@@ -285,59 +285,50 @@ class ChatResource(Resource):
         client = create_client()
 
         # Step 1: Extract user name from report
-        extraction_prompt = f"""You are a medical report analyzer. Please analyze the medical report image and:
+        patient_name = user.first_name + " " + user.last_name
+        
+        extraction_prompt = f"""You are a medical lab report analyzer. Your task is to extract ALL medical data from this lab report image.
 
-1. FIRST: Extract the patient's full name from the report
-2. Check if the name matches one of these formats:
-   - First Name: {user.first_name}
-   - Last Name: {user.last_name}
-   - Full Name: {user.first_name} {user.last_name}
+CRITICAL INSTRUCTIONS:
+1. First, verify the patient name matches: {patient_name}
+   - If the name does NOT match, respond with only: "NAME_MISMATCH"
+   - If it DOES match or no name is visible, proceed to step 2
 
-If the name in the report does NOT match the user's name ({user.first_name} {user.last_name}), respond with ONLY:
-"no"
+2. Extract EVERY single test result, measurement, or data point visible in the report, including:
+   - Test names (e.g., Hemoglobin, WBC, RBC, Platelet Count, etc.)
+   - Values (the actual numbers)
+   - Units (mmol/L, g/dL, 10^3/µL, etc.)
+   - Reference ranges (normal values shown)
+   - Whether it's abnormal (marked with up arrow or down arrow or outside reference range)
 
-If the name DOES match, continue with the analysis:
+3. Look for ANY numbers, measurements, or values on the report - extract them ALL
 
-3. Extract ALL medical data fields from the report, regardless of format. Include:
-   - Field name (e.g., Blood Pressure, Hemoglobin, any value you find)
-   - Field value (e.g., 120/80, 15.5, any measurement)
-   - Unit (e.g., mmHg, g/dL, or empty if not available)
-   - Normal range if available (e.g., 90-120, or empty string if not available)
-   - is_normal: true if value appears normal, false if abnormal or uncertain
-   - Report date
+4. Extract any notable findings, impressions, or diagnoses if present
 
-4. Check if any fields don't match the user's profile information (medical_history, allergies):
-   - List any NEW fields or information not in the profile
-
-5. Return the response in this EXACT JSON format. Be flexible with data - save anything you find:
-{{
-    "patient_name": "Full Name",
+RESPONSE FORMAT - Return ONLY valid JSON with NO extra text. Example structure:
+[
     "name_match": true,
-    "report_date": "YYYY-MM-DD or description or empty string",
+    "patient_name": "Full Name from report or user name",
+    "report_date": "Date from report or empty string",
     "medical_data": [
-        {{
-            "field_name": "Field Name",
-            "field_value": "Value",
-            "field_unit": "Unit or empty",
-            "normal_range": "Range or empty",
-            "is_normal": true
-        }}
+        [
+            "field_name": "Test Name",
+            "field_value": "123.45",
+            "field_unit": "g/dL",
+            "normal_range": "13.5-17.5",
+            "is_normal": false
+        ]
     ],
-    "new_fields": [
-        {{
-            "field_name": "New Field",
-            "field_value": "Value",
-            "category": "medical_history or allergies or other"
-        }}
-    ]
-}}
+    "findings": "Any notes or findings from the report"
+]
 
-Important: 
-- Always respond with valid JSON (never plain text)
-- medical_data array can be empty if no data found
-- new_fields array can be empty if no new fields found
-- Save ALL data you can extract, even if incomplete
-- Use empty strings for missing values, not null"""
+IMPORTANT RULES:
+- ALWAYS respond with ONLY the JSON, never add explanation
+- Extract EVERY field visible on the report
+- If no data found, medical_data should be an empty array
+- Use empty strings for missing values, never use null
+- is_normal should be false if value is outside reference range or marked abnormal
+- medical_data array MUST contain all extracted test results"""
 
         # Build message content
         content = [
@@ -360,7 +351,7 @@ Important:
                         'content': content
                     }
                 ],
-                temperature=0.3,  # Lower temperature for more consistent parsing
+                temperature=0.1,  # Very low temperature for strict JSON output
             )
 
             response_text = completion.choices[0].message.content.strip()
@@ -371,13 +362,14 @@ Important:
             print("="*80 + "\n")
             
             # Step 2: Check if name matched
-            if response_text.lower() == "no":
+            if "NAME_MISMATCH" in response_text.upper():
                 return {
                     'message': 'Patient name in report does not match your profile',
                     'error': 'Name mismatch'
                 }, 400
             
-            # Step 3: Parse the extracted data - be flexible and handle any format
+            # Step 3: Parse the extracted data
+            extracted_data = None
             try:
                 extracted_data = json.loads(response_text)
                 print("\n" + "="*80)
@@ -390,34 +382,46 @@ Important:
                 print("❌ JSON PARSE ERROR:")
                 print("="*80)
                 print(f"Error: {e}")
+                print(f"Response was: {response_text[:200]}...")
                 print("="*80 + "\n")
-                # If JSON parsing fails, try to extract data manually from text
-                extracted_data = {
-                    'patient_name': user.first_name + ' ' + user.last_name,
-                    'name_match': True,
-                    'report_date': '',
-                    'medical_data': [],
-                    'new_fields': []
-                }
-                print("[Fallback Data Created - Empty arrays]\n")
+                
+                # Try to extract JSON from response if it has extra text
+                import re
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    try:
+                        extracted_data = json.loads(json_match.group())
+                        print("✅ JSON extracted from response after regex match")
+                    except:
+                        extracted_data = None
+                
+                if not extracted_data:
+                    extracted_data = {
+                        'name_match': True,
+                        'patient_name': user.first_name + ' ' + user.last_name,
+                        'report_date': '',
+                        'medical_data': [],
+                        'findings': f'Failed to parse VLM response: {e}'
+                    }
+                    print("[Fallback data created]\n")
             
-            # Ensure name_match is true and structure is valid
+            # Validate structure
             if not isinstance(extracted_data, dict):
                 extracted_data = {
-                    'patient_name': user.first_name + ' ' + user.last_name,
                     'name_match': True,
+                    'patient_name': user.first_name + ' ' + user.last_name,
                     'report_date': '',
                     'medical_data': [],
-                    'new_fields': []
+                    'findings': 'Invalid response structure'
                 }
             
-            # Validate critical fields exist
+            # Ensure required fields exist
             if 'name_match' not in extracted_data:
                 extracted_data['name_match'] = True
             if 'medical_data' not in extracted_data:
                 extracted_data['medical_data'] = []
-            if 'new_fields' not in extracted_data:
-                extracted_data['new_fields'] = []
+            if 'patient_name' not in extracted_data:
+                extracted_data['patient_name'] = user.first_name + ' ' + user.last_name
             
             if not extracted_data.get('name_match', False):
                 return {
@@ -434,7 +438,7 @@ Important:
                 report_hash=report_hash
             ).first()
             
-            if existing_report:
+            if existing_report and len(extracted_data.get('medical_data', [])) > 0:
                 return {
                     'message': 'You have already extracted this report',
                     'error': 'Duplicate report',
@@ -455,24 +459,34 @@ Important:
                 # Step 6: Add ALL extracted fields to ReportField table
                 medical_entries = []
                 medical_data_list = extracted_data.get('medical_data', [])
+                
                 print("\n" + "="*80)
                 print(f"📊 PROCESSING {len(medical_data_list)} MEDICAL FIELDS:")
                 print("="*80)
+                
                 for i, item in enumerate(medical_data_list):
                     print(f"\n[Field {i+1}]:")
                     print(json.dumps(item, indent=2))
+                    
+                    # Ensure item is a dict
+                    if not isinstance(item, dict):
+                        print(f"⚠️  Skipping non-dict item: {item}")
+                        continue
+                    
                     field = ReportField(
                         report_id=new_report.id,
                         user_id=current_user_id,
-                        field_name=item.get('field_name', 'Unknown'),
-                        field_value=item.get('field_value', ''),
-                        field_unit=item.get('field_unit', ''),
-                        normal_range=item.get('normal_range', ''),
-                        is_normal=item.get('is_normal', True),
-                        field_type=item.get('field_type', 'measurement'),
-                        notes=item.get('notes', '')
+                        field_name=str(item.get('field_name', 'Unknown')),
+                        field_value=str(item.get('field_value', '')),
+                        field_unit=str(item.get('field_unit', '')),
+                        normal_range=str(item.get('normal_range', '')),
+                        is_normal=bool(item.get('is_normal', True)),
+                        field_type=str(item.get('field_type', 'measurement')),
+                        notes=str(item.get('notes', ''))
                     )
                     db.session.add(field)
+                    db.session.flush()  # Flush to get the field ID
+                    
                     medical_entries.append({
                         'id': field.id,
                         'field_name': field.field_name,
@@ -483,55 +497,12 @@ Important:
                         'field_type': field.field_type,
                         'notes': field.notes
                     })
+                
+                print("="*80)
+                print(f"✅ Successfully added {len(medical_entries)} fields to database")
                 print("="*80 + "\n")
                 
-                # Step 7: Handle new fields - Save to AdditionalField table AND merge to profile
-                new_fields_info = []
-                for new_field in extracted_data.get('new_fields', []):
-                    category = new_field.get('category', 'other')
-                    field_name = new_field.get('field_name', '')
-                    field_value = new_field.get('field_value', '')
-                    
-                    # Create additional field record
-                    additional_field = AdditionalField(
-                        user_id=current_user_id,
-                        report_id=new_report.id,
-                        field_name=field_name,
-                        field_value=field_value,
-                        category=category,
-                        is_approved=True,  # Automatically approved
-                        approved_at=datetime.utcnow(),
-                        merged_to_profile=True  # Automatically merged
-                    )
-                    db.session.add(additional_field)
-                    
-                    # Immediately merge into user profile based on category
-                    if category == 'medical_history':
-                        if user.medical_history:
-                            user.medical_history += f"\n{field_name}: {field_value}"
-                        else:
-                            user.medical_history = f"{field_name}: {field_value}"
-                    
-                    elif category == 'allergies':
-                        if user.allergies:
-                            user.allergies += f"\n{field_name}: {field_value}"
-                        else:
-                            user.allergies = f"{field_name}: {field_value}"
-                    
-                    else:  # 'other' category
-                        if user.medical_history:
-                            user.medical_history += f"\n[Additional] {field_name}: {field_value}"
-                        else:
-                            user.medical_history = f"[Additional] {field_name}: {field_value}"
-                    
-                    new_fields_info.append({
-                        'id': additional_field.id,
-                        'field_name': field_name,
-                        'field_value': field_value,
-                        'category': category,
-                        'merged_to_profile': True
-                    })
-                
+                # Commit all changes
                 db.session.commit()
                 
                 return {
@@ -540,18 +511,23 @@ Important:
                     'patient_name': extracted_data.get('patient_name', ''),
                     'report_date': extracted_data.get('report_date', ''),
                     'medical_data': medical_entries,
-                    'new_fields': new_fields_info,
                     'total_fields_extracted': len(medical_entries)
                 }, 201
                 
             except Exception as e:
                 db.session.rollback()
+                print(f"\n❌ ERROR saving to database: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 return {
                     'message': 'Failed to save report data',
                     'error': str(e)
                 }, 500
                 
         except Exception as e:
+            print(f"\n❌ VLM PROCESSING ERROR: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {'error': f'VLM processing error: {str(e)}'}, 500
 
 
