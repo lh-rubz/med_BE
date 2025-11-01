@@ -51,6 +51,7 @@ api = Api(app, version="1.0", title="Medical Application API",
 
 auth_ns = api.namespace('auth', description='Authentication operations')
 user_ns = api.namespace('users', description='User operations')
+vlm_ns = api.namespace('api/v1', description='VLM endpoints')
 
 # API Models
 register_model = api.model('Registration', {
@@ -75,6 +76,11 @@ user_update_model = api.model('UserUpdate', {
     'phone_number': fields.String(description='Phone number'),
     'medical_history': fields.String(description='Medical history'),
     'allergies': fields.String(description='Allergies information')
+})
+
+prompt_model = api.model('Prompt', {
+    'prompt': fields.String(required=True, description='Text prompt to send to the model'),
+    'image_url': fields.String(required=False, description='Optional image URL')
 })
 
 
@@ -186,6 +192,59 @@ class UserProfile(Resource):
         except Exception as e:
             db.session.rollback()
             return {'message': 'Update failed', 'error': str(e)}, 400
+
+
+@vlm_ns.route('/chat')
+class ChatResource(Resource):
+    @jwt_required()
+    @vlm_ns.expect(prompt_model)
+    def post(self):
+        """Send a prompt (optionally with image) to the Hugging Face VLM (requires authentication)"""
+        current_user_id = get_jwt_identity()
+        data = request.json or {}
+        prompt = data.get('prompt')
+        image_url = data.get('image_url')
+
+        if not prompt:
+            return {'error': 'prompt is required'}, 400
+
+        client = create_client()
+
+        # Build message content similar to the example provided
+        content = [{
+            'type': 'text',
+            'text': prompt
+        }]
+        if image_url:
+            content.append({
+                'type': 'image_url',
+                'image_url': {'url': image_url}
+            })
+
+        try:
+            completion = client.chat.completions.create(
+                model="google/gemma-3-12b-it:featherless-ai",
+                messages=[
+                    {
+                        'role': 'user',
+                        'content': content
+                    }
+                ],
+            )
+
+            # Return JSON-serializable values: convert objects to strings
+            try:
+                message = completion.choices[0].message
+            except Exception:
+                # fallback if structure differs
+                message = getattr(completion, 'choices', completion)
+
+            # Ensure serializable (most SDK objects aren't JSON serializable),
+            # so convert to string representations for debugging.
+            return {'model_response': str(message), 'raw': str(completion)}
+        except Exception as e:
+            return {'error': str(e)}, 500
+
 
 
 def init_db():
