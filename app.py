@@ -145,9 +145,8 @@ user_update_model = api.model('UserUpdate', {
     'allergies': fields.String(description='Allergies information')
 })
 
-prompt_model = api.model('Prompt', {
-    'prompt': fields.String(required=True, description='Text prompt to send to the model'),
-    'image_url': fields.String(required=False, description='Optional image URL')
+report_extraction_model = api.model('ReportExtraction', {
+    'image_url': fields.String(required=True, description='URL to medical report image for extraction')
 })
 
 
@@ -286,7 +285,7 @@ class UserProfile(Resource):
 class ChatResource(Resource):
     @vlm_ns.doc(security='Bearer Auth')
     @jwt_required()
-    @vlm_ns.expect(prompt_model)
+    @vlm_ns.expect(report_extraction_model)
     def post(self):
         """Extract medical report data and save to database"""
         current_user_id = int(get_jwt_identity())
@@ -303,51 +302,44 @@ class ChatResource(Resource):
 
         client, _ = create_client(require_image_support=bool(image_url))
 
-        # Step 1: Extract user name from report
+        # Step 0: Prepare minimal user data for VLM
         patient_name = user.first_name + " " + user.last_name
         
-        extraction_prompt = f"""You are a medical lab report analyzer. Your task is to extract ALL medical data from this lab report image.
+        # Step 1: Create lean VLM prompt (no test history to keep it short)
+        extraction_prompt = f"""You are a medical lab report analyzer. Extract ALL medical data from this report.
 
-CRITICAL INSTRUCTIONS:
-1. First, verify the patient name matches: {patient_name}
-   - If the name does NOT match, respond with only: "NAME_MISMATCH"
-   - If it DOES match or no name is visible, proceed to step 2
+USER NAME VERIFICATION:
+Patient name must match: {patient_name}
+- If the name does NOT match, respond with ONLY: "NAME_MISMATCH"
+- Otherwise proceed with extraction
 
-2. Extract EVERY single test result, measurement, or data point visible in the report, including:
-   - Test names (e.g., Hemoglobin, WBC, RBC, Platelet Count, etc.)
-   - Values (the actual numbers)
-   - Units (mmol/L, g/dL, 10^3/µL, etc.)
-   - Reference ranges (normal values shown)
-   - Whether it's abnormal (marked with up arrow or down arrow or outside reference range)
+EXTRACTION RULES:
+1. Extract every test result, measurement, or value that appears.
+2. For each result include: field name, value, unit, normal range, and whether it is normal.
+3. Capture the report date if it is visible.
 
-3. Look for ANY numbers, measurements, or values on the report - extract them ALL
-
-4. Extract any notable findings, impressions, or diagnoses if present
-
-RESPONSE FORMAT - Return ONLY valid JSON with NO extra text. Example structure:
+RESPONSE FORMAT - return ONLY valid JSON (no extra text):
 {{
     "name_match": true,
-    "patient_name": "Full Name from report or user name",
-    "report_date": "Date from report or empty string",
+    "patient_name": "{patient_name}",
+    "report_date": "YYYY-MM-DD or empty",
     "medical_data": [
         {{
             "field_name": "Test Name",
             "field_value": "123.45",
             "field_unit": "g/dL",
             "normal_range": "13.5-17.5",
-            "is_normal": false
+            "is_normal": true
         }}
     ],
-    "findings": "Any notes or findings from the report"
+    "findings": "Optional notes or impressions from the report"
 }}
 
-IMPORTANT RULES:
-- ALWAYS respond with ONLY the JSON, never add explanation
-- Extract EVERY field visible on the report
-- If no data found, medical_data should be an empty array
-- Use empty strings for missing values, never use null
-- is_normal should be false if value is outside reference range or marked abnormal
-- medical_data array MUST contain all extracted test results"""
+RULES:
+- Output must be valid JSON with no commentary.
+- Extract all visible fields (medical_data may be empty if none are present).
+- Use empty strings for missing values.
+- Set is_normal to false if the value is abnormal or outside the reference range."""
 
         # Build message content
         content = [
@@ -389,9 +381,11 @@ IMPORTANT RULES:
             
             # Step 2: Check if name matched
             if "NAME_MISMATCH" in response_text.upper():
+                print("❌ NAME MISMATCH DETECTED - Report does not belong to this user")
                 return {
                     'message': 'Patient name in report does not match your profile',
-                    'error': 'Name mismatch'
+                    'error': 'Name mismatch',
+                    'user_profile': patient_name
                 }, 400
             
             # Step 3: Parse the extracted data
@@ -422,24 +416,20 @@ IMPORTANT RULES:
                         extracted_data = None
                 
                 if not extracted_data:
-                    extracted_data = {
-                        'name_match': True,
-                        'patient_name': user.first_name + ' ' + user.last_name,
-                        'report_date': '',
-                        'medical_data': [],
-                        'findings': f'Failed to parse VLM response: {e}'
-                    }
-                    print("[Fallback data created]\n")
+                    print("❌ Could not parse VLM response as JSON - aborting extraction")
+                    return {
+                        'message': 'Failed to parse medical report',
+                        'error': 'Invalid response format',
+                        'details': f'JSON parse error: {str(e)}'
+                    }, 400
             
             # Validate structure
             if not isinstance(extracted_data, dict):
-                extracted_data = {
-                    'name_match': True,
-                    'patient_name': user.first_name + ' ' + user.last_name,
-                    'report_date': '',
-                    'medical_data': [],
-                    'findings': 'Invalid response structure'
-                }
+                print("❌ Invalid response structure - not a dictionary")
+                return {
+                    'message': 'Failed to parse medical report',
+                    'error': 'Invalid response structure'
+                }, 400
             
             # Ensure required fields exist
             if 'name_match' not in extracted_data:
@@ -447,33 +437,80 @@ IMPORTANT RULES:
             if 'medical_data' not in extracted_data:
                 extracted_data['medical_data'] = []
             if 'patient_name' not in extracted_data:
-                extracted_data['patient_name'] = user.first_name + ' ' + user.last_name
+                extracted_data['patient_name'] = patient_name
             
+            # Final name verification
             if not extracted_data.get('name_match', False):
+                print("❌ VLM name verification failed")
                 return {
                     'message': 'Patient name in report does not match your profile',
-                    'error': 'Name mismatch'
+                    'error': 'Name mismatch',
+                    'reported_name': extracted_data.get('patient_name'),
+                    'your_name': patient_name
                 }, 400
             
-            # Step 4: Check for duplicate reports
-            medical_data_str = json.dumps(extracted_data.get('medical_data', []), sort_keys=True)
-            report_hash = hashlib.sha256(medical_data_str.encode()).hexdigest()
+            # Step 4: Enhanced duplicate detection - compare extracted data
+            medical_data_list = extracted_data.get('medical_data', [])
             
-            existing_report = Report.query.filter_by(
-                user_id=current_user_id,
-                report_hash=report_hash
-            ).first()
-            
-            if existing_report and len(extracted_data.get('medical_data', [])) > 0:
-                return {
-                    'message': 'You have already extracted this report',
-                    'error': 'Duplicate report',
-                    'existing_report_id': existing_report.id,
-                    'existing_report_date': str(existing_report.created_at)
-                }, 409
+            if len(medical_data_list) > 0:
+                # Get all existing reports for this user
+                existing_reports = Report.query.filter_by(user_id=current_user_id).all()
+                
+                print("\n" + "="*80)
+                print("🔍 CHECKING FOR DUPLICATES:")
+                print("="*80)
+                print(f"New report has {len(medical_data_list)} fields")
+                print(f"Comparing against {len(existing_reports)} existing reports...\n")
+                
+                # Create a set of field names and values from new report
+                new_field_map = {}
+                for item in medical_data_list:
+                    field_name = str(item.get('field_name', '')).lower().strip()
+                    field_value = str(item.get('field_value', '')).strip()
+                    new_field_map[field_name] = field_value
+                
+                # Check each existing report
+                for existing_report in existing_reports:
+                    existing_fields = ReportField.query.filter_by(report_id=existing_report.id).all()
+                    existing_field_map = {}
+                    for field in existing_fields:
+                        field_name = str(field.field_name).lower().strip()
+                        field_value = str(field.field_value).strip()
+                        existing_field_map[field_name] = field_value
+                    
+                    # Calculate match percentage
+                    if existing_field_map:
+                        matching_fields = 0
+                        for field_name, field_value in new_field_map.items():
+                            if field_name in existing_field_map and existing_field_map[field_name] == field_value:
+                                matching_fields += 1
+                        
+                        match_percentage = (matching_fields / len(new_field_map)) * 100 if new_field_map else 0
+                        
+                        print(f"Report #{existing_report.id}: {match_percentage:.1f}% match ({matching_fields}/{len(new_field_map)} fields)")
+                        
+                        # If 70% or more fields match, it's likely a duplicate
+                        if match_percentage >= 90:
+                            print(f"⚠️  HIGH MATCH DETECTED ({match_percentage:.1f}%)")
+                            return {
+                                'message': 'This report appears to be a duplicate of an existing report',
+                                'error': 'Possible duplicate',
+                                'existing_report_id': existing_report.id,
+                                'existing_report_date': str(existing_report.created_at),
+                                'match_percentage': match_percentage,
+                                'matching_fields': matching_fields,
+                                'total_new_fields': len(new_field_map)
+                            }, 409
+                
+                print("✅ No duplicates found - Report is unique\n")
+                print("="*80 + "\n")
             
             # Step 5: Create new report
             try:
+                # Create hash based on medical data for record keeping
+                medical_data_str = json.dumps(medical_data_list, sort_keys=True)
+                report_hash = hashlib.sha256(medical_data_str.encode()).hexdigest()
+                
                 new_report = Report(
                     user_id=current_user_id,
                     report_date=datetime.utcnow(),
@@ -484,7 +521,6 @@ IMPORTANT RULES:
                 
                 # Step 6: Add ALL extracted fields to ReportField table
                 medical_entries = []
-                medical_data_list = extracted_data.get('medical_data', [])
                 
                 print("\n" + "="*80)
                 print(f"📊 PROCESSING {len(medical_data_list)} MEDICAL FIELDS:")
