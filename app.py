@@ -151,13 +151,32 @@ prompt_model = api.model('Prompt', {
 })
 
 
-def create_client():
-    # create OpenAI-compatible client pointing at HF router
+def create_client(require_image_support: bool = False):
+    import requests
+
+    local_server = os.getenv("LOCAL_GEMMA_URL", "http://localhost:8051")
+    try:
+        response = requests.get(f"{local_server}/health", timeout=2)
+        if response.status_code == 200:
+            payload = response.json()
+            supports_images = bool(payload.get("supports_images", False))
+            if not require_image_support or supports_images:
+                print("✅ Using LOCAL Gemma3 model server on port 8051")
+                client = OpenAI(
+                    base_url=f"{local_server}/v1",
+                    api_key="no-key-needed-for-local",
+                )
+                return client, supports_images
+            print("ℹ️ Local Gemma3 server is text-only. Falling back to HuggingFace for image support.")
+    except Exception as exc:
+        print(f"ℹ️ Local Gemma3 server unavailable: {exc}")
+
+    print("⚠️ Using HuggingFace router as fallback.")
     client = OpenAI(
         base_url="https://router.huggingface.co/v1",
         api_key=HF_TOKEN,
     )
-    return client
+    return client, True
 
 
 @auth_ns.route('/register')
@@ -206,7 +225,7 @@ class Login(Resource):
         if not user.is_active:
             return {'message': 'Account is deactivated'}, 403
 
-        access_token = create_access_token(identity=user.id)
+        access_token = create_access_token(identity=str(user.id))
         return {'access_token': access_token}, 200
 
 @user_ns.route('/profile')
@@ -215,7 +234,7 @@ class UserProfile(Resource):
     @jwt_required()
     def get(self):
         """Get user profile information"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -237,7 +256,7 @@ class UserProfile(Resource):
     @user_ns.expect(user_update_model)
     def put(self):
         """Update user profile"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -270,7 +289,7 @@ class ChatResource(Resource):
     @vlm_ns.expect(prompt_model)
     def post(self):
         """Extract medical report data and save to database"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -282,7 +301,7 @@ class ChatResource(Resource):
         if not image_url:
             return {'error': 'image_url is required for report extraction'}, 400
 
-        client = create_client()
+        client, _ = create_client(require_image_support=bool(image_url))
 
         # Step 1: Extract user name from report
         patient_name = user.first_name + " " + user.last_name
@@ -306,21 +325,21 @@ CRITICAL INSTRUCTIONS:
 4. Extract any notable findings, impressions, or diagnoses if present
 
 RESPONSE FORMAT - Return ONLY valid JSON with NO extra text. Example structure:
-[
+{{
     "name_match": true,
     "patient_name": "Full Name from report or user name",
     "report_date": "Date from report or empty string",
     "medical_data": [
-        [
+        {{
             "field_name": "Test Name",
             "field_value": "123.45",
             "field_unit": "g/dL",
             "normal_range": "13.5-17.5",
             "is_normal": false
-        ]
+        }}
     ],
     "findings": "Any notes or findings from the report"
-]
+}}
 
 IMPORTANT RULES:
 - ALWAYS respond with ONLY the JSON, never add explanation
@@ -344,7 +363,7 @@ IMPORTANT RULES:
 
         try:
             completion = client.chat.completions.create(
-                model="google/gemma-3-12b-it:featherless-ai",
+                model="google/gemma-3-12b-it",
                 messages=[
                     {
                         'role': 'user',
@@ -360,6 +379,13 @@ IMPORTANT RULES:
             print("="*80)
             print(response_text)
             print("="*80 + "\n")
+            
+            # Remove markdown code blocks if present
+            if response_text.startswith('```'):
+                response_text = response_text.split('```')[1]
+                if response_text.startswith('json'):
+                    response_text = response_text[4:]
+                response_text = response_text.strip()
             
             # Step 2: Check if name matched
             if "NAME_MISMATCH" in response_text.upper():
@@ -537,7 +563,7 @@ class UserReports(Resource):
     @jwt_required()
     def get(self):
         """Get all extracted reports for the current user"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -609,7 +635,7 @@ class UserReportDetail(Resource):
     @jwt_required()
     def get(self, report_id):
         """Get a specific report by ID"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -667,7 +693,7 @@ class DeleteReportDetail(Resource):
     @jwt_required()
     def delete(self, report_id):
         """Delete a specific report by ID - FOR TESTING PURPOSES ONLY"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
