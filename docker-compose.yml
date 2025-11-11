@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  medvlm:
+    build: .
+    container_name: medvlm
+    ports:
+      - "8051:8051"  # Gemma server
+      - "8052:8080"  # Flask (internal 8080 -> external 8052)
+    volumes:
+      - /home/medvlm/models:/medvlm/models
+      - .:/medvlm/app
+    working_dir: /medvlm/app
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres123@postgres_med:5432/medical_db
+      - SECRET_KEY=your-secret-key-12345
+      - GEMMA_BASE_URL=http://localhost:8051/v1
+      - FLASK_PORT=8080
+      - FLASK_HOST=0.0.0.0
+    depends_on:
+      - postgres_med
+    networks:
+      - mednet
+
+  postgres_med:
+    image: postgres:15
+    container_name: postgres_med
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres123
+      - POSTGRES_DB=medical_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - mednet
+
+volumes:
+  postgres_data:
+
+networks:
+  mednet:
+    driver: bridge
