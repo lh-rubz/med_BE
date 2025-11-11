@@ -7,20 +7,35 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 import hashlib
 import json
 import bcrypt
-import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file FIRST
+# Load environment variables from .env file
 load_dotenv()
 
-# NOTE: token is hardcoded as requested by the user. For production, use environment variables.
-HF_TOKEN = "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"
+# Read configuration from .env file
+def get_env(key, default=None):
+    """Get environment variable with optional default"""
+    import os
+    value = os.getenv(key)
+    if value is None and default is None:
+        raise ValueError(f"Missing required environment variable: {key}")
+    return value if value is not None else default
+
+# ===== CONFIGURATION FROM .ENV =====
+DATABASE_URL = get_env('DATABASE_URL')
+SECRET_KEY = get_env('SECRET_KEY')
+GEMMA_BASE_URL = get_env('GEMMA_BASE_URL', '176.119.254.185:8051/v1')
+GEMMA_MODEL_NAME = get_env('GEMMA_MODEL_NAME', 'local-gemma-3')
+FLASK_HOST = get_env('FLASK_HOST', '0.0.0.0')
+FLASK_PORT = int(get_env('FLASK_PORT', '8080'))
+FLASK_DEBUG = get_env('FLASK_DEBUG', 'True').lower() == 'true'
+# ====================================
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
-app.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY')  # We'll use the same secret key for JWT
+app.config['SECRET_KEY'] = SECRET_KEY
+app.config['JWT_SECRET_KEY'] = SECRET_KEY  # We'll use the same secret key for JWT
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=1)  # Token expires in 1 day
 app.config['JWT_TOKEN_LOCATION'] = ['headers']
 app.config['JWT_HEADER_NAME'] = 'Authorization'
@@ -150,32 +165,13 @@ report_extraction_model = api.model('ReportExtraction', {
 })
 
 
-def create_client(require_image_support: bool = False):
-    import requests
-
-    local_server = os.getenv("LOCAL_GEMMA_URL", "http://localhost:8051")
-    try:
-        response = requests.get(f"{local_server}/health", timeout=2)
-        if response.status_code == 200:
-            payload = response.json()
-            supports_images = bool(payload.get("supports_images", False))
-            if not require_image_support or supports_images:
-                print("✅ Using LOCAL Gemma3 model server on port 8051")
-                client = OpenAI(
-                    base_url=f"{local_server}/v1",
-                    api_key="no-key-needed-for-local",
-                )
-                return client, supports_images
-            print("ℹ️ Local Gemma3 server is text-only. Falling back to HuggingFace for image support.")
-    except Exception as exc:
-        print(f"ℹ️ Local Gemma3 server unavailable: {exc}")
-
-    print("⚠️ Using HuggingFace router as fallback.")
+def create_client():
+    """Create OpenAI-compatible client pointing at local Gemma-3 server"""
     client = OpenAI(
-        base_url="https://router.huggingface.co/v1",
-        api_key=HF_TOKEN,
+        base_url=GEMMA_BASE_URL,
+        api_key="dummy-key",  # Local server doesn't need authentication
     )
-    return client, True
+    return client
 
 
 @auth_ns.route('/register')
@@ -224,7 +220,7 @@ class Login(Resource):
         if not user.is_active:
             return {'message': 'Account is deactivated'}, 403
 
-        access_token = create_access_token(identity=str(user.id))
+        access_token = create_access_token(identity=user.id)
         return {'access_token': access_token}, 200
 
 @user_ns.route('/profile')
@@ -233,7 +229,7 @@ class UserProfile(Resource):
     @jwt_required()
     def get(self):
         """Get user profile information"""
-        current_user_id = int(get_jwt_identity())
+        current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
         
         if not user:
@@ -255,7 +251,7 @@ class UserProfile(Resource):
     @user_ns.expect(user_update_model)
     def put(self):
         """Update user profile"""
-        current_user_id = int(get_jwt_identity())
+        current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
         
         if not user:
@@ -288,7 +284,7 @@ class ChatResource(Resource):
     @vlm_ns.expect(report_extraction_model)
     def post(self):
         """Extract medical report data and save to database"""
-        current_user_id = int(get_jwt_identity())
+        current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
         
         if not user:
@@ -300,7 +296,7 @@ class ChatResource(Resource):
         if not image_url:
             return {'error': 'image_url is required for report extraction'}, 400
 
-        client, _ = create_client(require_image_support=bool(image_url))
+        client = create_client()
 
         # Step 0: Prepare minimal user data for VLM
         patient_name = user.first_name + " " + user.last_name
@@ -310,15 +306,15 @@ class ChatResource(Resource):
 
 USER NAME VERIFICATION:
 Patient name must match: {patient_name}
-- If the name does NOT match, respond with ONLY: "NAME_MISMATCH"
+- If name does NOT match, respond with ONLY: "NAME_MISMATCH"
 - Otherwise proceed with extraction
 
 EXTRACTION RULES:
-1. Extract every test result, measurement, or value that appears.
-2. For each result include: field name, value, unit, normal range, and whether it is normal.
-3. Capture the report date if it is visible.
+1. Extract EVERY test result, measurement, value visible
+2. For each result provide: test name, value, unit, normal range, if normal/abnormal
+3. Extract report date if available
 
-RESPONSE FORMAT - return ONLY valid JSON (no extra text):
+RESPONSE FORMAT - Return ONLY valid JSON:
 {{
     "name_match": true,
     "patient_name": "{patient_name}",
@@ -331,15 +327,15 @@ RESPONSE FORMAT - return ONLY valid JSON (no extra text):
             "normal_range": "13.5-17.5",
             "is_normal": true
         }}
-    ],
-    "findings": "Optional notes or impressions from the report"
+    ]
 }}
 
 RULES:
-- Output must be valid JSON with no commentary.
-- Extract all visible fields (medical_data may be empty if none are present).
-- Use empty strings for missing values.
-- Set is_normal to false if the value is abnormal or outside the reference range."""
+- Response must be ONLY valid JSON
+- Extract ALL visible fields
+- medical_data array can be empty if none found
+- Use empty strings for missing values
+- is_normal: false if abnormal or outside range"""
 
         # Build message content
         content = [
@@ -355,7 +351,7 @@ RULES:
 
         try:
             completion = client.chat.completions.create(
-                model="google/gemma-3-12b-it",
+                model=GEMMA_MODEL_NAME,  # Using local Gemma-3 model
                 messages=[
                     {
                         'role': 'user',
@@ -363,6 +359,7 @@ RULES:
                     }
                 ],
                 temperature=0.1,  # Very low temperature for strict JSON output
+                max_tokens=1024,  # Limit response length
             )
 
             response_text = completion.choices[0].message.content.strip()
@@ -371,13 +368,6 @@ RULES:
             print("="*80)
             print(response_text)
             print("="*80 + "\n")
-            
-            # Remove markdown code blocks if present
-            if response_text.startswith('```'):
-                response_text = response_text.split('```')[1]
-                if response_text.startswith('json'):
-                    response_text = response_text[4:]
-                response_text = response_text.strip()
             
             # Step 2: Check if name matched
             if "NAME_MISMATCH" in response_text.upper():
@@ -489,7 +479,7 @@ RULES:
                         
                         print(f"Report #{existing_report.id}: {match_percentage:.1f}% match ({matching_fields}/{len(new_field_map)} fields)")
                         
-                        # If 70% or more fields match, it's likely a duplicate
+                        # If 90% or more fields match, it's likely a duplicate
                         if match_percentage >= 90:
                             print(f"⚠️  HIGH MATCH DETECTED ({match_percentage:.1f}%)")
                             return {
@@ -599,7 +589,7 @@ class UserReports(Resource):
     @jwt_required()
     def get(self):
         """Get all extracted reports for the current user"""
-        current_user_id = int(get_jwt_identity())
+        current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
         
         if not user:
@@ -671,7 +661,7 @@ class UserReportDetail(Resource):
     @jwt_required()
     def get(self, report_id):
         """Get a specific report by ID"""
-        current_user_id = int(get_jwt_identity())
+        current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
         
         if not user:
@@ -729,7 +719,7 @@ class DeleteReportDetail(Resource):
     @jwt_required()
     def delete(self, report_id):
         """Delete a specific report by ID - FOR TESTING PURPOSES ONLY"""
-        current_user_id = int(get_jwt_identity())
+        current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
         
         if not user:
@@ -779,7 +769,9 @@ if __name__ == '__main__':
     # Initialize the database
     init_db()
     print("\n✅ Starting Medical Application API...")
-    print("📚 Swagger documentation available at: http://localhost:5000/swagger")
+    print("⚠️  IMPORTANT: Make sure Gemma-3 server is running on port 8051")
+    print("   Run in another terminal: python gemma3.py")
+    print(f"\n📚 Swagger documentation available at: http://localhost:{FLASK_PORT}/swagger")
     print("🔐 API Routes by Namespace:")
     print("\n📋 Authentication (auth/)")
     print("   - POST /auth/register - Register new user")
@@ -793,4 +785,7 @@ if __name__ == '__main__':
     print("   - GET /reports - Get all user reports with extracted data (requires JWT)")
     print("   - GET /reports/<id> - Get a specific report by ID (requires JWT)")
     print("   - DELETE /reports/<id> - Delete a report by ID (requires JWT) [FOR TESTING ONLY]")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    print("\n🤖 Model Configuration:")
+    print(f"   - Base URL: {GEMMA_BASE_URL}")
+    print(f"   - Model: {GEMMA_MODEL_NAME}")
+    app.run(debug=FLASK_DEBUG, host=FLASK_HOST, port=FLASK_PORT)

@@ -1,23 +1,36 @@
-"""Lightweight FastAPI server that exposes a local Gemma-3 chat endpoint
+"""Lightweight FastAPI serv# ===== CONFIGURATION - UPDATE THESE VALUES =====
+# Path to your Gemma-3 model directory
+MODEL_PATH = Path("/medvlm/models/gemma3")  # Server location of Gemma weights
+MAX_MAX_NEW_TOKENS = 1024
+SERVER_HOST = "0.0.0.0"
+SERVER_PORT = 8051
+# ================================================
+
+# Validate model path exists
+if not MODEL_PATH.exists():
+    raise RuntimeError(
+        f"Gemma model weights not found at: {MODEL_PATH}\n"
+        f"Please update MODEL_PATH to point to your Gemma-3 model directory."
+    )s a local Gemma-3 chat endpoint
 compatible with the OpenAI chat completions API used by the Flask app.
 
 Usage
 -----
 1. Install requirements ``pip install -r requirements.txt``
-2. Place the Gemma-3 weights under ``./models/gemma3`` or set
-    ``GEMMA_MODEL_PATH`` to a custom directory.
-3. Start the server:
+2. Place the Gemma-3 weights under ``./models/gemma3``
+3. Update MODEL_PATH below to point to your model directory
+4. Start the server:
 
-     uvicorn gemma_server:app --host 0.0.0.0 --port 8051
+     python gemma3.py
 
-4. Health check is available at ``GET /health``.
-5. Chat completions are served at ``POST /v1/chat/completions``.
+5. Health check is available at ``GET /health``.
+6. Chat completions are served at ``POST /v1/chat/completions``.
 """
 from __future__ import annotations
 
-import os
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import torch
@@ -25,16 +38,40 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-MODEL_PATH = os.getenv("GEMMA_MODEL_PATH", os.path.join(os.getcwd(), "models", "gemma3"))
-MAX_MAX_NEW_TOKENS = int(os.getenv("GEMMA_MAX_NEW_TOKENS", "1024"))
+# ===== CONFIGURATION - UPDATE THESE VALUES =====
+# Path to your Gemma-3 model directory
+MODEL_PATH = Path("/medvlm/models/gemma3")  # Server location of Gemma weights
+MAX_MAX_NEW_TOKENS = 1024
+SERVER_HOST = "0.0.0.0"
+SERVER_PORT = 8051
+# ================================================
 
-app = FastAPI(title="Local Gemma-3 Server", version="1.0.0")
+# Validate model path exists
+if not MODEL_PATH.exists():
+    raise RuntimeError(
+        f"Gemma model weights not found at: {MODEL_PATH}\n"
+        f"Please update MODEL_PATH to point to your Gemma-3 model directory."
+    )
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+app = FastAPI(
+    title="Local Gemma-3 Server",
+    version="1.0.0",
+    docs_url="/swagger",
+    openapi_url="/swagger.json",
+)
+
+tokenizer = AutoTokenizer.from_pretrained(
+    str(MODEL_PATH),
+    local_files_only=True,
+    trust_remote_code=True,
+    use_fast=False,
+)
 model = AutoModelForCausalLM.from_pretrained(
-    MODEL_PATH,
+    str(MODEL_PATH),
     torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
     device_map="auto",
+    local_files_only=True,
+    trust_remote_code=True,
 )
 model.eval()
 
@@ -66,7 +103,7 @@ def health() -> Dict[str, Any]:
     return {
         "status": "ok",
         "model_path": MODEL_PATH,
-        "supports_images": False,
+        "supports_images": True,
     }
 
 
@@ -151,7 +188,19 @@ def chat_completions(request: ChatCompletionRequest) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     import uvicorn
-
-    host = os.getenv("GEMMA_HOST", "0.0.0.0")
-    port = int(os.getenv("GEMMA_PORT", "8051"))
-    uvicorn.run("gemma_server:app", host=host, port=port, reload=False)
+    
+    print("\n" + "="*80)
+    print("🚀 Starting Gemma-3 Local Model Server")
+    print("="*80)
+    print(f"📍 Model Path: {MODEL_PATH}")
+    print(f"🌐 Server URL: http://{SERVER_HOST}:{SERVER_PORT}")
+    print(f"📊 Max Tokens: {MAX_MAX_NEW_TOKENS}")
+    print(f"🔧 Device: {'CUDA' if torch.cuda.is_available() else 'CPU'}")
+    print("="*80)
+    print("\n✅ Server endpoints:")
+    print(f"   - Health Check: http://{SERVER_HOST}:{SERVER_PORT}/health")
+    print(f"   - Chat Completions: http://{SERVER_HOST}:{SERVER_PORT}/v1/chat/completions")
+    print(f"   - API Docs: http://{SERVER_HOST}:{SERVER_PORT}/swagger")
+    print("="*80 + "\n")
+    
+    uvicorn.run("gemma3:app", host=SERVER_HOST, port=SERVER_PORT, reload=False)
