@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_restx import Api, Resource, fields
-from openai import OpenAI
+import requests  # We'll use the 'requests' library to talk to our new model server.
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
@@ -12,9 +12,6 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env file FIRST
 load_dotenv()
-
-# NOTE: token is hardcoded as requested by the user. For production, use environment variables.
-HF_TOKEN = "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"
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
@@ -150,15 +147,6 @@ report_extraction_model = api.model('ReportExtraction', {
 })
 
 
-def create_client():
-    # create OpenAI-compatible client pointing at HF router
-    client = OpenAI(
-        base_url="https://router.huggingface.co/v1",
-        api_key=HF_TOKEN,
-    )
-    return client
-
-
 @auth_ns.route('/register')
 class Register(Resource):
     @auth_ns.expect(register_model)
@@ -281,8 +269,6 @@ class ChatResource(Resource):
         if not image_url:
             return {'error': 'image_url is required for report extraction'}, 400
 
-        client = create_client()
-
         # Step 0: Prepare minimal user data for VLM
         patient_name = user.first_name + " " + user.last_name
         
@@ -335,20 +321,34 @@ RULES:
         ]
 
         try:
-            completion = client.chat.completions.create(
-                model="google/gemma-3-12b-it:featherless-ai",
-                messages=[
-                    {
-                        'role': 'user',
-                        'content': content
-                    }
-                ],
-                temperature=0.1,  # Very low temperature for strict JSON output
-            )
+            # --- MODIFIED SECTION: Calling the local model server ---
+            # Instead of using the OpenAI client, we now send an HTTP POST request
+            # to our local model server, which is now running on port 8051.
+            model_server_url = "http://176.119.254.185:8051/generate"
+            
+            # The Gemma 3 model you mentioned is likely a text model, so we will
+            # send the text prompt. The model server currently doesn't process images,
+            # but this structure can be extended if your local model is multimodal.
+            payload = {
+                "prompt": extraction_prompt
+                # We are not sending the image_url to the current model server,
+                # as it's set up for text-based generation. If your gemma3 model
+                # can handle images, the model_server.py would need to be updated.
+            }
 
-            response_text = completion.choices[0].message.content.strip()
+            print(f"Sending request to local model server at {model_server_url}...")
+            
+            # We use a timeout to ensure the app doesn't hang indefinitely.
+            response = requests.post(model_server_url, json=payload, timeout=120)
+            response.raise_for_status()  # This will raise an error for bad responses (4xx or 5xx)
+
+            # We expect the model server to return JSON with a 'response' key.
+            response_text = response.json().get('response', '')
+            
+            # --- END OF MODIFIED SECTION ---
+
             print("\n" + "="*80)
-            print("🔍 VLM RAW RESPONSE:")
+            print("🔍 MODEL SERVER RAW RESPONSE:")
             print("="*80)
             print(response_text)
             print("="*80 + "\n")
@@ -463,7 +463,7 @@ RULES:
                         
                         print(f"Report #{existing_report.id}: {match_percentage:.1f}% match ({matching_fields}/{len(new_field_map)} fields)")
                         
-                        # If 70% or more fields match, it's likely a duplicate
+                        # If 90% or more fields match, it's likely a duplicate
                         if match_percentage >= 90:
                             print(f"⚠️  HIGH MATCH DETECTED ({match_percentage:.1f}%)")
                             return {
@@ -753,6 +753,7 @@ if __name__ == '__main__':
     # Initialize the database
     init_db()
     print("\n✅ Starting Medical Application API...")
+    # The main app will now run on port 5000.
     print("📚 Swagger documentation available at: http://localhost:5000/swagger")
     print("🔐 API Routes by Namespace:")
     print("\n📋 Authentication (auth/)")
