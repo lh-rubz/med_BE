@@ -10,14 +10,22 @@ import bcrypt
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file FIRST
+import os
+from dotenv import load_dotenv
+from openai import OpenAI
+
+# Load environment variables from .env file
 load_dotenv()
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+# Get database URL and secret key from environment variables
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://user:password@localhost/meddb')
+SECRET_KEY = os.getenv('SECRET_KEY', 'your-default-secret-key')
+
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
-app.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY')  # We'll use the same secret key for JWT
+app.config['SECRET_KEY'] = SECRET_KEY
+app.config['JWT_SECRET_KEY'] = SECRET_KEY  # We'll use the same secret key for JWT
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=1)  # Token expires in 1 day
 app.config['JWT_TOKEN_LOCATION'] = ['headers']
 app.config['JWT_HEADER_NAME'] = 'Authorization'
@@ -147,6 +155,17 @@ report_extraction_model = api.model('ReportExtraction', {
 })
 
 
+def create_client():
+    # create OpenAI-compatible client pointing at the local gemma server
+    client = OpenAI(
+        base_url="http://localhost:8051/v1",
+        api_key="not-needed",
+    )
+    return client
+
+client = create_client()
+
+
 @auth_ns.route('/register')
 class Register(Resource):
     @auth_ns.expect(register_model)
@@ -193,7 +212,7 @@ class Login(Resource):
         if not user.is_active:
             return {'message': 'Account is deactivated'}, 403
 
-        access_token = create_access_token(identity=user.id)
+        access_token = create_access_token(identity=str(user.id))
         return {'access_token': access_token}, 200
 
 @user_ns.route('/profile')
@@ -202,7 +221,7 @@ class UserProfile(Resource):
     @jwt_required()
     def get(self):
         """Get user profile information"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -224,7 +243,7 @@ class UserProfile(Resource):
     @user_ns.expect(user_update_model)
     def put(self):
         """Update user profile"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -257,7 +276,7 @@ class ChatResource(Resource):
     @vlm_ns.expect(report_extraction_model)
     def post(self):
         """Extract medical report data and save to database"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -321,32 +340,18 @@ RULES:
         ]
 
         try:
-            # --- MODIFIED SECTION: Calling the local model server ---
-            # Instead of using the OpenAI client, we now send an HTTP POST request
-            # to our local model server, which is now running on port 8051.
-            model_server_url = "http://176.119.254.185:8051/generate"
-            
-            # The Gemma 3 model you mentioned is likely a text model, so we will
-            # send the text prompt. The model server currently doesn't process images,
-            # but this structure can be extended if your local model is multimodal.
-            payload = {
-                "prompt": extraction_prompt
-                # We are not sending the image_url to the current model server,
-                # as it's set up for text-based generation. If your gemma3 model
-                # can handle images, the model_server.py would need to be updated.
-            }
+            completion = client.chat.completions.create(
+                model="google/gemma-3-12b-it:featherless-ai",
+                messages=[
+                    {
+                        'role': 'user',
+                        'content': content
+                    }
+                ],
+                temperature=0.1,  # Very low temperature for strict JSON output
+            )
 
-            print(f"Sending request to local model server at {model_server_url}...")
-            
-            # We use a timeout to ensure the app doesn't hang indefinitely.
-            response = requests.post(model_server_url, json=payload, timeout=120)
-            response.raise_for_status()  # This will raise an error for bad responses (4xx or 5xx)
-
-            # We expect the model server to return JSON with a 'response' key.
-            response_text = response.json().get('response', '')
-            
-            # --- END OF MODIFIED SECTION ---
-
+            response_text = completion.choices[0].message.content.strip()
             print("\n" + "="*80)
             print("🔍 MODEL SERVER RAW RESPONSE:")
             print("="*80)
@@ -573,7 +578,7 @@ class UserReports(Resource):
     @jwt_required()
     def get(self):
         """Get all extracted reports for the current user"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -645,7 +650,7 @@ class UserReportDetail(Resource):
     @jwt_required()
     def get(self, report_id):
         """Get a specific report by ID"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -703,7 +708,7 @@ class DeleteReportDetail(Resource):
     @jwt_required()
     def delete(self, report_id):
         """Delete a specific report by ID - FOR TESTING PURPOSES ONLY"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -753,7 +758,6 @@ if __name__ == '__main__':
     # Initialize the database
     init_db()
     print("\n✅ Starting Medical Application API...")
-    # The main app will now run on port 5000.
     print("📚 Swagger documentation available at: http://localhost:5000/swagger")
     print("🔐 API Routes by Namespace:")
     print("\n📋 Authentication (auth/)")

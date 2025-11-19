@@ -14,13 +14,22 @@ Running locally (Windows PowerShell):
 python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r requirements.txt
 ```
 
-2. Run the server
+2. (Optional) Start the local Gemma 3 server in another shell
+
+```powershell
+uvicorn gemma_server:app --host 0.0.0.0 --port 8051
+```
+
+By default the server looks for model weights under `./models/gemma3`. Set
+`GEMMA_MODEL_PATH` if you store the weights elsewhere.
+
+3. Run the Flask API
 
 ```powershell
 python app.py
 ```
 
-3. Open Swagger UI in your browser:
+4. Open Swagger UI in your browser:
 
 http://127.0.0.1:5000/swagger
 
@@ -38,5 +47,6 @@ POST a prompt with image:
 curl -X POST "http://127.0.0.1:5000/api/v1/chat" -H "Content-Type: application/json" -d '{"prompt":"Describe this image in one sentence.", "image_url":"https://cdn.britannica.com/61/93061-050-99147DCE/Statue-of-Liberty-Island-New-York-Bay.jpg"}'
 ```
 
-Security note: The HF token is currently hardcoded in `app.py` as you requested. For real projects, store secrets in environment variables or a secrets manager.
-# med_BE
+Security note: The HF token is currently hardcoded in `app.py` as you requested.
+For real deployments, store secrets in environment variables or a secrets
+manager.
