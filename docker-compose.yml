@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # Gemma Model Server (FastAPI)
+  gemma-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.gemma
+    container_name: gemma_server
+    volumes:
+      - /home/medvlm/models/gemma3:/medvlm/models/gemma3:ro
+    ports:
+      - "8051:8051"
+    environment:
+      - MODEL_PATH=/medvlm/models/gemma3
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres_medical
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+      POSTGRES_DB: medical_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Flask App
+  flask-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flask_app
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres123@postgres:5432/medical_db
+      FLASK_HOST: 0.0.0.0
+      FLASK_PORT: 8080
+      FLASK_DEBUG: "False"
+      GEMMA_BASE_URL: http://gemma-server:8051/v1
+      GEMMA_MODEL_NAME: local-gemma-3
+      SECRET_KEY: MedicalApp@2025SecureKey123
+    ports:
+      - "8089:8080"
+    depends_on:
+      gemma-server:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

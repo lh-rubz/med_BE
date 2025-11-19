@@ -1,0 +1,23 @@
+# Dockerfile for Gemma Model Server
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+
+WORKDIR /app
+
+# Set proxy for apt and pip (but exclude internal Docker hostnames)
+ENV http_proxy="http://213.244.124.19:3128"
+ENV https_proxy="http://213.244.124.19:3128"
+ENV ftp_proxy="http://213.244.124.19:3128"
+ENV NO_PROXY="localhost,127.0.0.1,postgres,gemma-server,flask-app,*.local"
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Expose port
+EXPOSE 8051
+
+# Run Gemma server
+CMD ["python", "gemma_server.py"]

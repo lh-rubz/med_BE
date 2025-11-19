@@ -7,6 +7,7 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 import hashlib
 import json
 import bcrypt
+import os
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -15,7 +16,6 @@ load_dotenv()
 # Read configuration from .env file
 def get_env(key, default=None):
     """Get environment variable with optional default"""
-    import os
     value = os.getenv(key)
     if value is None and default is None:
         raise ValueError(f"Missing required environment variable: {key}")
@@ -24,11 +24,13 @@ def get_env(key, default=None):
 # ===== CONFIGURATION FROM .ENV =====
 DATABASE_URL = get_env('DATABASE_URL')
 SECRET_KEY = get_env('SECRET_KEY')
-GEMMA_BASE_URL = get_env('GEMMA_BASE_URL', '176.119.254.185:8051/v1')
+GEMMA_BASE_URL = get_env('GEMMA_BASE_URL', 'http://gemma-server:8051/v1')
+if not GEMMA_BASE_URL.startswith('http'):
+    GEMMA_BASE_URL = 'http://' + GEMMA_BASE_URL
 GEMMA_MODEL_NAME = get_env('GEMMA_MODEL_NAME', 'local-gemma-3')
 FLASK_HOST = get_env('FLASK_HOST', '0.0.0.0')
 FLASK_PORT = int(get_env('FLASK_PORT', '8080'))
-FLASK_DEBUG = get_env('FLASK_DEBUG', 'True').lower() == 'true'
+FLASK_DEBUG = get_env('FLASK_DEBUG', 'False').lower() == 'true'
 # ====================================
 
 app = Flask(__name__)
@@ -220,7 +222,7 @@ class Login(Resource):
         if not user.is_active:
             return {'message': 'Account is deactivated'}, 403
 
-        access_token = create_access_token(identity=user.id)
+        access_token = create_access_token(identity=str(user.id))
         return {'access_token': access_token}, 200
 
 @user_ns.route('/profile')
@@ -229,7 +231,7 @@ class UserProfile(Resource):
     @jwt_required()
     def get(self):
         """Get user profile information"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -251,7 +253,7 @@ class UserProfile(Resource):
     @user_ns.expect(user_update_model)
     def put(self):
         """Update user profile"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -284,7 +286,7 @@ class ChatResource(Resource):
     @vlm_ns.expect(report_extraction_model)
     def post(self):
         """Extract medical report data and save to database"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -589,7 +591,7 @@ class UserReports(Resource):
     @jwt_required()
     def get(self):
         """Get all extracted reports for the current user"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -661,7 +663,7 @@ class UserReportDetail(Resource):
     @jwt_required()
     def get(self, report_id):
         """Get a specific report by ID"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
@@ -719,7 +721,7 @@ class DeleteReportDetail(Resource):
     @jwt_required()
     def delete(self, report_id):
         """Delete a specific report by ID - FOR TESTING PURPOSES ONLY"""
-        current_user_id = get_jwt_identity()
+        current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:

@@ -1,33 +1,21 @@
-"""Lightweight FastAPI serv# ===== CONFIGURATION - UPDATE THESE VALUES =====
-# Path to your Gemma-3 model directory
-MODEL_PATH = Path("/medvlm/models/gemma3")  # Server location of Gemma weights
-MAX_MAX_NEW_TOKENS = 1024
-SERVER_HOST = "0.0.0.0"
-SERVER_PORT = 8051
-# ================================================
-
-# Validate model path exists
-if not MODEL_PATH.exists():
-    raise RuntimeError(
-        f"Gemma model weights not found at: {MODEL_PATH}\n"
-        f"Please update MODEL_PATH to point to your Gemma-3 model directory."
-    )s a local Gemma-3 chat endpoint
+"""Lightweight FastAPI server for local Gemma-3 chat endpoint
 compatible with the OpenAI chat completions API used by the Flask app.
 
 Usage
 -----
 1. Install requirements ``pip install -r requirements.txt``
-2. Place the Gemma-3 weights under ``./models/gemma3``
-3. Update MODEL_PATH below to point to your model directory
+2. Place the Gemma-3 weights under your configured MODEL_PATH
+3. Set environment variables or use defaults
 4. Start the server:
 
-     python gemma3.py
+     python gemma_server.py
 
 5. Health check is available at ``GET /health``.
 6. Chat completions are served at ``POST /v1/chat/completions``.
 """
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from pathlib import Path
@@ -37,14 +25,18 @@ import torch
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from dotenv import load_dotenv
 
-# ===== CONFIGURATION - UPDATE THESE VALUES =====
+# Load environment variables
+load_dotenv()
+
+# ===== CONFIGURATION - READ FROM ENVIRONMENT OR USE DEFAULTS =====
 # Path to your Gemma-3 model directory
-MODEL_PATH = Path("/medvlm/models/gemma3")  # Server location of Gemma weights
-MAX_MAX_NEW_TOKENS = 1024
-SERVER_HOST = "0.0.0.0"
-SERVER_PORT = 8051
-# ================================================
+MODEL_PATH = Path(os.getenv('MODEL_PATH', '/medvlm/models/gemma3'))
+MAX_MAX_NEW_TOKENS = int(os.getenv('MAX_MAX_NEW_TOKENS', '1024'))
+SERVER_HOST = os.getenv('SERVER_HOST', '0.0.0.0')
+SERVER_PORT = int(os.getenv('SERVER_PORT', '8051'))
+# =================================================================
 
 # Validate model path exists
 if not MODEL_PATH.exists():
@@ -60,20 +52,36 @@ app = FastAPI(
     openapi_url="/swagger.json",
 )
 
-tokenizer = AutoTokenizer.from_pretrained(
-    str(MODEL_PATH),
-    local_files_only=True,
-    trust_remote_code=True,
-    use_fast=False,
-)
-model = AutoModelForCausalLM.from_pretrained(
-    str(MODEL_PATH),
-    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-    device_map="auto",
-    local_files_only=True,
-    trust_remote_code=True,
-)
-model.eval()
+# Global model and tokenizer - loaded lazily on first request
+_tokenizer = None
+_model = None
+
+def get_model():
+    """Lazy load model on first request"""
+    global _model, _tokenizer
+    if _model is None:
+        print("Loading Gemma-3 model...")
+        _tokenizer = AutoTokenizer.from_pretrained(
+            str(MODEL_PATH),
+            local_files_only=True,
+            trust_remote_code=True,
+            use_fast=False,
+        )
+        try:
+            _model = AutoModelForCausalLM.from_pretrained(
+                str(MODEL_PATH),
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                device_map="auto",
+                local_files_only=True,
+                trust_remote_code=True,
+            )
+            _model.eval()
+            print("Model loaded successfully!")
+        except Exception as e:
+            print(f"WARNING: Model failed to load: {e}")
+            print("Continuing in health-check-only mode...")
+            _model = "error"
+    return _model, _tokenizer
 
 
 class MessageContent(BaseModel):
@@ -102,7 +110,7 @@ class ChatCompletionRequest(BaseModel):
 def health() -> Dict[str, Any]:
     return {
         "status": "ok",
-        "model_path": MODEL_PATH,
+        "model_path": str(MODEL_PATH),
         "supports_images": True,
     }
 
@@ -138,6 +146,14 @@ def _build_conversation(messages: List[Message]) -> List[Dict[str, str]]:
 def chat_completions(request: ChatCompletionRequest) -> Dict[str, Any]:
     if not request.messages:
         raise HTTPException(status_code=400, detail="messages must not be empty")
+
+    model, tokenizer = get_model()
+    
+    if model == "error":
+        raise HTTPException(
+            status_code=503, 
+            detail="Model failed to load. Check server logs for details."
+        )
 
     conversation = _build_conversation(request.messages)
     prompt = tokenizer.apply_chat_template(
@@ -203,4 +219,4 @@ if __name__ == "__main__":
     print(f"   - API Docs: http://{SERVER_HOST}:{SERVER_PORT}/swagger")
     print("="*80 + "\n")
     
-    uvicorn.run("gemma3:app", host=SERVER_HOST, port=SERVER_PORT, reload=False)
+    uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, reload=False)
