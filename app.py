@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_restx import Api, Resource, fields
-from openai import OpenAI
+import requests  # We'll use the 'requests' library to talk to our new model server.
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
@@ -10,17 +10,22 @@ import bcrypt
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file FIRST
+import os
+from dotenv import load_dotenv
+from openai import OpenAI
+
+# Load environment variables from .env file
 load_dotenv()
 
-# NOTE: token is hardcoded as requested by the user. For production, use environment variables.
-HF_TOKEN = "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"
-
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+# Get database URL and secret key from environment variables
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://user:password@localhost/meddb')
+SECRET_KEY = os.getenv('SECRET_KEY', 'your-default-secret-key')
+
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
-app.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY')  # We'll use the same secret key for JWT
+app.config['SECRET_KEY'] = SECRET_KEY
+app.config['JWT_SECRET_KEY'] = SECRET_KEY  # We'll use the same secret key for JWT
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=1)  # Token expires in 1 day
 app.config['JWT_TOKEN_LOCATION'] = ['headers']
 app.config['JWT_HEADER_NAME'] = 'Authorization'
@@ -150,32 +155,15 @@ report_extraction_model = api.model('ReportExtraction', {
 })
 
 
-def create_client(require_image_support: bool = False):
-    import requests
-
-    local_server = os.getenv("LOCAL_GEMMA_URL", "http://localhost:8051")
-    try:
-        response = requests.get(f"{local_server}/health", timeout=2)
-        if response.status_code == 200:
-            payload = response.json()
-            supports_images = bool(payload.get("supports_images", False))
-            if not require_image_support or supports_images:
-                print("✅ Using LOCAL Gemma3 model server on port 8051")
-                client = OpenAI(
-                    base_url=f"{local_server}/v1",
-                    api_key="no-key-needed-for-local",
-                )
-                return client, supports_images
-            print("ℹ️ Local Gemma3 server is text-only. Falling back to HuggingFace for image support.")
-    except Exception as exc:
-        print(f"ℹ️ Local Gemma3 server unavailable: {exc}")
-
-    print("⚠️ Using HuggingFace router as fallback.")
+def create_client():
+    # create OpenAI-compatible client pointing at the local gemma server
     client = OpenAI(
-        base_url="https://router.huggingface.co/v1",
-        api_key=HF_TOKEN,
+        base_url="http://localhost:8051/v1",
+        api_key="not-needed",
     )
-    return client, True
+    return client
+
+client = create_client()
 
 
 @auth_ns.route('/register')
@@ -300,8 +288,6 @@ class ChatResource(Resource):
         if not image_url:
             return {'error': 'image_url is required for report extraction'}, 400
 
-        client, _ = create_client(require_image_support=bool(image_url))
-
         # Step 0: Prepare minimal user data for VLM
         patient_name = user.first_name + " " + user.last_name
         
@@ -310,15 +296,15 @@ class ChatResource(Resource):
 
 USER NAME VERIFICATION:
 Patient name must match: {patient_name}
-- If the name does NOT match, respond with ONLY: "NAME_MISMATCH"
+- If name does NOT match, respond with ONLY: "NAME_MISMATCH"
 - Otherwise proceed with extraction
 
 EXTRACTION RULES:
-1. Extract every test result, measurement, or value that appears.
-2. For each result include: field name, value, unit, normal range, and whether it is normal.
-3. Capture the report date if it is visible.
+1. Extract EVERY test result, measurement, value visible
+2. For each result provide: test name, value, unit, normal range, if normal/abnormal
+3. Extract report date if available
 
-RESPONSE FORMAT - return ONLY valid JSON (no extra text):
+RESPONSE FORMAT - Return ONLY valid JSON:
 {{
     "name_match": true,
     "patient_name": "{patient_name}",
@@ -331,15 +317,15 @@ RESPONSE FORMAT - return ONLY valid JSON (no extra text):
             "normal_range": "13.5-17.5",
             "is_normal": true
         }}
-    ],
-    "findings": "Optional notes or impressions from the report"
+    ]
 }}
 
 RULES:
-- Output must be valid JSON with no commentary.
-- Extract all visible fields (medical_data may be empty if none are present).
-- Use empty strings for missing values.
-- Set is_normal to false if the value is abnormal or outside the reference range."""
+- Response must be ONLY valid JSON
+- Extract ALL visible fields
+- medical_data array can be empty if none found
+- Use empty strings for missing values
+- is_normal: false if abnormal or outside range"""
 
         # Build message content
         content = [
@@ -355,7 +341,7 @@ RULES:
 
         try:
             completion = client.chat.completions.create(
-                model="google/gemma-3-12b-it",
+                model="google/gemma-3-12b-it:featherless-ai",
                 messages=[
                     {
                         'role': 'user',
@@ -367,17 +353,10 @@ RULES:
 
             response_text = completion.choices[0].message.content.strip()
             print("\n" + "="*80)
-            print("🔍 VLM RAW RESPONSE:")
+            print("🔍 MODEL SERVER RAW RESPONSE:")
             print("="*80)
             print(response_text)
             print("="*80 + "\n")
-            
-            # Remove markdown code blocks if present
-            if response_text.startswith('```'):
-                response_text = response_text.split('```')[1]
-                if response_text.startswith('json'):
-                    response_text = response_text[4:]
-                response_text = response_text.strip()
             
             # Step 2: Check if name matched
             if "NAME_MISMATCH" in response_text.upper():
@@ -489,7 +468,7 @@ RULES:
                         
                         print(f"Report #{existing_report.id}: {match_percentage:.1f}% match ({matching_fields}/{len(new_field_map)} fields)")
                         
-                        # If 70% or more fields match, it's likely a duplicate
+                        # If 90% or more fields match, it's likely a duplicate
                         if match_percentage >= 90:
                             print(f"⚠️  HIGH MATCH DETECTED ({match_percentage:.1f}%)")
                             return {

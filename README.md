@@ -47,31 +47,6 @@ POST a prompt with image:
 curl -X POST "http://127.0.0.1:5000/api/v1/chat" -H "Content-Type: application/json" -d '{"prompt":"Describe this image in one sentence.", "image_url":"https://cdn.britannica.com/61/93061-050-99147DCE/Statue-of-Liberty-Island-New-York-Bay.jpg"}'
 ```
 
-## Running on the remote server with screen sessions
-
-1. **Gemma model session** (`screen -S gemma3`)
-		```bash
-		docker exec -it medvlm /bin/bash
-		source /root/.bashrc
-		cd /medvlm
-		uvicorn gemma_server:app --host 0.0.0.0 --port 8051 >> /var/log/gemma3.log 2>&1
-	```
-	Detach with `Ctrl+A` then `D` to keep the model server running.
-
-2. **Application session** (`screen -S medvlm`)
-	```bash
-	docker exec -it medvlm /bin/bash
-	source /root/.bashrc
-	cd /medvlm
-	git pull
-	python app.py >> /var/log/med_app.log 2>&1
-	```
-
-Use `screen -ls` to verify both sessions are active and `screen -rd <name>` to
-reattach later. The Flask service will automatically talk to the local Gemma
-endpoint if it is healthy; otherwise it falls back to the Hugging Face router.
-
 Security note: The HF token is currently hardcoded in `app.py` as you requested.
 For real deployments, store secrets in environment variables or a secrets
 manager.
-# med_BE
