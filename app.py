@@ -19,8 +19,8 @@ load_dotenv()
 
 app = Flask(__name__)
 # Get database URL and secret key from environment variables
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://user:password@localhost/meddb')
-SECRET_KEY = os.getenv('SECRET_KEY', 'your-default-secret-key')
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://user:root@localhost/meddb')
+SECRET_KEY = os.getenv('SECRET_KEY', 'MedicalApp@2025SecureKey123')
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
