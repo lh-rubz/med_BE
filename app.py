@@ -6,16 +6,33 @@ from datetime import datetime, timedelta
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 import hashlib
 import json
+import base64
 import bcrypt
 import os
 from dotenv import load_dotenv
-
-import os
-from dotenv import load_dotenv
 from openai import OpenAI
+try:
+    import httpx
+    HAS_HTTPX = True
+except ImportError:
+    HAS_HTTPX = False
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Configure NO_PROXY to exclude localhost from proxy (important for local VLM server)
+# This prevents proxy from blocking localhost connections
+no_proxy = os.environ.get('NO_PROXY', '')
+no_proxy_list = [item.strip() for item in no_proxy.split(',') if item.strip()]
+no_proxy_list.extend(['localhost', '127.0.0.1', '0.0.0.0', '::1', 'localhost:11434', '127.0.0.1:11434'])
+os.environ['NO_PROXY'] = ','.join(set(no_proxy_list))
+
+# Temporarily unset proxy env vars before creating httpx client to ensure localhost bypasses proxy
+# Store original values to restore after httpx client creation (needed for external image downloads)
+_original_proxy_vars = {}
+for var in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']:
+    if var in os.environ:
+        _original_proxy_vars[var] = os.environ.pop(var)
 
 app = Flask(__name__)
 # Get database URL and secret key from environment variables
@@ -156,14 +173,40 @@ report_extraction_model = api.model('ReportExtraction', {
 
 
 def create_client():
-    # create OpenAI-compatible client pointing at the local gemma server
-    client = OpenAI(
-        base_url="http://localhost:8051/v1",
-        api_key="not-needed",
-    )
+    # create OpenAI-compatible client pointing at Ollama server
+    # Ollama provides OpenAI-compatible API at /v1 endpoint
+    ollama_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434/v1')
+    
+    # Create a custom HTTP client that bypasses proxy for localhost
+    # This is necessary because some proxy configurations block localhost
+    # Explicitly disable all proxies to bypass Squid proxy blocking localhost
+    client_kwargs = {
+        'base_url': ollama_url,
+        'api_key': 'not-needed',
+    }
+    
+    if HAS_HTTPX:
+        # Use httpx client - NO_PROXY env var should prevent proxy usage for localhost
+        # httpx respects NO_PROXY environment variable
+        http_client = httpx.Client(
+            timeout=600.0,  # Long timeout for VLM processing
+        )
+        client_kwargs['http_client'] = http_client
+    else:
+        # Fallback: rely on NO_PROXY environment variable
+        # Note: This may not work if the library doesn't respect NO_PROXY
+        pass
+    
+    client = OpenAI(**client_kwargs)
     return client
 
 client = create_client()
+
+# Restore proxy environment variables after httpx client creation
+# This allows requests library to use proxy for external image downloads
+# while httpx client (already created) will bypass proxy for localhost via NO_PROXY
+for var, value in _original_proxy_vars.items():
+    os.environ[var] = value
 
 
 @auth_ns.route('/register')
@@ -327,21 +370,59 @@ RULES:
 - Use empty strings for missing values
 - is_normal: false if abnormal or outside range"""
 
-        # Build message content
-        content = [
-            {
-                'type': 'text',
-                'text': extraction_prompt
-            },
-            {
-                'type': 'image_url',
-                'image_url': {'url': image_url}
-            }
-        ]
+        # Download and convert image to base64 for Ollama
+        # Ollama vision models require base64-encoded images, not URLs
+        try:
+            # Download the image using proxy (proxy env vars are restored)
+            # Create a session with proxy support for external URLs
+            session = requests.Session()
+            # Proxy will be used automatically from environment variables
+            img_response = session.get(image_url, timeout=60)
+            img_response.raise_for_status()
+            
+            # Convert to base64
+            image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+            
+            # Determine image format from content type or URL
+            content_type = img_response.headers.get('Content-Type', '')
+            if 'jpeg' in content_type or 'jpg' in content_type or image_url.lower().endswith(('.jpg', '.jpeg')):
+                image_format = 'jpeg'
+            elif 'png' in content_type or image_url.lower().endswith('.png'):
+                image_format = 'png'
+            elif 'webp' in content_type or image_url.lower().endswith('.webp'):
+                image_format = 'webp'
+            else:
+                # Try to detect from image data
+                from io import BytesIO
+                from PIL import Image
+                img = Image.open(BytesIO(img_response.content))
+                image_format = img.format.lower() if img.format else 'jpeg'
+            
+            # Build message content with base64 image
+            content = [
+                {
+                    'type': 'text',
+                    'text': extraction_prompt
+                },
+                {
+                    'type': 'image_url',
+                    'image_url': {
+                        'url': f'data:image/{image_format};base64,{image_base64}'
+                    }
+                }
+            ]
+        except Exception as e:
+            print(f"\n❌ ERROR downloading/processing image: {str(e)}")
+            return {
+                'message': 'Failed to download or process image',
+                'error': str(e)
+            }, 400
 
         try:
+            # Get model name from environment or use default
+            model_name = os.getenv('OLLAMA_MODEL', 'gemma3:4b')
             completion = client.chat.completions.create(
-                model="google/gemma-3-12b-it:featherless-ai",
+                model=model_name,
                 messages=[
                     {
                         'role': 'user',
