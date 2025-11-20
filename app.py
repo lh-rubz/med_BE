@@ -156,10 +156,14 @@ report_extraction_model = api.model('ReportExtraction', {
 
 
 def create_client():
-    # create OpenAI-compatible client pointing at the local gemma server
+    # create OpenAI-compatible client pointing at Ollama server
+    # Ollama runs on port 11434 by default and supports OpenAI-compatible API
+    # Use 127.0.0.1 instead of localhost to bypass proxy issues
+    vlm_base_url = os.getenv('VLM_BASE_URL', 'http://127.0.0.1:11434')
+    
     client = OpenAI(
-        base_url="http://localhost:8051/v1",
-        api_key="not-needed",
+        base_url=vlm_base_url,
+        api_key="not-needed",  # Ollama doesn't require API key
     )
     return client
 
@@ -340,8 +344,15 @@ RULES:
         ]
 
         try:
+            # Log the VLM server URL being used
+            vlm_url = os.getenv('VLM_BASE_URL', 'http://127.0.0.1:11434')
+            # Use Ollama model name format (gemma2) or allow override via env var
+            model_name = os.getenv('VLM_MODEL', 'gemma2')
+            print(f"\n🔗 Connecting to VLM server: {vlm_url}")
+            print(f"📝 Model: {model_name}")
+            
             completion = client.chat.completions.create(
-                model="google/gemma-3-12b-it:featherless-ai",
+                model=model_name,
                 messages=[
                     {
                         'role': 'user',
@@ -569,7 +580,31 @@ RULES:
             print(f"\n❌ VLM PROCESSING ERROR: {str(e)}")
             import traceback
             traceback.print_exc()
-            return {'error': f'VLM processing error: {str(e)}'}, 500
+            
+            # Provide more helpful error messages
+            error_msg = str(e)
+            vlm_url = os.getenv('VLM_BASE_URL', 'http://127.0.0.1:11434')
+            
+            if '404' in error_msg or 'Not Found' in error_msg:
+                return {
+                    'error': 'VLM server endpoint not found',
+                    'message': f'Cannot connect to VLM server at {vlm_url}',
+                    'details': 'The VLM server (Ollama) may not be running or the endpoint is incorrect.',
+                    'suggestion': 'Please verify that Ollama is running on port 11434.'
+                }, 503
+            elif 'Connection' in error_msg or 'refused' in error_msg.lower():
+                return {
+                    'error': 'VLM server connection failed',
+                    'message': f'Cannot connect to VLM server at {vlm_url}',
+                    'details': 'The VLM server may not be running or is not accessible.',
+                    'suggestion': 'Please start the VLM server or check the VLM_BASE_URL configuration.'
+                }, 503
+            else:
+                return {
+                    'error': 'VLM processing error',
+                    'message': error_msg,
+                    'vlm_url': vlm_url
+                }, 500
 
 
 @reports_ns.route('')
@@ -773,4 +808,4 @@ if __name__ == '__main__':
     print("   - GET /reports - Get all user reports with extracted data (requires JWT)")
     print("   - GET /reports/<id> - Get a specific report by ID (requires JWT)")
     print("   - DELETE /reports/<id> - Delete a report by ID (requires JWT) [FOR TESTING ONLY]")
-    app.run(debug=True, host='0.0.0.0', port=8051)
+    app.run(debug=True, host='0.0.0.0', port=5000)
