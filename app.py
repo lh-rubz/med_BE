@@ -156,14 +156,10 @@ report_extraction_model = api.model('ReportExtraction', {
 
 
 def create_client():
-    # create OpenAI-compatible client pointing at Ollama server
-    # Ollama runs on port 11434 by default and supports OpenAI-compatible API
-    # Use 127.0.0.1 instead of localhost to bypass proxy issues
-    vlm_base_url = os.getenv('VLM_BASE_URL', 'http://127.0.0.1:11434')
-    
+    # create OpenAI-compatible client pointing at the local gemma server
     client = OpenAI(
-        base_url=vlm_base_url,
-        api_key="not-needed",  # Ollama doesn't require API key
+        base_url="http://localhost:8051/v1",
+        api_key="not-needed",
     )
     return client
 
@@ -344,15 +340,8 @@ RULES:
         ]
 
         try:
-            # Log the VLM server URL being used
-            vlm_url = os.getenv('VLM_BASE_URL', 'http://127.0.0.1:11434')
-            # Use Ollama model name format (gemma2) or allow override via env var
-            model_name = os.getenv('VLM_MODEL', 'gemma2')
-            print(f"\n🔗 Connecting to VLM server: {vlm_url}")
-            print(f"📝 Model: {model_name}")
-            
             completion = client.chat.completions.create(
-                model=model_name,
+                model="google/gemma-3-12b-it:featherless-ai",
                 messages=[
                     {
                         'role': 'user',
@@ -364,14 +353,14 @@ RULES:
 
             response_text = completion.choices[0].message.content.strip()
             print("\n" + "="*80)
-            print("🔍 MODEL SERVER RAW RESPONSE:")
+            print("ðŸ” MODEL SERVER RAW RESPONSE:")
             print("="*80)
             print(response_text)
             print("="*80 + "\n")
             
             # Step 2: Check if name matched
             if "NAME_MISMATCH" in response_text.upper():
-                print("❌ NAME MISMATCH DETECTED - Report does not belong to this user")
+                print("âŒ NAME MISMATCH DETECTED - Report does not belong to this user")
                 return {
                     'message': 'Patient name in report does not match your profile',
                     'error': 'Name mismatch',
@@ -383,13 +372,13 @@ RULES:
             try:
                 extracted_data = json.loads(response_text)
                 print("\n" + "="*80)
-                print("✅ PARSED JSON DATA:")
+                print("âœ… PARSED JSON DATA:")
                 print("="*80)
                 print(json.dumps(extracted_data, indent=2))
                 print("="*80 + "\n")
             except json.JSONDecodeError as e:
                 print("\n" + "="*80)
-                print("❌ JSON PARSE ERROR:")
+                print("âŒ JSON PARSE ERROR:")
                 print("="*80)
                 print(f"Error: {e}")
                 print(f"Response was: {response_text[:200]}...")
@@ -401,12 +390,12 @@ RULES:
                 if json_match:
                     try:
                         extracted_data = json.loads(json_match.group())
-                        print("✅ JSON extracted from response after regex match")
+                        print("âœ… JSON extracted from response after regex match")
                     except:
                         extracted_data = None
                 
                 if not extracted_data:
-                    print("❌ Could not parse VLM response as JSON - aborting extraction")
+                    print("âŒ Could not parse VLM response as JSON - aborting extraction")
                     return {
                         'message': 'Failed to parse medical report',
                         'error': 'Invalid response format',
@@ -415,7 +404,7 @@ RULES:
             
             # Validate structure
             if not isinstance(extracted_data, dict):
-                print("❌ Invalid response structure - not a dictionary")
+                print("âŒ Invalid response structure - not a dictionary")
                 return {
                     'message': 'Failed to parse medical report',
                     'error': 'Invalid response structure'
@@ -431,7 +420,7 @@ RULES:
             
             # Final name verification
             if not extracted_data.get('name_match', False):
-                print("❌ VLM name verification failed")
+                print("âŒ VLM name verification failed")
                 return {
                     'message': 'Patient name in report does not match your profile',
                     'error': 'Name mismatch',
@@ -447,7 +436,7 @@ RULES:
                 existing_reports = Report.query.filter_by(user_id=current_user_id).all()
                 
                 print("\n" + "="*80)
-                print("🔍 CHECKING FOR DUPLICATES:")
+                print("ðŸ” CHECKING FOR DUPLICATES:")
                 print("="*80)
                 print(f"New report has {len(medical_data_list)} fields")
                 print(f"Comparing against {len(existing_reports)} existing reports...\n")
@@ -481,7 +470,7 @@ RULES:
                         
                         # If 90% or more fields match, it's likely a duplicate
                         if match_percentage >= 90:
-                            print(f"⚠️  HIGH MATCH DETECTED ({match_percentage:.1f}%)")
+                            print(f"âš ï¸  HIGH MATCH DETECTED ({match_percentage:.1f}%)")
                             return {
                                 'message': 'This report appears to be a duplicate of an existing report',
                                 'error': 'Possible duplicate',
@@ -492,7 +481,7 @@ RULES:
                                 'total_new_fields': len(new_field_map)
                             }, 409
                 
-                print("✅ No duplicates found - Report is unique\n")
+                print("âœ… No duplicates found - Report is unique\n")
                 print("="*80 + "\n")
             
             # Step 5: Create new report
@@ -513,7 +502,7 @@ RULES:
                 medical_entries = []
                 
                 print("\n" + "="*80)
-                print(f"📊 PROCESSING {len(medical_data_list)} MEDICAL FIELDS:")
+                print(f"ðŸ“Š PROCESSING {len(medical_data_list)} MEDICAL FIELDS:")
                 print("="*80)
                 
                 for i, item in enumerate(medical_data_list):
@@ -522,7 +511,7 @@ RULES:
                     
                     # Ensure item is a dict
                     if not isinstance(item, dict):
-                        print(f"⚠️  Skipping non-dict item: {item}")
+                        print(f"âš ï¸  Skipping non-dict item: {item}")
                         continue
                     
                     field = ReportField(
@@ -551,7 +540,7 @@ RULES:
                     })
                 
                 print("="*80)
-                print(f"✅ Successfully added {len(medical_entries)} fields to database")
+                print(f"âœ… Successfully added {len(medical_entries)} fields to database")
                 print("="*80 + "\n")
                 
                 # Commit all changes
@@ -568,7 +557,7 @@ RULES:
                 
             except Exception as e:
                 db.session.rollback()
-                print(f"\n❌ ERROR saving to database: {str(e)}")
+                print(f"\nâŒ ERROR saving to database: {str(e)}")
                 import traceback
                 traceback.print_exc()
                 return {
@@ -577,34 +566,10 @@ RULES:
                 }, 500
                 
         except Exception as e:
-            print(f"\n❌ VLM PROCESSING ERROR: {str(e)}")
+            print(f"\nâŒ VLM PROCESSING ERROR: {str(e)}")
             import traceback
             traceback.print_exc()
-            
-            # Provide more helpful error messages
-            error_msg = str(e)
-            vlm_url = os.getenv('VLM_BASE_URL', 'http://127.0.0.1:11434')
-            
-            if '404' in error_msg or 'Not Found' in error_msg:
-                return {
-                    'error': 'VLM server endpoint not found',
-                    'message': f'Cannot connect to VLM server at {vlm_url}',
-                    'details': 'The VLM server (Ollama) may not be running or the endpoint is incorrect.',
-                    'suggestion': 'Please verify that Ollama is running on port 11434.'
-                }, 503
-            elif 'Connection' in error_msg or 'refused' in error_msg.lower():
-                return {
-                    'error': 'VLM server connection failed',
-                    'message': f'Cannot connect to VLM server at {vlm_url}',
-                    'details': 'The VLM server may not be running or is not accessible.',
-                    'suggestion': 'Please start the VLM server or check the VLM_BASE_URL configuration.'
-                }, 503
-            else:
-                return {
-                    'error': 'VLM processing error',
-                    'message': error_msg,
-                    'vlm_url': vlm_url
-                }, 500
+            return {'error': f'VLM processing error: {str(e)}'}, 500
 
 
 @reports_ns.route('')
@@ -793,19 +758,19 @@ def init_db():
 if __name__ == '__main__':
     # Initialize the database
     init_db()
-    print("\n✅ Starting Medical Application API...")
-    print("📚 Swagger documentation available at: http://localhost:5000/swagger")
-    print("🔐 API Routes by Namespace:")
-    print("\n📋 Authentication (auth/)")
+    print("\nâœ… Starting Medical Application API...")
+    print("ðŸ“š Swagger documentation available at: http://localhost:5000/swagger")
+    print("ðŸ” API Routes by Namespace:")
+    print("\nðŸ“‹ Authentication (auth/)")
     print("   - POST /auth/register - Register new user")
     print("   - POST /auth/login - Login and get JWT token")
-    print("\n👤 Users (users/)")
+    print("\nðŸ‘¤ Users (users/)")
     print("   - GET /users/profile - Get user profile (requires JWT)")
     print("   - PUT /users/profile - Update user profile (requires JWT)")
-    print("\n🔬 VLM Operations (vlm/)")
+    print("\nðŸ”¬ VLM Operations (vlm/)")
     print("   - POST /vlm/chat - Extract medical report data from image (requires JWT)")
-    print("\n📊 Reports Management (reports/)")
+    print("\nðŸ“Š Reports Management (reports/)")
     print("   - GET /reports - Get all user reports with extracted data (requires JWT)")
     print("   - GET /reports/<id> - Get a specific report by ID (requires JWT)")
     print("   - DELETE /reports/<id> - Delete a report by ID (requires JWT) [FOR TESTING ONLY]")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=8051)
