@@ -19,7 +19,7 @@ load_dotenv()
 
 app = Flask(__name__)
 # Get database URL and secret key from environment variables
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://user:root@localhost/meddb')
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://user:user@localhost/meddb')
 SECRET_KEY = os.getenv('SECRET_KEY', 'MedicalApp@2025SecureKey123')
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
@@ -37,7 +37,6 @@ jwt = JWTManager(app)
 
 # Define User model for medical application
 class User(db.Model):
-    __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(255), nullable=False)
@@ -59,9 +58,8 @@ class User(db.Model):
 
 
 class Report(db.Model):
-    __tablename__ = 'reports'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     report_date = db.Column(db.DateTime, nullable=False)
     report_hash = db.Column(db.String(255), nullable=False)  # Hash to detect duplicates
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -69,10 +67,9 @@ class Report(db.Model):
 
 
 class ReportData(db.Model):
-    __tablename__ = 'report_data'
     """Deprecated - use ReportField instead"""
     id = db.Column(db.Integer, primary_key=True)
-    report_id = db.Column(db.Integer, db.ForeignKey('reports.id'), nullable=False)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=False)
     field_name = db.Column(db.String(120), nullable=False)
     field_value = db.Column(db.String(120), nullable=False)
     field_unit = db.Column(db.String(50))
@@ -83,11 +80,10 @@ class ReportData(db.Model):
 
 
 class ReportField(db.Model):
-    __tablename__ = 'report_fields'
     """Generic field storage for any medical data extracted from reports"""
     id = db.Column(db.Integer, primary_key=True)
-    report_id = db.Column(db.Integer, db.ForeignKey('reports.id'), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     field_name = db.Column(db.String(255), nullable=False)  # e.g., "Blood Pressure", "Weight", "Diagnosis"
     field_value = db.Column(db.Text, nullable=False)  # The actual value
     field_unit = db.Column(db.String(100))  # Optional unit (mmHg, kg, etc.)
@@ -99,11 +95,10 @@ class ReportField(db.Model):
 
 
 class AdditionalField(db.Model):
-    __tablename__ = 'additional_fields'
     """Track new fields that should be added to user profile"""
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    report_id = db.Column(db.Integer, db.ForeignKey('reports.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=False)
     field_name = db.Column(db.String(120), nullable=False)
     field_value = db.Column(db.Text, nullable=False)
     category = db.Column(db.String(50), nullable=False)  # 'medical_history', 'allergies', 'other'
@@ -759,8 +754,6 @@ def init_db():
             print(f"Database initialization warning: {e}")
             print("App will run in read-only mode. Please verify PostgreSQL connection.")
 
-# Ensure database tables exist even when the module is imported by a WSGI server
-init_db()
 
 if __name__ == '__main__':
     # Initialize the database
@@ -780,4 +773,4 @@ if __name__ == '__main__':
     print("   - GET /reports - Get all user reports with extracted data (requires JWT)")
     print("   - GET /reports/<id> - Get a specific report by ID (requires JWT)")
     print("   - DELETE /reports/<id> - Delete a report by ID (requires JWT) [FOR TESTING ONLY]")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=8051)
