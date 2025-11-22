@@ -11,6 +11,10 @@ import bcrypt
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
+from flask_mail import Mail, Message
+import secrets
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 try:
     import httpx
     HAS_HTTPX = True
@@ -48,9 +52,47 @@ app.config['JWT_TOKEN_LOCATION'] = ['headers']
 app.config['JWT_HEADER_NAME'] = 'Authorization'
 app.config['JWT_HEADER_TYPE'] = 'Bearer'
 
+# Email configuration for Brevo SMTP
+app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp-relay.brevo.com')
+app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'True').lower() == 'true'
+app.config['MAIL_USE_SSL'] = os.getenv('MAIL_USE_SSL', 'False').lower() == 'true'
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', os.getenv('MAIL_USERNAME'))
+
+# Brevo API configuration
+BREVO_API_KEY = os.getenv('BREVO_API_KEY')
+SENDER_EMAIL = "habuelrub@gmail.com"
+SENDER_NAME = "Medical Application"
+
 # Initialize extensions
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
+mail = Mail(app)
+
+
+def send_brevo_email(recipient_email, subject, html_content):
+    """Send email using Brevo API"""
+    configuration = sib_api_v3_sdk.Configuration()
+    configuration.api_key['api-key'] = BREVO_API_KEY
+
+    api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+
+    send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+        sender={"name": SENDER_NAME, "email": SENDER_EMAIL},
+        to=[{"email": recipient_email}],
+        subject=subject,
+        html_content=html_content
+    )
+
+    try:
+        api_response = api_instance.send_transac_email(send_smtp_email)
+        print(f"✅ Brevo API Response: {api_response}")
+        return True
+    except ApiException as e:
+        print(f"❌ Exception when calling Brevo API: {e}")
+        return False
 
 # Define User model for medical application
 class User(db.Model):
@@ -65,6 +107,11 @@ class User(db.Model):
     allergies = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_active = db.Column(db.Boolean, default=True)
+    email_verified = db.Column(db.Boolean, default=False)
+    verification_code = db.Column(db.String(6), nullable=True)
+    verification_code_expires = db.Column(db.DateTime, nullable=True)
+    reset_code = db.Column(db.String(6), nullable=True)
+    reset_code_expires = db.Column(db.DateTime, nullable=True)
     reports = db.relationship('Report', backref='user', lazy=True, cascade='all, delete-orphan')
     
     def set_password(self, password):
@@ -159,6 +206,25 @@ login_model = api.model('Login', {
     'password': fields.String(required=True, description='User password')
 })
 
+forgot_password_model = api.model('ForgotPassword', {
+    'email': fields.String(required=True, description='User email address')
+})
+
+reset_password_model = api.model('ResetPassword', {
+    'email': fields.String(required=True, description='User email address'),
+    'code': fields.String(required=True, description='6-digit verification code from email'),
+    'new_password': fields.String(required=True, description='New password')
+})
+
+verify_email_model = api.model('VerifyEmail', {
+    'email': fields.String(required=True, description='User email address'),
+    'code': fields.String(required=True, description='6-digit verification code from email')
+})
+
+resend_code_model = api.model('ResendCode', {
+    'email': fields.String(required=True, description='User email address')
+})
+
 user_update_model = api.model('UserUpdate', {
     'first_name': fields.String(description='First name'),
     'last_name': fields.String(description='Last name'),
@@ -169,6 +235,18 @@ user_update_model = api.model('UserUpdate', {
 
 report_extraction_model = api.model('ReportExtraction', {
     'image_url': fields.String(required=True, description='URL to medical report image for extraction')
+})
+
+delete_user_model = api.model('DeleteUser', {
+    'user_id': fields.Integer(required=True, description='ID of the user to delete'),
+    'admin_password': fields.String(required=True, description='Admin password for testing')
+})
+
+test_email_model = api.model('TestEmail', {
+    'to_email': fields.String(required=True, description='Recipient email address'),
+    'subject': fields.String(required=True, description='Email subject'),
+    'body': fields.String(required=True, description='Email body/message'),
+    'admin_password': fields.String(required=True, description='Admin password (testingAdmin)')
 })
 
 
@@ -221,6 +299,9 @@ class Register(Resource):
             return {'message': 'Email already registered'}, 409
 
         try:
+            # Generate 6-digit verification code
+            verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            
             # Create new user
             new_user = User(
                 email=data['email'],
@@ -229,14 +310,63 @@ class Register(Resource):
                 date_of_birth=datetime.strptime(str(data['date_of_birth']), '%Y-%m-%d').date(),
                 phone_number=data['phone_number'],
                 medical_history=data.get('medical_history', ''),
-                allergies=data.get('allergies', '')
+                allergies=data.get('allergies', ''),
+                verification_code=verification_code,
+                verification_code_expires=datetime.utcnow() + timedelta(minutes=15),
+                email_verified=False
             )
             new_user.set_password(data['password'])
             
             db.session.add(new_user)
             db.session.commit()
 
-            return {'message': 'User registered successfully'}, 201
+            # Print verification code to console for testing
+            print(f"\n{'='*80}")
+            print(f"📧 VERIFICATION CODE for {new_user.email}: {verification_code}")
+            print(f"Code expires at: {new_user.verification_code_expires}")
+            print(f"{'='*80}\n")
+
+            # Send verification email
+            try:
+                print(f"Attempting to send email to {new_user.email}...")
+                
+                html_content = f"""
+                <html>
+                <body>
+                    <h2>Hello {new_user.first_name},</h2>
+                    <p>Thank you for registering with our Medical Application!</p>
+                    <p>Your verification code is:</p>
+                    <h1 style="color: #4CAF50; font-size: 32px; letter-spacing: 5px;">{verification_code}</h1>
+                    <p>This code will expire in 15 minutes.</p>
+                    <p>Please use this code to verify your email address.</p>
+                    <p>If you did not create this account, please ignore this email.</p>
+                    <br>
+                    <p>Best regards,<br>Medical Application Team</p>
+                </body>
+                </html>
+                """
+                
+                success = send_brevo_email(
+                    recipient_email=new_user.email,
+                    subject='Verify Your Email - Medical Application',
+                    html_content=html_content
+                )
+                
+                if success:
+                    print(f"✅ Email sent successfully to {new_user.email}")
+                else:
+                    print(f"❌ Failed to send email to {new_user.email}")
+                    
+            except Exception as email_error:
+                print(f"❌ Failed to send verification email: {str(email_error)}")
+                import traceback
+                traceback.print_exc()
+                # Continue with registration even if email fails
+
+            return {
+                'message': 'User registered successfully. Please check your email to verify your account.',
+                'verification_required': True
+            }, 201
         except Exception as e:
             db.session.rollback()
             return {'message': 'Registration failed', 'error': str(e)}, 400
@@ -255,8 +385,266 @@ class Login(Resource):
         if not user.is_active:
             return {'message': 'Account is deactivated'}, 403
 
+        if not user.email_verified:
+            return {
+                'message': 'Email not verified. Please verify your email before logging in.',
+                'email_verified': False
+            }, 403
+
         access_token = create_access_token(identity=str(user.id))
-        return {'access_token': access_token}, 200
+        return {'access_token': access_token, 'email_verified': True}, 200
+
+@auth_ns.route('/verify-email')
+class VerifyEmail(Resource):
+    @auth_ns.expect(verify_email_model)
+    def post(self):
+        """Verify user email with 6-digit code"""
+        data = request.json
+        email = data.get('email')
+        code = data.get('code')
+        
+        if not email or not code:
+            return {'message': 'Email and verification code are required'}, 400
+        
+        # Validate code format
+        if not code.isdigit() or len(code) != 6:
+            return {'message': 'Invalid code format. Code must be 6 digits.'}, 400
+        
+        user = User.query.filter_by(email=email).first()
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+        
+        if user.email_verified:
+            return {'message': 'Email already verified'}, 200
+        
+        if not user.verification_code:
+            return {'message': 'No verification code found. Please register again.'}, 400
+        
+        # Check if code has expired
+        if user.verification_code_expires < datetime.utcnow():
+            return {'message': 'Verification code has expired. Please request a new one.'}, 400
+        
+        # Validate code
+        if user.verification_code != code:
+            return {'message': 'Invalid verification code'}, 400
+        
+        try:
+            user.email_verified = True
+            user.verification_code = None
+            user.verification_code_expires = None
+            db.session.commit()
+            
+            return {'message': 'Email verified successfully. You can now log in.'}, 200
+        except Exception as e:
+            db.session.rollback()
+            return {'message': 'Verification failed', 'error': str(e)}, 400
+
+@auth_ns.route('/resend-verification')
+class ResendVerification(Resource):
+    @auth_ns.expect(resend_code_model)
+    def post(self):
+        """Resend verification code"""
+        data = request.json
+        email = data.get('email')
+        
+        if not email:
+            return {'message': 'Email is required'}, 400
+        
+        user = User.query.filter_by(email=email).first()
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+        
+        if user.email_verified:
+            return {'message': 'Email already verified'}, 200
+        
+        try:
+            # Generate new 6-digit verification code
+            verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.verification_code = verification_code
+            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Send verification email
+            try:
+                html_content = f"""
+                <html>
+                <body>
+                    <h2>Hello {user.first_name},</h2>
+                    <p>Your new verification code is:</p>
+                    <h1 style="color: #4CAF50; font-size: 32px; letter-spacing: 5px;">{verification_code}</h1>
+                    <p>This code will expire in 15 minutes.</p>
+                    <p>Please use this code to verify your email address.</p>
+                    <p>If you did not request this code, please ignore this email.</p>
+                    <br>
+                    <p>Best regards,<br>Medical Application Team</p>
+                </body>
+                </html>
+                """
+                
+                success = send_brevo_email(
+                    recipient_email=user.email,
+                    subject='Verify Your Email - Medical Application',
+                    html_content=html_content
+                )
+                
+                if not success:
+                    print(f"Failed to send verification email to {user.email}")
+                    return {'message': 'Failed to send email'}, 500
+                    
+            except Exception as email_error:
+                print(f"Failed to send verification email: {str(email_error)}")
+                return {'message': 'Failed to send email', 'error': str(email_error)}, 500
+            
+            return {'message': 'Verification code sent successfully. Please check your email.'}, 200
+        except Exception as e:
+            db.session.rollback()
+            return {'message': 'Failed to resend verification code', 'error': str(e)}, 400
+
+@auth_ns.route('/forgot-password')
+class ForgotPassword(Resource):
+    @auth_ns.expect(forgot_password_model)
+    def post(self):
+        """Request password reset"""
+        data = request.json
+        email = data.get('email')
+        
+        if not email:
+            return {'message': 'Email is required'}, 400
+        
+        user = User.query.filter_by(email=email).first()
+        
+        # Always return success to prevent email enumeration
+        if not user:
+            return {
+                'message': 'If an account exists with this email, a password reset link has been sent.'
+            }, 200
+        
+        try:
+            # Generate 6-digit reset code
+            reset_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            user.reset_code = reset_code
+            user.reset_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+            
+            # Print reset code to console for testing
+            print(f"\n{'='*80}")
+            print(f"🔑 PASSWORD RESET CODE for {user.email}: {reset_code}")
+            print(f"Code expires at: {user.reset_code_expires}")
+            print(f"{'='*80}\n")
+            
+            # Send reset email
+            try:
+                print(f"Attempting to send password reset email to {user.email}...")
+                
+                html_content = f"""
+                <html>
+                <body>
+                    <h2>Hello {user.first_name},</h2>
+                    <p>You have requested to reset your password for your Medical Application account.</p>
+                    <p>Your password reset code is:</p>
+                    <h1 style="color: #FF5722; font-size: 32px; letter-spacing: 5px;">{reset_code}</h1>
+                    <p>This code will expire in 15 minutes.</p>
+                    <p>Please use this code along with your email to reset your password.</p>
+                    <p>If you did not request this password reset, please ignore this email and your password will remain unchanged.</p>
+                    <br>
+                    <p>Best regards,<br>Medical Application Team</p>
+                </body>
+                </html>
+                """
+                
+                success = send_brevo_email(
+                    recipient_email=user.email,
+                    subject='Password Reset - Medical Application',
+                    html_content=html_content
+                )
+                
+                if success:
+                    print(f"✅ Password reset email sent successfully to {user.email}")
+                else:
+                    print(f"❌ Failed to send password reset email to {user.email}")
+                    
+            except Exception as email_error:
+                print(f"❌ Failed to send password reset email: {str(email_error)}")
+                import traceback
+                traceback.print_exc()
+            
+            return {
+                'message': 'If an account exists with this email, a password reset link has been sent.'
+            }, 200
+        except Exception as e:
+            db.session.rollback()
+            print(f"Password reset error: {str(e)}")
+            return {
+                'message': 'If an account exists with this email, a password reset link has been sent.'
+            }, 200
+
+@auth_ns.route('/reset-password')
+class ResetPassword(Resource):
+    @auth_ns.expect(reset_password_model)
+    def post(self):
+        """Reset password with 6-digit code"""
+        data = request.json
+        email = data.get('email')
+        code = data.get('code')
+        new_password = data.get('new_password')
+        
+        if not email or not code or not new_password:
+            return {'message': 'Email, code, and new password are required'}, 400
+        
+        # Validate code format
+        if not code.isdigit() or len(code) != 6:
+            return {'message': 'Invalid code format. Code must be 6 digits.'}, 400
+        
+        user = User.query.filter_by(email=email).first()
+        
+        if not user:
+            return {'message': 'Invalid credentials'}, 400
+        
+        if not user.reset_code:
+            return {'message': 'No reset code found. Please request password reset first.'}, 400
+        
+        # Check if code has expired
+        if user.reset_code_expires < datetime.utcnow():
+            return {'message': 'Reset code has expired. Please request a new one.'}, 400
+        
+        # Validate code
+        if user.reset_code != code:
+            return {'message': 'Invalid reset code'}, 400
+        
+        try:
+            user.set_password(new_password)
+            user.reset_code = None
+            user.reset_code_expires = None
+            db.session.commit()
+            
+            # Send confirmation email
+            try:
+                html_content = f"""
+                <html>
+                <body>
+                    <h2>Hello {user.first_name},</h2>
+                    <p>Your password has been successfully changed.</p>
+                    <p>If you did not make this change, please contact support immediately.</p>
+                    <br>
+                    <p>Best regards,<br>Medical Application Team</p>
+                </body>
+                </html>
+                """
+                
+                send_brevo_email(
+                    recipient_email=user.email,
+                    subject='Password Changed - Medical Application',
+                    html_content=html_content
+                )
+            except Exception as email_error:
+                print(f"Failed to send password change confirmation: {str(email_error)}")
+            
+            return {'message': 'Password reset successfully. You can now log in with your new password.'}, 200
+        except Exception as e:
+            db.session.rollback()
+            return {'message': 'Password reset failed', 'error': str(e)}, 400
 
 @user_ns.route('/profile')
 class UserProfile(Resource):
@@ -310,6 +698,127 @@ class UserProfile(Resource):
         except Exception as e:
             db.session.rollback()
             return {'message': 'Update failed', 'error': str(e)}, 400
+
+
+@user_ns.route('/delete-user-testing')
+class DeleteUserTesting(Resource):
+    @user_ns.expect(delete_user_model)
+    def delete(self):
+        """Delete a user by ID - FOR TESTING ONLY"""
+        data = request.json
+        user_id = data.get('user_id')
+        admin_password = data.get('admin_password')
+        
+        if not user_id or not admin_password:
+            return {'message': 'user_id and admin_password are required'}, 400
+        
+        # Check admin password
+        if admin_password != 'testingAdmin':
+            return {'message': 'Invalid admin password'}, 403
+        
+        user = User.query.get(user_id)
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+        
+        try:
+            # Delete all reports and related data for this user
+            reports = Report.query.filter_by(user_id=user_id).all()
+            for report in reports:
+                ReportField.query.filter_by(report_id=report.id).delete()
+                AdditionalField.query.filter_by(report_id=report.id).delete()
+                db.session.delete(report)
+            
+            # Delete the user
+            db.session.delete(user)
+            db.session.commit()
+            
+            return {
+                'message': f'User {user.email} (ID: {user_id}) deleted successfully (TESTING MODE)',
+                'deleted_user_id': user_id,
+                'deleted_email': user.email
+            }, 200
+        except Exception as e:
+            db.session.rollback()
+            return {
+                'message': 'Failed to delete user',
+                'error': str(e)
+            }, 500
+
+
+@user_ns.route('/test-email')
+class TestEmail(Resource):
+    @user_ns.expect(test_email_model)
+    def post(self):
+        """Test email sending - FOR TESTING ONLY"""
+        data = request.json
+        to_email = data.get('to_email')
+        subject = data.get('subject')
+        body = data.get('body')
+        admin_password = data.get('admin_password')
+        
+        if not all([to_email, subject, body, admin_password]):
+            return {'message': 'All fields are required: to_email, subject, body, admin_password'}, 400
+        
+        # Check admin password
+        if admin_password != 'testingAdmin':
+            return {'message': 'Invalid admin password'}, 403
+        
+        try:
+            print(f"\n{'='*80}")
+            print(f"📧 TEST EMAIL SEND")
+            print(f"From: {SENDER_EMAIL}")
+            print(f"To: {to_email}")
+            print(f"Subject: {subject}")
+            print(f"Using Brevo API")
+            print(f"{'='*80}\n")
+            
+            html_content = f"""
+            <html>
+            <body>
+                <h2>Test Email</h2>
+                <p>{body}</p>
+                <br>
+                <p>This is a test email from Medical Application API.</p>
+            </body>
+            </html>
+            """
+            
+            success = send_brevo_email(
+                recipient_email=to_email,
+                subject=subject,
+                html_content=html_content
+            )
+            
+            if success:
+                print(f"✅ Test email sent successfully to {to_email}\n")
+                return {
+                    'message': 'Email sent successfully using Brevo API!',
+                    'details': {
+                        'from': SENDER_EMAIL,
+                        'to': to_email,
+                        'subject': subject,
+                        'method': 'Brevo Transactional Email API'
+                    }
+                }, 200
+            else:
+                return {
+                    'message': 'Failed to send email via Brevo API',
+                    'details': {
+                        'from': SENDER_EMAIL,
+                        'to': to_email
+                    }
+                }, 500
+            
+        except Exception as e:
+            print(f"❌ Failed to send test email: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
+            return {
+                'message': 'Failed to send email',
+                'error': str(e)
+            }, 500
 
 
 @vlm_ns.route('/chat')
