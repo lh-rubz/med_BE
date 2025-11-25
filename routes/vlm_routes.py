@@ -86,11 +86,6 @@ class ChatResource(Resource):
         
         extraction_prompt = f"""You are a medical lab report analyzer. Extract ALL medical data from this report.
 
-USER NAME VERIFICATION:
-Patient name must match: {patient_name}
-- If name does NOT match, respond with ONLY: "NAME_MISMATCH"
-- Otherwise proceed with extraction
-
 EXTRACTION RULES:
 1. Extract EVERY test result, measurement, value visible.
 2. Identify the REPORT TYPE from this EXACT list (choose the closest match):
@@ -106,8 +101,7 @@ CRITICAL - "is_normal" FIELD:
 
 RESPONSE FORMAT - Return ONLY valid JSON:
 {{
-    "name_match": true,
-    "patient_name": "{patient_name}",
+    "patient_name": "Patient name from report",
     "report_date": "YYYY-MM-DD or empty",
     "report_type": "MUST be one of the exact values from the list above",
     "doctor_names": "Dr. Name1, Dr. Name2 or empty string",
@@ -189,14 +183,6 @@ RULES:
             print(response_text)
             print("="*80 + "\n")
             
-            if "NAME_MISMATCH" in response_text.upper():
-                print("❌ NAME MISMATCH DETECTED - Report does not belong to this user")
-                return {
-                    'message': 'Patient name in report does not match your profile',
-                    'error': 'Name mismatch',
-                    'user_profile': patient_name
-                }, 400
-            
             extracted_data = None
             try:
                 extracted_data = json.loads(response_text)
@@ -237,21 +223,10 @@ RULES:
                     'error': 'Invalid response structure'
                 }, 400
             
-            if 'name_match' not in extracted_data:
-                extracted_data['name_match'] = True
             if 'medical_data' not in extracted_data:
                 extracted_data['medical_data'] = []
             if 'patient_name' not in extracted_data:
-                extracted_data['patient_name'] = patient_name
-            
-            if not extracted_data.get('name_match', False):
-                print("❌ VLM name verification failed")
-                return {
-                    'message': 'Patient name in report does not match your profile',
-                    'error': 'Name mismatch',
-                    'reported_name': extracted_data.get('patient_name'),
-                    'your_name': patient_name
-                }, 400
+                extracted_data['patient_name'] = ''
             
             # SELF-VERIFICATION PASS
             print("\n" + "="*80)
