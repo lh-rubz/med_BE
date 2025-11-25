@@ -15,6 +15,13 @@ from flask_mail import Mail, Message
 import secrets
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
+from email_templates import (
+    get_verification_email,
+    get_resend_verification_email,
+    get_password_reset_email,
+    get_password_changed_email,
+    get_test_email
+)
 try:
     import httpx
     HAS_HTTPX = True
@@ -330,25 +337,11 @@ class Register(Resource):
             try:
                 print(f"Attempting to send email to {new_user.email}...")
                 
-                html_content = f"""
-                <html>
-                <body>
-                    <h2>Hello {new_user.first_name},</h2>
-                    <p>Thank you for registering with our Medical Application!</p>
-                    <p>Your verification code is:</p>
-                    <h1 style="color: #4CAF50; font-size: 32px; letter-spacing: 5px;">{verification_code}</h1>
-                    <p>This code will expire in 15 minutes.</p>
-                    <p>Please use this code to verify your email address.</p>
-                    <p>If you did not create this account, please ignore this email.</p>
-                    <br>
-                    <p>Best regards,<br>Medical Application Team</p>
-                </body>
-                </html>
-                """
+                html_content = get_verification_email(new_user.first_name, verification_code)
                 
                 success = send_brevo_email(
                     recipient_email=new_user.email,
-                    subject='Verify Your Email - Medical Application',
+                    subject='Verify Your Email - MediScan',
                     html_content=html_content
                 )
                 
@@ -468,24 +461,11 @@ class ResendVerification(Resource):
             
             # Send verification email
             try:
-                html_content = f"""
-                <html>
-                <body>
-                    <h2>Hello {user.first_name},</h2>
-                    <p>Your new verification code is:</p>
-                    <h1 style="color: #4CAF50; font-size: 32px; letter-spacing: 5px;">{verification_code}</h1>
-                    <p>This code will expire in 15 minutes.</p>
-                    <p>Please use this code to verify your email address.</p>
-                    <p>If you did not request this code, please ignore this email.</p>
-                    <br>
-                    <p>Best regards,<br>Medical Application Team</p>
-                </body>
-                </html>
-                """
+                html_content = get_resend_verification_email(user.first_name, verification_code)
                 
                 success = send_brevo_email(
                     recipient_email=user.email,
-                    subject='Verify Your Email - Medical Application',
+                    subject='Verify Your Email - MediScan',
                     html_content=html_content
                 )
                 
@@ -538,25 +518,11 @@ class ForgotPassword(Resource):
             try:
                 print(f"Attempting to send password reset email to {user.email}...")
                 
-                html_content = f"""
-                <html>
-                <body>
-                    <h2>Hello {user.first_name},</h2>
-                    <p>You have requested to reset your password for your Medical Application account.</p>
-                    <p>Your password reset code is:</p>
-                    <h1 style="color: #FF5722; font-size: 32px; letter-spacing: 5px;">{reset_code}</h1>
-                    <p>This code will expire in 15 minutes.</p>
-                    <p>Please use this code along with your email to reset your password.</p>
-                    <p>If you did not request this password reset, please ignore this email and your password will remain unchanged.</p>
-                    <br>
-                    <p>Best regards,<br>Medical Application Team</p>
-                </body>
-                </html>
-                """
+                html_content = get_password_reset_email(user.first_name, reset_code)
                 
                 success = send_brevo_email(
                     recipient_email=user.email,
-                    subject='Password Reset - Medical Application',
+                    subject='Password Reset - MediScan',
                     html_content=html_content
                 )
                 
@@ -621,21 +587,11 @@ class ResetPassword(Resource):
             
             # Send confirmation email
             try:
-                html_content = f"""
-                <html>
-                <body>
-                    <h2>Hello {user.first_name},</h2>
-                    <p>Your password has been successfully changed.</p>
-                    <p>If you did not make this change, please contact support immediately.</p>
-                    <br>
-                    <p>Best regards,<br>Medical Application Team</p>
-                </body>
-                </html>
-                """
+                html_content = get_password_changed_email(user.first_name)
                 
                 send_brevo_email(
                     recipient_email=user.email,
-                    subject='Password Changed - Medical Application',
+                    subject='Password Changed - MediScan',
                     html_content=html_content
                 )
             except Exception as email_error:
@@ -773,16 +729,7 @@ class TestEmail(Resource):
             print(f"Using Brevo API")
             print(f"{'='*80}\n")
             
-            html_content = f"""
-            <html>
-            <body>
-                <h2>Test Email</h2>
-                <p>{body}</p>
-                <br>
-                <p>This is a test email from Medical Application API.</p>
-            </body>
-            </html>
-            """
+            html_content = get_test_email(body)
             
             success = send_brevo_email(
                 recipient_email=to_email,
