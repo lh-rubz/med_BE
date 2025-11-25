@@ -36,6 +36,8 @@ class Report(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     report_date = db.Column(db.DateTime, nullable=False)
     report_hash = db.Column(db.String(255), nullable=False)
+    report_type = db.Column(db.String(100))
+    doctor_names = db.Column(db.Text)  # Comma-separated list of doctor names
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     fields = db.relationship('ReportField', backref='report', lazy=True, cascade='all, delete-orphan')
 

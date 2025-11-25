@@ -14,6 +14,47 @@ from config import ollama_client, Config
 # Create namespace
 vlm_ns = Namespace('vlm', description='VLM and Report operations')
 
+# Standardized Report Types
+REPORT_TYPES = [
+    "Complete Blood Count (CBC)",
+    "Lipid Panel",
+    "Comprehensive Metabolic Panel (CMP)",
+    "Basic Metabolic Panel (BMP)",
+    "Liver Function Test (LFT)",
+    "Kidney Function Test (KFT)",
+    "Thyroid Function Test (TFT)",
+    "Hemoglobin A1C (HbA1c)",
+    "Urinalysis",
+    "Vitamin D Test",
+    "Iron Studies",
+    "Coagulation Panel (PT/INR/PTT)",
+    "Cardiac Enzymes (Troponin)",
+    "Electrolyte Panel",
+    "Hormone Panel",
+    "Tumor Markers",
+    "Infectious Disease Test",
+    "Allergy Test",
+    "X-Ray",
+    "CT Scan",
+    "MRI Scan",
+    "Ultrasound",
+    "Mammogram",
+    "DEXA Scan (Bone Density)",
+    "ECG/EKG (Electrocardiogram)",
+    "Echocardiogram",
+    "Stress Test",
+    "Pulmonary Function Test (PFT)",
+    "Colonoscopy Report",
+    "Endoscopy Report",
+    "Biopsy Report",
+    "Pathology Report",
+    "Genetic Test",
+    "COVID-19 Test",
+    "Drug Screen/Toxicology",
+    "General Medical Report",
+    "Other"
+]
+
 # API Models
 report_extraction_model = vlm_ns.model('ReportExtraction', {
     'image_url': fields.String(required=True, description='URL to medical report image for extraction')
@@ -41,6 +82,8 @@ class ChatResource(Resource):
 
         patient_name = user.first_name + " " + user.last_name
         
+        report_types_list = '\n'.join([f'- "{rt}"' for rt in REPORT_TYPES])
+        
         extraction_prompt = f"""You are a medical lab report analyzer. Extract ALL medical data from this report.
 
 USER NAME VERIFICATION:
@@ -49,22 +92,33 @@ Patient name must match: {patient_name}
 - Otherwise proceed with extraction
 
 EXTRACTION RULES:
-1. Extract EVERY test result, measurement, value visible
-2. For each result provide: test name, value, unit, normal range, if normal/abnormal
-3. Extract report date if available
+1. Extract EVERY test result, measurement, value visible.
+2. Identify the REPORT TYPE from this EXACT list (choose the closest match):
+{report_types_list}
+3. Extract ALL DOCTOR NAMES visible (Referring Physician, Radiologist, Pathologist, etc.) as a comma-separated list.
+4. For each result provide: test name, value, unit, normal range, if normal/abnormal.
+5. Extract report date if available.
+
+CRITICAL - "is_normal" FIELD:
+- Set "is_normal": true ONLY if the "field_value" is STRICTLY within the "normal_range".
+- Set "is_normal": false if the value is outside the range (High/Low) or explicitly marked as abnormal.
+- If no range is provided, default to true.
 
 RESPONSE FORMAT - Return ONLY valid JSON:
 {{
     "name_match": true,
     "patient_name": "{patient_name}",
     "report_date": "YYYY-MM-DD or empty",
+    "report_type": "MUST be one of the exact values from the list above",
+    "doctor_names": "Dr. Name1, Dr. Name2 or empty string",
     "medical_data": [
         {{
             "field_name": "Test Name",
             "field_value": "123.45",
             "field_unit": "g/dL",
             "normal_range": "13.5-17.5",
-            "is_normal": true
+            "is_normal": true,
+            "field_type": "measurement"
         }}
     ]
 }}
@@ -74,7 +128,7 @@ RULES:
 - Extract ALL visible fields
 - medical_data array can be empty if none found
 - Use empty strings for missing values
-- is_normal: false if abnormal or outside range"""
+- report_type MUST match one of the provided options exactly"""
 
         try:
             session = requests.Session()
@@ -256,7 +310,9 @@ RULES:
                 new_report = Report(
                     user_id=current_user_id,
                     report_date=datetime.now(timezone.utc),
-                    report_hash=report_hash
+                    report_hash=report_hash,
+                    report_type=extracted_data.get('report_type', 'General Medical Report'),
+                    doctor_names=extracted_data.get('doctor_names', '')
                 )
                 db.session.add(new_report)
                 db.session.flush()
@@ -311,6 +367,8 @@ RULES:
                     'report_id': new_report.id,
                     'patient_name': extracted_data.get('patient_name', ''),
                     'report_date': extracted_data.get('report_date', ''),
+                    'report_type': new_report.report_type,
+                    'doctor_names': new_report.doctor_names,
                     'medical_data': medical_entries,
                     'total_fields_extracted': len(medical_entries)
                 }, 201
