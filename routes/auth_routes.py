@@ -162,7 +162,12 @@ class VerifyEmail(Resource):
         if not user.verification_code:
             return {'message': 'No verification code found. Please register again.'}, 400
         
-        if user.verification_code_expires < datetime.now(timezone.utc):
+        # Ensure verification_code_expires is timezone-aware
+        expires = user.verification_code_expires
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+            
+        if expires < datetime.now(timezone.utc):
             return {'message': 'Verification code has expired. Please request a new one.'}, 400
         
         if user.verification_code != code:
@@ -305,7 +310,12 @@ class ResetPassword(Resource):
         if not user.reset_code:
             return {'message': 'No reset code found. Please request password reset first.'}, 400
         
-        if user.reset_code_expires < datetime.now(timezone.utc):
+        # Ensure reset_code_expires is timezone-aware
+        expires = user.reset_code_expires
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+            
+        if expires < datetime.now(timezone.utc):
             return {'message': 'Reset code has expired. Please request a new one.'}, 400
         
         if user.reset_code != code:
