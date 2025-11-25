@@ -112,8 +112,10 @@ class ChatResource(Resource):
                     if parsed_results:
                         ocr_text = parsed_results[0].get('ParsedText', '')
                         print(f"✅ OCR extracted {len(ocr_text)} characters")
-                        print("\nExtracted Text Preview:")
-                        print(ocr_text[:500] + "..." if len(ocr_text) > 500 else ocr_text)
+                        print("\n📄 Full OCR Extracted Text:")
+                        print("=" * 80)
+                        print(ocr_text)
+                        print("=" * 80)
                 else:
                     print(f"⚠️  OCR processing error: {ocr_result.get('ErrorMessage')}")
             else:
