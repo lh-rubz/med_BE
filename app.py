@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from flask_restx import Api, Resource, fields
 import requests  # We'll use the 'requests' library to talk to our new model server.
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 import hashlib
 import json
@@ -112,7 +112,7 @@ class User(db.Model):
     phone_number = db.Column(db.String(20), nullable=False)
     medical_history = db.Column(db.Text)
     allergies = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     is_active = db.Column(db.Boolean, default=True)
     email_verified = db.Column(db.Boolean, default=False)
     verification_code = db.Column(db.String(6), nullable=True)
@@ -133,7 +133,7 @@ class Report(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     report_date = db.Column(db.DateTime, nullable=False)
     report_hash = db.Column(db.String(255), nullable=False)  # Hash to detect duplicates
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     fields = db.relationship('ReportField', backref='report', lazy=True, cascade='all, delete-orphan')
 
 
@@ -147,7 +147,7 @@ class ReportData(db.Model):
     normal_range = db.Column(db.String(120))
     is_normal = db.Column(db.Boolean, default=True)
     notes = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class ReportField(db.Model):
@@ -162,7 +162,7 @@ class ReportField(db.Model):
     is_normal = db.Column(db.Boolean)  # Is this value normal?
     field_type = db.Column(db.String(50))  # 'measurement', 'diagnosis', 'medication', 'note', 'other'
     notes = db.Column(db.Text)  # Any additional notes
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class AdditionalField(db.Model):
@@ -176,7 +176,7 @@ class AdditionalField(db.Model):
     is_approved = db.Column(db.Boolean, default=False)
     approved_at = db.Column(db.DateTime)
     merged_to_profile = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 api = Api(app, version="1.0", title="Medical Application API",
           description="API for Medical Application with secure user management",
@@ -319,7 +319,7 @@ class Register(Resource):
                 medical_history=data.get('medical_history', ''),
                 allergies=data.get('allergies', ''),
                 verification_code=verification_code,
-                verification_code_expires=datetime.utcnow() + timedelta(minutes=15),
+                verification_code_expires=datetime.now(timezone.utc) + timedelta(minutes=15),
                 email_verified=False
             )
             new_user.set_password(data['password'])
@@ -415,7 +415,7 @@ class VerifyEmail(Resource):
             return {'message': 'No verification code found. Please register again.'}, 400
         
         # Check if code has expired
-        if user.verification_code_expires < datetime.utcnow():
+        if user.verification_code_expires < datetime.now(timezone.utc):
             return {'message': 'Verification code has expired. Please request a new one.'}, 400
         
         # Validate code
@@ -456,7 +456,7 @@ class ResendVerification(Resource):
             # Generate new 6-digit verification code
             verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
             user.verification_code = verification_code
-            user.verification_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            user.verification_code_expires = datetime.now(timezone.utc) + timedelta(minutes=15)
             db.session.commit()
             
             # Send verification email
@@ -505,7 +505,7 @@ class ForgotPassword(Resource):
             # Generate 6-digit reset code
             reset_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
             user.reset_code = reset_code
-            user.reset_code_expires = datetime.utcnow() + timedelta(minutes=15)
+            user.reset_code_expires = datetime.now(timezone.utc) + timedelta(minutes=15)
             db.session.commit()
             
             # Print reset code to console for testing
@@ -572,7 +572,7 @@ class ResetPassword(Resource):
             return {'message': 'No reset code found. Please request password reset first.'}, 400
         
         # Check if code has expired
-        if user.reset_code_expires < datetime.utcnow():
+        if user.reset_code_expires < datetime.now(timezone.utc):
             return {'message': 'Reset code has expired. Please request a new one.'}, 400
         
         # Validate code
@@ -1029,7 +1029,7 @@ RULES:
                 
                 new_report = Report(
                     user_id=current_user_id,
-                    report_date=datetime.utcnow(),
+                    report_date=datetime.now(timezone.utc),
                     report_hash=report_hash
                 )
                 db.session.add(new_report)
