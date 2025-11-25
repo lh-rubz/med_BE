@@ -184,7 +184,7 @@ RULES:
 
             response_text = completion.choices[0].message.content.strip()
             print("\n" + "="*80)
-            print("🔍 MODEL SERVER RAW RESPONSE:")
+            print("🔍 MODEL SERVER RAW RESPONSE (FIRST PASS):")
             print("="*80)
             print(response_text)
             print("="*80 + "\n")
@@ -252,6 +252,86 @@ RULES:
                     'reported_name': extracted_data.get('patient_name'),
                     'your_name': patient_name
                 }, 400
+            
+            # SELF-VERIFICATION PASS
+            print("\n" + "="*80)
+            print("🔄 STARTING SELF-VERIFICATION PASS...")
+            print("="*80)
+            
+            verification_prompt = f"""You are reviewing a medical report extraction that you just performed.
+
+ORIGINAL EXTRACTION:
+{json.dumps(extracted_data, indent=2)}
+
+Your task is to:
+1. Review the extracted data for accuracy
+2. Check if "is_normal" flags are correct based on values vs normal ranges
+3. Verify all field values are extracted correctly
+4. Ensure report_type matches one of the standard types
+5. Correct any errors you find
+
+RETURN THE CORRECTED JSON in the EXACT same format. If everything is correct, return the same JSON.
+
+IMPORTANT:
+- Only return valid JSON
+- Keep the same structure
+- Fix any inaccuracies you notice"""
+            
+            try:
+                verification_completion = ollama_client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {
+                            'role': 'user',
+                            'content': [
+                                {'type': 'text', 'text': verification_prompt},
+                                {
+                                    'type': 'image_url',
+                                    'image_url': {
+                                        'url': f'data:image/{image_format};base64,{image_base64}'
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    temperature=0.1,
+                )
+                
+                verified_response = verification_completion.choices[0].message.content.strip()
+                print("\n" + "="*80)
+                print("✅ VERIFIED RESPONSE (SECOND PASS):")
+                print("="*80)
+                print(verified_response)
+                print("="*80 + "\n")
+                
+                # Try to parse verified response
+                try:
+                    verified_data = json.loads(verified_response)
+                    print("✅ Verification pass successful - using verified data")
+                    extracted_data = verified_data
+                except json.JSONDecodeError:
+                    # Try regex extraction
+                    import re
+                    json_match = re.search(r'\{.*\}', verified_response, re.DOTALL)
+                    if json_match:
+                        try:
+                            verified_data = json.loads(json_match.group())
+                            print("✅ Verification pass successful (after regex) - using verified data")
+                            extracted_data = verified_data
+                        except:
+                            print("⚠️  Verification pass failed to parse - using original extraction")
+                    else:
+                        print("⚠️  Verification pass failed to parse - using original extraction")
+                        
+            except Exception as verify_error:
+                print(f"⚠️  Verification pass error: {verify_error}")
+                print("Using original extraction")
+            
+            print("\n" + "="*80)
+            print("📊 FINAL EXTRACTED DATA:")
+            print("="*80)
+            print(json.dumps(extracted_data, indent=2))
+            print("="*80 + "\n")
             
             medical_data_list = extracted_data.get('medical_data', [])
             
