@@ -82,9 +82,54 @@ class ChatResource(Resource):
 
         patient_name = user.first_name + " " + user.last_name
         
+        # Step 1: Extract text using OCR.space API
+        print("\n" + "="*80)
+        print("🔍 STEP 1: OCR TEXT EXTRACTION")
+        print("="*80)
+        
+        ocr_text = ""
+        try:
+            ocr_payload = {
+                'url': image_url,
+                'apikey': 'K87899142388957',  # Free tier API key
+                'language': 'eng',
+                'isOverlayRequired': False,
+                'detectOrientation': True,
+                'scale': True,
+                'OCREngine': 2  # Engine 2 is more accurate
+            }
+            
+            ocr_response = requests.post(
+                'https://api.ocr.space/parse/image',
+                data=ocr_payload,
+                timeout=30
+            )
+            
+            if ocr_response.status_code == 200:
+                ocr_result = ocr_response.json()
+                if ocr_result.get('IsErroredOnProcessing') == False:
+                    parsed_results = ocr_result.get('ParsedResults', [])
+                    if parsed_results:
+                        ocr_text = parsed_results[0].get('ParsedText', '')
+                        print(f"✅ OCR extracted {len(ocr_text)} characters")
+                        print("\nExtracted Text Preview:")
+                        print(ocr_text[:500] + "..." if len(ocr_text) > 500 else ocr_text)
+                else:
+                    print(f"⚠️  OCR processing error: {ocr_result.get('ErrorMessage')}")
+            else:
+                print(f"⚠️  OCR API request failed: {ocr_response.status_code}")
+        except Exception as ocr_error:
+            print(f"⚠️  OCR extraction failed: {ocr_error}")
+            print("Continuing with VLM-only extraction...")
+        
+        print("="*80 + "\n")
+        
         report_types_list = '\n'.join([f'- "{rt}"' for rt in REPORT_TYPES])
         
         extraction_prompt = f"""You are a medical lab report analyzer. Extract ALL medical data from this report.
+
+OCR EXTRACTED TEXT (use this for EXACT values):
+{ocr_text if ocr_text else "[OCR not available - extract from image]"}
 
 EXTRACTION RULES:
 1. Extract EVERY test result, measurement, value visible.
@@ -109,15 +154,17 @@ CRITICAL - "is_normal" FIELD:
 - If no range is provided, default to true.
 
 CRITICAL - DECIMAL PRECISION:
-- Preserve EXACT decimal values as shown in the report
-- If a value shows "15.75", write "15.75" NOT "15.7" or "12.5"
-- Copy numbers character-by-character from the image
+- Use the OCR text above to get EXACT decimal values
+- Preserve EXACT decimal values as shown (e.g., "15.75" not "15.7" or "12.5")
+- Cross-reference OCR text with the image to ensure accuracy
+- Copy numbers character-by-character from OCR text
 
 CRITICAL - DOCTOR NAMES:
+- Use the OCR text to get exact doctor name spelling
 - Extract ONLY the REFERRING PHYSICIAN (doctor who ordered the test)
 - DO NOT extract examining doctors, lab directors, or clinic signatures
 - Only include doctors specifically tied to this patient's case
-- Double-check spelling and titles (Dr., Prof., etc.)
+- Double-check spelling and titles (Dr., Prof., etc.) against OCR text
 - If multiple referring doctors, separate with commas
 
 CRITICAL - HANDLING DIFFERENT VALUE TYPES:
