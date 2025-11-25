@@ -90,7 +90,10 @@ EXTRACTION RULES:
 1. Extract EVERY test result, measurement, value visible.
 2. Identify the REPORT TYPE from this EXACT list (choose the closest match):
 {report_types_list}
-3. Extract ALL DOCTOR NAMES visible (Referring Physician, Radiologist, Pathologist, etc.) as a comma-separated list.
+3. Extract REFERRING PHYSICIAN names ONLY (doctors who ordered/referred the test).
+   - DO NOT include template doctors, clinic signatures, or lab directors
+   - Only extract doctors specifically associated with THIS patient's case
+   - If no referring physician is mentioned, leave empty
 4. For each result provide: test name, value, unit, normal range, if normal/abnormal.
 5. Extract report date if available.
 
@@ -105,16 +108,18 @@ CRITICAL - DECIMAL PRECISION:
 - Copy numbers character-by-character from the image
 
 CRITICAL - DOCTOR NAMES:
-- Read doctor names VERY CAREFULLY from the report
+- Extract ONLY the REFERRING PHYSICIAN (doctor who ordered the test)
+- DO NOT extract template doctors, lab directors, or clinic signatures
+- Only include doctors specifically tied to this patient's case
 - Double-check spelling and titles (Dr., Prof., etc.)
-- If multiple doctors, separate with commas
+- If multiple referring doctors, separate with commas
 
 RESPONSE FORMAT - Return ONLY valid JSON:
 {{
     "patient_name": "Patient name from report",
     "report_date": "YYYY-MM-DD or empty",
     "report_type": "MUST be one of the exact values from the list above",
-    "doctor_names": "Dr. Name1, Dr. Name2 or empty string",
+    "doctor_names": "Referring physician name(s) only, or empty string",
     "medical_data": [
         {{
             "field_name": "Test Name",
