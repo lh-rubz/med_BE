@@ -43,6 +43,50 @@ api.add_namespace(vlm_ns, path='/vlm')
 api.add_namespace(reports_ns, path='/reports')
 
 
+
+def print_env_vars():
+    """Print relevant environment variables for debugging"""
+    import os
+    print("\n🔍 Environment Variables Configuration:")
+    
+    # Database
+    db_url = os.getenv('DATABASE_URL', 'Not Set')
+    if 'postgresql://' in db_url:
+        # Mask password
+        try:
+            parts = db_url.split('@')
+            if len(parts) > 1:
+                credentials = parts[0].split(':')
+                if len(credentials) > 2:
+                    # Mask password part
+                    masked_creds = f"{credentials[0]}:{credentials[1]}:****"
+                    db_url = f"{masked_creds}@{parts[1]}"
+        except:
+            pass
+    print(f"   - DATABASE_URL: {db_url}")
+    
+    # Mail
+    print(f"   - MAIL_SERVER: {os.getenv('MAIL_SERVER', 'Not Set')}")
+    print(f"   - MAIL_PORT: {os.getenv('MAIL_PORT', 'Not Set')}")
+    print(f"   - MAIL_USE_TLS: {os.getenv('MAIL_USE_TLS', 'Not Set')}")
+    print(f"   - MAIL_USE_SSL: {os.getenv('MAIL_USE_SSL', 'Not Set')}")
+    
+    # Brevo
+    api_key = os.getenv('BREVO_API_KEY', 'Not Set')
+    if len(api_key) > 10:
+        api_key = f"{api_key[:5]}...{api_key[-5:]}"
+    print(f"   - BREVO_API_KEY: {api_key}")
+    
+    # Ollama
+    print(f"   - OLLAMA_BASE_URL: {os.getenv('OLLAMA_BASE_URL', 'Not Set')}")
+    
+    # Proxy
+    print(f"   - http_proxy: {os.getenv('http_proxy', 'Not Set')}")
+    print(f"   - https_proxy: {os.getenv('https_proxy', 'Not Set')}")
+    print(f"   - no_proxy: {os.getenv('no_proxy', 'Not Set')}")
+    print("-" * 50 + "\n")
+
+
 def init_db():
     """Initialize the database"""
     with app.app_context():
@@ -55,6 +99,9 @@ def init_db():
 
 
 if __name__ == '__main__':
+    # Print environment variables
+    print_env_vars()
+
     # Initialize the database
     init_db()
     
