@@ -99,6 +99,16 @@ CRITICAL - "is_normal" FIELD:
 - Set "is_normal": false if the value is outside the range (High/Low) or explicitly marked as abnormal.
 - If no range is provided, default to true.
 
+CRITICAL - DECIMAL PRECISION:
+- Preserve EXACT decimal values as shown in the report
+- If a value shows "15.75", write "15.75" NOT "15.7" or "12.5"
+- Copy numbers character-by-character from the image
+
+CRITICAL - DOCTOR NAMES:
+- Read doctor names VERY CAREFULLY from the report
+- Double-check spelling and titles (Dr., Prof., etc.)
+- If multiple doctors, separate with commas
+
 RESPONSE FORMAT - Return ONLY valid JSON:
 {{
     "patient_name": "Patient name from report",
@@ -241,16 +251,18 @@ ORIGINAL EXTRACTION:
 Your task is to:
 1. Review the extracted data for accuracy
 2. Check if "is_normal" flags are correct based on values vs normal ranges
-3. Verify all field values are extracted correctly
-4. Ensure report_type matches one of the standard types
-5. Correct any errors you find
+3. CRITICAL: Verify all field_value numbers have EXACT decimal precision from the image (e.g., 15.75 not 12.5)
+4. CRITICAL: Verify doctor_names are spelled correctly and match the image exactly
+5. Ensure report_type matches one of the standard types
+6. Correct any errors you find
 
 RETURN THE CORRECTED JSON in the EXACT same format. If everything is correct, return the same JSON.
 
 IMPORTANT:
 - Only return valid JSON
 - Keep the same structure
-- Fix any inaccuracies you notice"""
+- Fix any inaccuracies you notice
+- Pay special attention to decimal values and doctor names"""
             
             try:
                 verification_completion = ollama_client.chat.completions.create(
