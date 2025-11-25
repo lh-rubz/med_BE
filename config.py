@@ -18,7 +18,10 @@ load_dotenv()
 no_proxy = os.environ.get('NO_PROXY', '')
 no_proxy_list = [item.strip() for item in no_proxy.split(',') if item.strip()]
 no_proxy_list.extend(['localhost', '127.0.0.1', '0.0.0.0', '::1', 'localhost:11434', '127.0.0.1:11434'])
+no_proxy_list.extend(['localhost', '127.0.0.1', '0.0.0.0', '::1', 'localhost:11434', '127.0.0.1:11434'])
+# Set both uppercase and lowercase to ensure compatibility
 os.environ['NO_PROXY'] = ','.join(set(no_proxy_list))
+os.environ['no_proxy'] = os.environ['NO_PROXY']
 
 # Temporarily unset proxy env vars before creating httpx client
 _original_proxy_vars = {}
@@ -79,8 +82,25 @@ def send_brevo_email(recipient_email, subject, html_content):
     
     configuration = sib_api_v3_sdk.Configuration()
     configuration.api_key['api-key'] = Config.BREVO_API_KEY
-
-    api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+    
+    # Explicitly set proxy if available
+    http_proxy = os.environ.get('http_proxy') or os.environ.get('HTTP_PROXY')
+    https_proxy = os.environ.get('https_proxy') or os.environ.get('HTTPS_PROXY')
+    
+    if https_proxy:
+        configuration.proxy = https_proxy
+        print(f"   Using HTTPS Proxy: {https_proxy}")
+    elif http_proxy:
+        configuration.proxy = http_proxy
+        print(f"   Using HTTP Proxy: {http_proxy}")
+    
+    # Set timeout (in milliseconds)
+    # Note: sib-api-v3-sdk might not expose direct timeout in Configuration, 
+    # but we can try to set it on the ApiClient if supported, or rely on socket defaults.
+    # However, to be safe, we'll just log clearly before the call.
+    
+    api_client = sib_api_v3_sdk.ApiClient(configuration)
+    api_instance = sib_api_v3_sdk.TransactionalEmailsApi(api_client)
 
     send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
         sender={"name": Config.SENDER_NAME, "email": Config.SENDER_EMAIL},
@@ -90,6 +110,7 @@ def send_brevo_email(recipient_email, subject, html_content):
     )
 
     try:
+        print("⏳ Sending request to Brevo API...")
         api_response = api_instance.send_transac_email(send_smtp_email)
         print(f"✅ Brevo API Response: {api_response}")
         print(f"✅ Message ID: {api_response.message_id if hasattr(api_response, 'message_id') else 'N/A'}")
