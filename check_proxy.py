@@ -2,8 +2,16 @@ import requests
 import os
 import sys
 
-PROXY_URL = "http://213.244.124.19:3128"
-TARGET_URL = "https://api.brevo.com/v3/smtp/email"
+# Read from environment variables (User's preferred method)
+http_proxy = os.environ.get('http_proxy') or os.environ.get('HTTP_PROXY')
+https_proxy = os.environ.get('https_proxy') or os.environ.get('HTTPS_PROXY')
+PROXY_URL = https_proxy or http_proxy
+
+if not PROXY_URL:
+    print("⚠️  No proxy found in environment variables (http_proxy/https_proxy).")
+    print("   Please run 'export http_proxy=...' first.")
+    # Fallback for testing if user forgets
+    # PROXY_URL = "http://213.244.124.19:3128" 
 
 print(f"🔍 Testing connectivity to {TARGET_URL}")
 print(f"ℹ️  Using Proxy: {PROXY_URL}")
