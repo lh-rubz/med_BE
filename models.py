@@ -1,0 +1,82 @@
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime, timezone
+import bcrypt
+
+db = SQLAlchemy()
+
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=False)
+    first_name = db.Column(db.String(50), nullable=False)
+    last_name = db.Column(db.String(50), nullable=False)
+    date_of_birth = db.Column(db.Date, nullable=False)
+    phone_number = db.Column(db.String(20), nullable=False)
+    medical_history = db.Column(db.Text)
+    allergies = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    is_active = db.Column(db.Boolean, default=True)
+    email_verified = db.Column(db.Boolean, default=False)
+    verification_code = db.Column(db.String(6), nullable=True)
+    verification_code_expires = db.Column(db.DateTime, nullable=True)
+    reset_code = db.Column(db.String(6), nullable=True)
+    reset_code_expires = db.Column(db.DateTime, nullable=True)
+    reports = db.relationship('Report', backref='user', lazy=True, cascade='all, delete-orphan')
+    
+    def set_password(self, password):
+        self.password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    
+    def check_password(self, password):
+        return bcrypt.checkpw(password.encode('utf-8'), self.password.encode('utf-8'))
+
+
+class Report(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    report_date = db.Column(db.DateTime, nullable=False)
+    report_hash = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    fields = db.relationship('ReportField', backref='report', lazy=True, cascade='all, delete-orphan')
+
+
+class ReportData(db.Model):
+    """Deprecated - use ReportField instead"""
+    id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=False)
+    field_name = db.Column(db.String(120), nullable=False)
+    field_value = db.Column(db.String(120), nullable=False)
+    field_unit = db.Column(db.String(50))
+    normal_range = db.Column(db.String(120))
+    is_normal = db.Column(db.Boolean, default=True)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ReportField(db.Model):
+    """Generic field storage for any medical data extracted from reports"""
+    id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    field_name = db.Column(db.String(255), nullable=False)
+    field_value = db.Column(db.Text, nullable=False)
+    field_unit = db.Column(db.String(100))
+    normal_range = db.Column(db.String(255))
+    is_normal = db.Column(db.Boolean)
+    field_type = db.Column(db.String(50))
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class AdditionalField(db.Model):
+    """Track new fields that should be added to user profile"""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=False)
+    field_name = db.Column(db.String(120), nullable=False)
+    field_value = db.Column(db.Text, nullable=False)
+    category = db.Column(db.String(50), nullable=False)
+    is_approved = db.Column(db.Boolean, default=False)
+    approved_at = db.Column(db.DateTime)
+    merged_to_profile = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
