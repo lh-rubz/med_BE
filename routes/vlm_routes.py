@@ -95,6 +95,12 @@ EXTRACTION RULES:
    - Only extract doctors specifically associated with THIS patient's case
    - If no referring physician is mentioned, leave empty
 4. For each result provide: test name, value, unit, normal range, if normal/abnormal.
+   - Extract BOTH numeric values (e.g., "13.5 g/dL") AND qualitative results (e.g., "Normal", "NAD", "Negative")
+   - "NAD" means "No Abnormality Detected" - treat as normal result
+   - Include visual acuity, system examinations, mental status, and all other assessments
+   - For qualitative results, put the assessment in field_value (e.g., "Normal", "NAD", "Absent")
+   - SKIP category headers (e.g., "DIFFERENTIAL LEUCOCYTE COUNT", "HAEMATOLOGY") - only extract tests with actual values
+   - Extract individual sub-tests (e.g., Neutrophils, Lymphocytes) not their parent category
 5. Extract report date if available.
 
 CRITICAL - "is_normal" FIELD:
@@ -109,10 +115,16 @@ CRITICAL - DECIMAL PRECISION:
 
 CRITICAL - DOCTOR NAMES:
 - Extract ONLY the REFERRING PHYSICIAN (doctor who ordered the test)
-- DO NOT extract template doctors, lab directors, or clinic signatures
+- DO NOT extract examining doctors, lab directors, or clinic signatures
 - Only include doctors specifically tied to this patient's case
 - Double-check spelling and titles (Dr., Prof., etc.)
 - If multiple referring doctors, separate with commas
+
+CRITICAL - HANDLING DIFFERENT VALUE TYPES:
+- Numeric values: Extract with full precision (e.g., "15.75")
+- Qualitative values: Extract exactly as shown (e.g., "Normal", "NAD", "Negative", "Absent")
+- "NAD" = "No Abnormality Detected" = Normal result (set is_normal: true)
+- For "NAD" results, put "NAD" in field_value and leave normal_range empty
 
 RESPONSE FORMAT - Return ONLY valid JSON:
 {{
@@ -123,9 +135,9 @@ RESPONSE FORMAT - Return ONLY valid JSON:
     "medical_data": [
         {{
             "field_name": "Test Name",
-            "field_value": "123.45",
-            "field_unit": "g/dL",
-            "normal_range": "13.5-17.5",
+            "field_value": "123.45 OR 'Normal' OR 'NAD' OR 'Negative'",
+            "field_unit": "g/dL or empty for qualitative results",
+            "normal_range": "13.5-17.5 or empty",
             "is_normal": true,
             "field_type": "measurement"
         }}
