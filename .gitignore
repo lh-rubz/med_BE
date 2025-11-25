@@ -6,3 +6,4 @@ env/
 instance/
 .DS_Store
 *.db
+app_backup.py
