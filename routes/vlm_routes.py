@@ -148,7 +148,11 @@ EXTRACTION RULES:
    - For qualitative results, put the assessment in field_value (e.g., "Normal", "NAD", "Absent")
    - SKIP category headers (e.g., "DIFFERENTIAL LEUCOCYTE COUNT", "HAEMATOLOGY") - only extract tests with actual values
    - Extract individual sub-tests (e.g., Neutrophils, Lymphocytes) not their parent category
-5. Extract report date if available.
+5. Extract the REPORT DATE - this is the date the report was generated/issued.
+   - Look for labels like "Report Date", "Reported on", "Date", "Issue Date"
+   - DO NOT confuse with collection date, registration date, or patient birth date
+   - Format as YYYY-MM-DD
+6. Count ALL test fields in the OCR text and ensure you extract every single one.
 
 CRITICAL - "is_normal" FIELD:
 - Set "is_normal": true ONLY if the "field_value" is STRICTLY within the "normal_range".
@@ -178,9 +182,10 @@ CRITICAL - HANDLING DIFFERENT VALUE TYPES:
 RESPONSE FORMAT - Return ONLY valid JSON:
 {{
     "patient_name": "Patient name from report",
-    "report_date": "YYYY-MM-DD or empty",
+    "report_date": "YYYY-MM-DD (the date report was issued, NOT collection/birth date)",
     "report_type": "MUST be one of the exact values from the list above",
     "doctor_names": "Referring physician name(s) only, or empty string",
+    "total_fields_in_report": <count of all test fields you see>,
     "medical_data": [
         {{
             "field_name": "Test Name",
@@ -384,6 +389,25 @@ IMPORTANT:
             print("📊 FINAL EXTRACTED DATA:")
             print("="*80)
             print(json.dumps(extracted_data, indent=2))
+            print("="*80 + "\n")
+            
+            # Verify field count
+            medical_data_list = extracted_data.get('medical_data', [])
+            total_fields_claimed = extracted_data.get('total_fields_in_report', 0)
+            actual_extracted = len(medical_data_list)
+            
+            print("\n" + "="*80)
+            print("🔍 FIELD COUNT VERIFICATION:")
+            print("="*80)
+            print(f"Total fields in report (VLM count): {total_fields_claimed}")
+            print(f"Fields actually extracted: {actual_extracted}")
+            
+            if total_fields_claimed > 0 and actual_extracted < total_fields_claimed:
+                missing_count = total_fields_claimed - actual_extracted
+                print(f"⚠️  WARNING: {missing_count} field(s) may be missing!")
+                print("   The VLM will re-verify in the second pass.")
+            elif actual_extracted >= total_fields_claimed:
+                print("✅ All fields appear to be extracted")
             print("="*80 + "\n")
             
             medical_data_list = extracted_data.get('medical_data', [])
