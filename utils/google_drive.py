@@ -92,7 +92,9 @@ def upload_file_to_drive(file_data, filename, mimetype='image/jpeg'):
                     proxy_host=proxy_host,
                     proxy_port=int(proxy_port)
                 )
-            service = build('drive', 'v3', credentials=creds, http=http)
+            # Authorize the http object with credentials
+            http = creds.authorize(http)
+            service = build('drive', 'v3', http=http)
         else:
             service = build('drive', 'v3', credentials=creds)
 
@@ -175,7 +177,9 @@ def delete_file_from_drive(file_id):
                     proxy_host=proxy_host,
                     proxy_port=int(proxy_port)
                 )
-            service = build('drive', 'v3', credentials=creds, http=http)
+            # Authorize the http object with credentials
+            http = creds.authorize(http)
+            service = build('drive', 'v3', http=http)
         else:
             service = build('drive', 'v3', credentials=creds)
             
