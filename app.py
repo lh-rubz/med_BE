@@ -5,7 +5,7 @@ from flask_mail import Mail
 
 from config import Config
 from models import db
-from routes import auth_ns, user_ns, vlm_ns, reports_ns
+from routes import auth_ns, user_ns, vlm_ns, reports_ns, upload_ns
 
 # Create Flask app
 app = Flask(__name__)
@@ -41,6 +41,7 @@ api.add_namespace(auth_ns, path='/auth')
 api.add_namespace(user_ns, path='/users')
 api.add_namespace(vlm_ns, path='/vlm')
 api.add_namespace(reports_ns, path='/reports')
+api.add_namespace(upload_ns, path='/upload')
 
 
 

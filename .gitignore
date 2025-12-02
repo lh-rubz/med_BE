@@ -7,3 +7,4 @@ instance/
 .DS_Store
 *.db
 app_backup.py
+service_account.json
