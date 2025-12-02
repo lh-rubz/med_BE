@@ -52,6 +52,11 @@ reset_password_model = auth_ns.model('ResetPassword', {
     'new_password': fields.String(required=True, description='New password')
 })
 
+verify_reset_code_model = auth_ns.model('VerifyResetCode', {
+    'email': fields.String(required=True, description='User email address'),
+    'code': fields.String(required=True, description='6-digit reset code from email')
+})
+
 
 @auth_ns.route('/register')
 class Register(Resource):
@@ -284,6 +289,43 @@ class ForgotPassword(Resource):
             return {
                 'message': 'If an account exists with this email, a password reset link has been sent.'
             }, 200
+
+
+@auth_ns.route('/verify-reset-code')
+class VerifyResetCode(Resource):
+    @auth_ns.expect(verify_reset_code_model)
+    def post(self):
+        """Verify password reset code"""
+        data = request.json
+        email = data.get('email')
+        code = data.get('code')
+        
+        if not email or not code:
+            return {'message': 'Email and code are required'}, 400
+        
+        if not code.isdigit() or len(code) != 6:
+            return {'message': 'Invalid code format. Code must be 6 digits.'}, 400
+        
+        user = User.query.filter_by(email=email).first()
+        
+        if not user:
+            return {'message': 'Invalid email or code'}, 400
+        
+        if not user.reset_code:
+            return {'message': 'No reset code found. Please request password reset first.'}, 400
+        
+        # Ensure reset_code_expires is timezone-aware
+        expires = user.reset_code_expires
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+            
+        if expires < datetime.now(timezone.utc):
+            return {'message': 'Reset code has expired. Please request a new one.'}, 400
+        
+        if user.reset_code != code:
+            return {'message': 'Invalid reset code'}, 400
+        
+        return {'message': 'Reset code verified successfully. You can now set a new password.', 'code_valid': True}, 200
 
 
 @auth_ns.route('/reset-password')
