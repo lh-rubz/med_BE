@@ -7,41 +7,16 @@ Handles file uploads to Google Drive using service account authentication.
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from google.oauth2 import service_account
-from google.auth.transport.requests import AuthorizedSession
+import google_auth_httplib2
+import httplib2
 import io
 import os
-import requests
 
 
 # Configuration
 SCOPES = ['https://www.googleapis.com/auth/drive']
 SERVICE_ACCOUNT_FILE = 'service_account.json'
 PARENT_FOLDER_ID = "1AWU7gaaZ4W8XUl08Slml0FHVZhpPEHSY"  # Hardcoded folder ID
-
-
-def get_authorized_session(credentials):
-    """Create an authorized session with proxy support"""
-    # Get proxy settings from environment
-    proxies = {}
-    http_proxy = os.environ.get('http_proxy') or os.environ.get('HTTP_PROXY')
-    https_proxy = os.environ.get('https_proxy') or os.environ.get('HTTPS_PROXY')
-    
-    if http_proxy:
-        proxies['http'] = http_proxy
-    if https_proxy:
-        proxies['https'] = https_proxy
-    
-    # Create session with proxy
-    session = requests.Session()
-    if proxies:
-        session.proxies.update(proxies)
-    
-    # Create authorized session
-    authed_session = AuthorizedSession(credentials)
-    if proxies:
-        authed_session.proxies.update(proxies)
-    
-    return authed_session
 
 
 def authenticate():
@@ -78,7 +53,6 @@ def upload_file_to_drive(file_data, filename, mimetype='image/jpeg'):
         
         # Use custom HTTP with proxy if available
         if http_proxy or https_proxy:
-            import httplib2
             http = httplib2.Http(timeout=60)
             # Set proxy manually on http object
             if https_proxy:
@@ -92,8 +66,8 @@ def upload_file_to_drive(file_data, filename, mimetype='image/jpeg'):
                     proxy_host=proxy_host,
                     proxy_port=int(proxy_port)
                 )
-            # Authorize the http object with credentials
-            http = creds.authorize(http)
+            # Use google_auth_httplib2 to authorize
+            http = google_auth_httplib2.AuthorizedHttp(creds, http=http)
             service = build('drive', 'v3', http=http)
         else:
             service = build('drive', 'v3', credentials=creds)
@@ -164,7 +138,6 @@ def delete_file_from_drive(file_id):
         https_proxy = os.environ.get('https_proxy') or os.environ.get('HTTPS_PROXY')
         
         if http_proxy or https_proxy:
-            import httplib2
             http = httplib2.Http(timeout=60)
             if https_proxy:
                 proxy_url = https_proxy.replace('http://', '').replace('https://', '')
@@ -177,8 +150,8 @@ def delete_file_from_drive(file_id):
                     proxy_host=proxy_host,
                     proxy_port=int(proxy_port)
                 )
-            # Authorize the http object with credentials
-            http = creds.authorize(http)
+            # Use google_auth_httplib2 to authorize
+            http = google_auth_httplib2.AuthorizedHttp(creds, http=http)
             service = build('drive', 'v3', http=http)
         else:
             service = build('drive', 'v3', credentials=creds)
