@@ -8,12 +8,33 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from google.oauth2 import service_account
 import io
+import os
+import httplib2
 
 
 # Configuration
 SCOPES = ['https://www.googleapis.com/auth/drive']
 SERVICE_ACCOUNT_FILE = 'service_account.json'
 PARENT_FOLDER_ID = "1AWU7gaaZ4W8XUl08Slml0FHVZhpPEHSY"  # Hardcoded folder ID
+
+
+def get_http_with_proxy():
+    """Create HTTP object with proxy support"""
+    http = httplib2.Http(timeout=60)
+    
+    # Get proxy settings from environment
+    http_proxy = os.environ.get('http_proxy') or os.environ.get('HTTP_PROXY')
+    https_proxy = os.environ.get('https_proxy') or os.environ.get('HTTPS_PROXY')
+    
+    if https_proxy or http_proxy:
+        proxy_info = httplib2.ProxyInfo(
+            httplib2.socks.PROXY_TYPE_HTTP,
+            proxy_host=(https_proxy or http_proxy).replace('http://', '').replace('https://', '').split(':')[0],
+            proxy_port=int((https_proxy or http_proxy).split(':')[-1]) if ':' in (https_proxy or http_proxy) else 8080
+        )
+        http = httplib2.Http(proxy_info=proxy_info, timeout=60)
+    
+    return http
 
 
 def authenticate():
@@ -43,7 +64,8 @@ def upload_file_to_drive(file_data, filename, mimetype='image/jpeg'):
     """
     try:
         creds = authenticate()
-        service = build('drive', 'v3', credentials=creds)
+        http = get_http_with_proxy()
+        service = build('drive', 'v3', credentials=creds, http=http)
 
         file_metadata = {
             'name': filename,
@@ -105,7 +127,8 @@ def delete_file_from_drive(file_id):
     """
     try:
         creds = authenticate()
-        service = build('drive', 'v3', credentials=creds)
+        http = get_http_with_proxy()
+        service = build('drive', 'v3', credentials=creds, http=http)
         service.files().delete(fileId=file_id).execute()
         return True
     except Exception as e:
