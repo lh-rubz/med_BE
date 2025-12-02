@@ -7,9 +7,10 @@ Handles file uploads to Google Drive using service account authentication.
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from google.oauth2 import service_account
+from google.auth.transport.requests import AuthorizedSession
 import io
 import os
-import httplib2
+import requests
 
 
 # Configuration
@@ -18,23 +19,29 @@ SERVICE_ACCOUNT_FILE = 'service_account.json'
 PARENT_FOLDER_ID = "1AWU7gaaZ4W8XUl08Slml0FHVZhpPEHSY"  # Hardcoded folder ID
 
 
-def get_http_with_proxy():
-    """Create HTTP object with proxy support"""
-    http = httplib2.Http(timeout=60)
-    
+def get_authorized_session(credentials):
+    """Create an authorized session with proxy support"""
     # Get proxy settings from environment
+    proxies = {}
     http_proxy = os.environ.get('http_proxy') or os.environ.get('HTTP_PROXY')
     https_proxy = os.environ.get('https_proxy') or os.environ.get('HTTPS_PROXY')
     
-    if https_proxy or http_proxy:
-        proxy_info = httplib2.ProxyInfo(
-            httplib2.socks.PROXY_TYPE_HTTP,
-            proxy_host=(https_proxy or http_proxy).replace('http://', '').replace('https://', '').split(':')[0],
-            proxy_port=int((https_proxy or http_proxy).split(':')[-1]) if ':' in (https_proxy or http_proxy) else 8080
-        )
-        http = httplib2.Http(proxy_info=proxy_info, timeout=60)
+    if http_proxy:
+        proxies['http'] = http_proxy
+    if https_proxy:
+        proxies['https'] = https_proxy
     
-    return http
+    # Create session with proxy
+    session = requests.Session()
+    if proxies:
+        session.proxies.update(proxies)
+    
+    # Create authorized session
+    authed_session = AuthorizedSession(credentials)
+    if proxies:
+        authed_session.proxies.update(proxies)
+    
+    return authed_session
 
 
 def authenticate():
@@ -64,8 +71,30 @@ def upload_file_to_drive(file_data, filename, mimetype='image/jpeg'):
     """
     try:
         creds = authenticate()
-        http = get_http_with_proxy()
-        service = build('drive', 'v3', credentials=creds, http=http)
+        
+        # Build service with proxy support
+        http_proxy = os.environ.get('http_proxy') or os.environ.get('HTTP_PROXY')
+        https_proxy = os.environ.get('https_proxy') or os.environ.get('HTTPS_PROXY')
+        
+        # Use custom HTTP with proxy if available
+        if http_proxy or https_proxy:
+            import httplib2
+            http = httplib2.Http(timeout=60)
+            # Set proxy manually on http object
+            if https_proxy:
+                proxy_url = https_proxy.replace('http://', '').replace('https://', '')
+                if ':' in proxy_url:
+                    proxy_host, proxy_port = proxy_url.rsplit(':', 1)
+                else:
+                    proxy_host, proxy_port = proxy_url, '8080'
+                http.proxy_info = httplib2.ProxyInfo(
+                    proxy_type=3,  # PROXY_TYPE_HTTP
+                    proxy_host=proxy_host,
+                    proxy_port=int(proxy_port)
+                )
+            service = build('drive', 'v3', credentials=creds, http=http)
+        else:
+            service = build('drive', 'v3', credentials=creds)
 
         file_metadata = {
             'name': filename,
@@ -127,8 +156,29 @@ def delete_file_from_drive(file_id):
     """
     try:
         creds = authenticate()
-        http = get_http_with_proxy()
-        service = build('drive', 'v3', credentials=creds, http=http)
+        
+        # Build service with proxy support
+        http_proxy = os.environ.get('http_proxy') or os.environ.get('HTTP_PROXY')
+        https_proxy = os.environ.get('https_proxy') or os.environ.get('HTTPS_PROXY')
+        
+        if http_proxy or https_proxy:
+            import httplib2
+            http = httplib2.Http(timeout=60)
+            if https_proxy:
+                proxy_url = https_proxy.replace('http://', '').replace('https://', '')
+                if ':' in proxy_url:
+                    proxy_host, proxy_port = proxy_url.rsplit(':', 1)
+                else:
+                    proxy_host, proxy_port = proxy_url, '8080'
+                http.proxy_info = httplib2.ProxyInfo(
+                    proxy_type=3,  # PROXY_TYPE_HTTP
+                    proxy_host=proxy_host,
+                    proxy_port=int(proxy_port)
+                )
+            service = build('drive', 'v3', credentials=creds, http=http)
+        else:
+            service = build('drive', 'v3', credentials=creds)
+            
         service.files().delete(fileId=file_id).execute()
         return True
     except Exception as e:
