@@ -25,9 +25,11 @@ class User(db.Model):
     reports = db.relationship('Report', backref='user', lazy=True, cascade='all, delete-orphan')
     
     def set_password(self, password):
+        """Set new password"""
         self.password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     
     def check_password(self, password):
+        """Check if provided password matches current password"""
         return bcrypt.checkpw(password.encode('utf-8'), self.password.encode('utf-8'))
 
 

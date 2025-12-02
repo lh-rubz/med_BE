@@ -12,6 +12,7 @@ from email_templates import (
     get_password_reset_email,
     get_password_changed_email
 )
+from utils.password_validator import validate_password_strength
 
 # Create namespace
 auth_ns = Namespace('auth', description='Authentication operations')
@@ -67,6 +68,11 @@ class Register(Resource):
 
         if User.query.filter_by(email=data['email']).first():
             return {'message': 'Email already registered'}, 409
+
+        # Validate password strength
+        is_valid, error_message = validate_password_strength(data['password'])
+        if not is_valid:
+            return {'message': error_message}, 400
 
         try:
             verification_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
@@ -344,6 +350,11 @@ class ResetPassword(Resource):
         if not code.isdigit() or len(code) != 6:
             return {'message': 'Invalid code format. Code must be 6 digits.'}, 400
         
+        # Validate password strength
+        is_valid, error_message = validate_password_strength(new_password)
+        if not is_valid:
+            return {'message': error_message}, 400
+        
         user = User.query.filter_by(email=email).first()
         
         if not user:
@@ -362,6 +373,10 @@ class ResetPassword(Resource):
         
         if user.reset_code != code:
             return {'message': 'Invalid reset code'}, 400
+        
+        # Check if new password is the same as the current password
+        if user.check_password(new_password):
+            return {'message': 'New password cannot be the same as your current password. Please choose a different password.'}, 400
         
         try:
             user.set_password(new_password)
