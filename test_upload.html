@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Medical Report Upload Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin: 20px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+            white-space: pre-wrap;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .error {
+            color: red;
+        }
+        .success {
+            color: green;
+        }
+    </style>
+</head>
+<body>
+    <h1>🏥 Medical Report Upload Test</h1>
+    
+    <div class="form-group">
+        <label for="apiUrl">API URL:</label>
+        <input type="text" id="apiUrl" value="http://176.119.254.185:8051/vlm/chat">
+    </div>
+    
+    <div class="form-group">
+        <label for="token">JWT Token (paste your Bearer token):</label>
+        <input type="text" id="token" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+    </div>
+    
+    <div class="form-group">
+        <label for="files">Select Image or PDF File(s):</label>
+        <input type="file" id="files" multiple accept="image/*,.pdf">
+        <small>You can select multiple files - they will be combined into one report</small>
+    </div>
+    
+    <button onclick="uploadFiles()">Upload and Process</button>
+    
+    <div id="result"></div>
+    
+    <script>
+        async function uploadFiles() {
+            const resultDiv = document.getElementById('result');
+            const apiUrl = document.getElementById('apiUrl').value;
+            const token = document.getElementById('token').value;
+            const filesInput = document.getElementById('files');
+            
+            // Validation
+            if (!token) {
+                resultDiv.innerHTML = '<span class="error">❌ Please enter JWT token</span>';
+                return;
+            }
+            
+            if (!filesInput.files || filesInput.files.length === 0) {
+                resultDiv.innerHTML = '<span class="error">❌ Please select at least one file</span>';
+                return;
+            }
+            
+            // Build FormData
+            const formData = new FormData();
+            for (let i = 0; i < filesInput.files.length; i++) {
+                formData.append('file', filesInput.files[i]);
+            }
+            
+            resultDiv.innerHTML = '⏳ Uploading and processing...';
+            
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Accept': 'application/json'
+                    },
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.innerHTML = `<span class="success">✅ Success!</span>\n\n${JSON.stringify(data, null, 2)}`;
+                } else {
+                    resultDiv.innerHTML = `<span class="error">❌ Error ${response.status}</span>\n\n${JSON.stringify(data, null, 2)}`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">❌ Network Error</span>\n\n${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>
