@@ -61,13 +61,14 @@ REPORT_TYPES = [
 ]
 
 # API Models for file upload
+# Note: Using a simple file argument without 'append' for better Swagger compatibility
+# Multiple files can still be uploaded by selecting multiple files in the file picker
 upload_parser = vlm_ns.parser()
 upload_parser.add_argument('file', 
                           location='files',
                           type=FileStorage, 
                           required=True,
-                          action='append',
-                          help='Upload one or more medical report images or PDF files. Multiple files will be combined into a single report.')
+                          help='Upload medical report image or PDF file. You can select multiple files at once.')
 
 
 def allowed_file(filename):
@@ -160,9 +161,26 @@ class ChatResource(Resource):
         if not user:
             return {'message': 'User not found'}, 404
         
+        # Debug: Print request info
+        print(f"\n{'='*80}")
+        print(f"📥 INCOMING REQUEST DEBUG")
+        print(f"{'='*80}")
+        print(f"Content-Type: {request.content_type}")
+        print(f"request.files keys: {list(request.files.keys())}")
+        print(f"request.form keys: {list(request.form.keys())}")
+        print(f"request.data: {request.data[:200] if request.data else 'None'}")
+        print(f"{'='*80}\n")
+        
         # Check if file is in request
         if 'file' not in request.files:
-            return {'error': 'No file part in the request. Please upload a file using form-data with key "file"'}, 400
+            return {
+                'error': 'No file part in the request. Please upload a file using form-data with key "file"',
+                'debug': {
+                    'content_type': request.content_type,
+                    'files_keys': list(request.files.keys()),
+                    'form_keys': list(request.form.keys())
+                }
+            }, 400
         
         files = request.files.getlist('file')
         
