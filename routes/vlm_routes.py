@@ -207,174 +207,177 @@ class ChatResource(Resource):
             return {'error': f'VLM processing error: {str(e)}'}, 500
     
     def _process_multiple_images(self, images_list, current_user_id, user, original_filenames):
-        """Process multiple images as one report and extract all data"""
+        """Process each image separately, then combine all extracted data"""
         patient_name = user.first_name + " " + user.last_name
         
         report_types_list = '\n'.join([f'- "{rt}"' for rt in REPORT_TYPES])
         
-        # Build detailed extraction prompt
-        prompt_text = f"""You are a medical lab report analyzer. Extract ALL medical data from these {len(images_list)} image(s)/page(s) that together form ONE complete medical report.
-
-IMPORTANT: All {len(images_list)} images are part of the SAME report. Extract data from ALL images and combine them into ONE complete dataset.
+        print(f"\n🔄 Processing {len(images_list)} image(s) individually...")
+        
+        all_extracted_data = []
+        patient_info = {}
+        
+        # Process each image separately
+        for idx, image_info in enumerate(images_list, 1):
+            print(f"\n{'='*80}")
+            print(f"📄 Processing Image {idx}/{len(images_list)}: {image_info['source_filename']}")
+            print(f"{'='*80}\n")
+            
+            # Build extraction prompt for single image
+            prompt_text = f"""You are a medical lab report analyzer. Extract ALL medical data from this image which is part {idx} of {len(images_list)} of a complete medical report.
 
 EXTRACTION RULES:
-1. Extract EVERY test result, measurement, value visible in ALL the images.
+1. Extract EVERY test result, measurement, value visible in this image.
 2. Identify the REPORT TYPE from this EXACT list (choose the closest match):
 {report_types_list}
 3. Extract REFERRING PHYSICIAN names ONLY (doctors who ordered/referred the test).
    - DO NOT include template doctors, clinic signatures, or lab directors
    - Only extract doctors specifically associated with THIS patient's case
-   - If no referring physician is mentioned, leave empty
 4. For each result provide: test name, value, unit, normal range, if normal/abnormal.
    - Extract BOTH numeric values (e.g., "13.5 g/dL") AND qualitative results (e.g., "Normal", "NAD", "Negative")
    - "NAD" means "No Abnormality Detected" - treat as normal result
-   - Include visual acuity, system examinations, mental status, and all other assessments
-   - For qualitative results, put the assessment in field_value (e.g., "Normal", "NAD", "Absent")
-   - SKIP category headers (e.g., "DIFFERENTIAL LEUCOCYTE COUNT", "HAEMATOLOGY") - only extract tests with actual values
-   - Extract individual sub-tests (e.g., Neutrophils, Lymphocytes) not their parent category
-5. Extract the REPORT DATE - this is the date the report was generated/issued.
-   - Look for labels like "Report Date", "Reported on", "Date", "Issue Date"
-   - DO NOT confuse with collection date, registration date, or patient birth date
+   - For qualitative results, put the assessment in field_value
+   - SKIP category headers - only extract tests with actual values
+5. Extract the REPORT DATE - the date the report was generated/issued.
+   - Look for "Report Date", "Reported on", "Date", "Issue Date"
    - Format as YYYY-MM-DD
-6. Count ALL test fields across ALL {len(images_list)} images and ensure you extract every single one.
+6. Count ALL test fields in THIS image.
 
 CRITICAL - "is_normal" FIELD:
-- Set "is_normal": true ONLY if the "field_value" is STRICTLY within the "normal_range".
-- Set "is_normal": false if the value is outside the range (High/Low) or explicitly marked as abnormal.
-- If no range is provided, default to true.
+- Set "is_normal": true ONLY if "field_value" is STRICTLY within "normal_range"
+- Set "is_normal": false if outside range or marked abnormal
+- If no range provided, default to true
 
 CRITICAL - DECIMAL PRECISION:
-- Read EXACT decimal values from the images as shown (e.g., "15.75" not "15.7" or "12.5")
-- Preserve all decimal places visible in the images
-- Double-check each number character-by-character against the images
+- Read EXACT decimal values (e.g., "15.75" not "15.7")
+- Preserve all decimal places visible
 
 CRITICAL - DOCTOR NAMES:
-- Extract ONLY the REFERRING PHYSICIAN (doctor who ordered the test)
-- DO NOT extract examining doctors, lab directors, or clinic signatures
-- Only include doctors specifically tied to this patient's case
-- Read the name carefully from the images and spell it exactly
-- If multiple referring doctors, separate with commas
-
-CRITICAL - HANDLING DIFFERENT VALUE TYPES:
-- Numeric values: Extract with full precision (e.g., "15.75")
-- Qualitative values: Extract exactly as shown (e.g., "Normal", "NAD", "Negative", "Absent")
-- "NAD" = "No Abnormality Detected" = Normal result (set is_normal: true)
-- For "NAD" results, put "NAD" in field_value and leave normal_range empty
+- Extract ONLY REFERRING PHYSICIAN (who ordered the test)
+- Read name carefully and spell exactly
 
 RESPONSE FORMAT - Return ONLY valid JSON:
 {{
     "patient_name": "Patient name from report",
-    "report_date": "YYYY-MM-DD (the date report was issued, NOT collection/birth date)",
+    "report_date": "YYYY-MM-DD",
     "report_type": "MUST be one of the exact values from the list above",
     "doctor_names": "Referring physician name(s) only, or empty string",
-    "total_fields_in_report": <count of all test fields across ALL {len(images_list)} images>,
+    "total_fields_in_image": <count of test fields in THIS image>,
     "medical_data": [
         {{
             "field_name": "Test Name",
-            "field_value": "123.45 OR 'Normal' OR 'NAD' OR 'Negative'",
-            "field_unit": "g/dL or empty for qualitative results",
+            "field_value": "123.45 OR 'Normal' OR 'NAD'",
+            "field_unit": "g/dL or empty",
             "normal_range": "13.5-17.5 or empty",
             "is_normal": true,
             "field_type": "measurement"
         }}
     ]
-}}
-
-RULES:
-- Response must be ONLY valid JSON
-- Extract ALL visible fields from ALL {len(images_list)} images
-- medical_data array should contain data from ALL pages/images combined
-- Use empty strings for missing values
-- report_type MUST match one of the provided options exactly"""
-        
-        content = [{'type': 'text', 'text': prompt_text}]
-        
-        # Add all images to the content
-        for idx, image_info in enumerate(images_list, 1):
+}}"""
+            
             image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
             image_format = image_info['format']
             
-            label = f"Image {idx}/{len(images_list)}"
-            if image_info.get('page_number'):
-                label = f"Page {image_info['page_number']}"
+            content = [
+                {'type': 'text', 'text': prompt_text},
+                {
+                    'type': 'image_url',
+                    'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                }
+            ]
             
-            content.append({'type': 'text', 'text': f"\n--- {label} ({image_info['source_filename']}) ---"})
-            content.append({
-                'type': 'image_url',
-                'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-            })
-        
-        print(f"\n🔄 Sending {len(images_list)} image(s) to VLM for processing...")
-        
-        try:
-            model_name = Config.OLLAMA_MODEL
-            
-            # FIRST PASS: Initial extraction
-            completion = ollama_client.chat.completions.create(
-                model=model_name,
-                messages=[{'role': 'user', 'content': content}],
-                temperature=0.1,
-            )
-
-            response_text = completion.choices[0].message.content.strip()
-            print("\n" + "="*80)
-            print("🔍 MODEL SERVER RAW RESPONSE (FIRST PASS):")
-            print("="*80)
-            print(response_text)
-            print("="*80 + "\n")
-            
-            extracted_data = None
             try:
-                extracted_data = json.loads(response_text)
-                print("\n" + "="*80)
-                print("✅ PARSED JSON DATA:")
-                print("="*80)
-                print(json.dumps(extracted_data, indent=2))
-                print("="*80 + "\n")
-            except json.JSONDecodeError as e:
-                print("\n" + "="*80)
-                print("❌ JSON PARSE ERROR:")
-                print("="*80)
-                print(f"Error: {e}")
-                print(f"Response was: {response_text[:200]}...")
-                print("="*80 + "\n")
+                model_name = Config.OLLAMA_MODEL
                 
-                import re
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                if json_match:
-                    try:
-                        extracted_data = json.loads(json_match.group())
-                        print("✅ JSON extracted from response after regex match")
-                    except:
-                        pass
-                
-                if not extracted_data:
-                    raise Exception(f'Failed to parse medical report: Invalid JSON - {str(e)}')
-            
-            if not isinstance(extracted_data, dict):
-                raise Exception('Failed to parse medical report: Invalid response structure')
-            
-            if 'medical_data' not in extracted_data:
-                extracted_data['medical_data'] = []
-            if 'patient_name' not in extracted_data:
-                extracted_data['patient_name'] = ''
-            
-            # SELF-VERIFICATION PASS (text-only to avoid payload size issues)
-            print("\n" + "="*80)
-            print("🔄 STARTING SELF-VERIFICATION PASS...")
-            print("="*80)
-            
-            verification_prompt = f"""You just extracted data from {len(images_list)} medical report images. Review your extraction for accuracy:
+                # Extract from single image
+                completion = ollama_client.chat.completions.create(
+                    model=model_name,
+                    messages=[{'role': 'user', 'content': content}],
+                    temperature=0.1,
+                )
 
-ORIGINAL EXTRACTION:
+                response_text = completion.choices[0].message.content.strip()
+                print(f"🔍 RAW RESPONSE for Image {idx}:")
+                print("="*80)
+                print(response_text)
+                print("="*80 + "\n")
+                
+                extracted_data = None
+                try:
+                    extracted_data = json.loads(response_text)
+                except json.JSONDecodeError as e:
+                    import re
+                    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                    if json_match:
+                        try:
+                            extracted_data = json.loads(json_match.group())
+                            print(f"✅ JSON extracted after regex for Image {idx}")
+                        except:
+                            pass
+                    
+                    if not extracted_data:
+                        print(f"❌ Failed to parse Image {idx}: {e}")
+                        continue
+                
+                if not isinstance(extracted_data, dict):
+                    print(f"❌ Invalid response structure for Image {idx}")
+                    continue
+                
+                # Store patient info from first valid extraction
+                if not patient_info and extracted_data.get('patient_name'):
+                    patient_info = {
+                        'patient_name': extracted_data.get('patient_name', ''),
+                        'report_date': extracted_data.get('report_date', ''),
+                        'report_type': extracted_data.get('report_type', ''),
+                        'doctor_names': extracted_data.get('doctor_names', '')
+                    }
+                
+                # Collect medical data
+                medical_data = extracted_data.get('medical_data', [])
+                if medical_data:
+                    all_extracted_data.extend(medical_data)
+                    print(f"✅ Extracted {len(medical_data)} field(s) from Image {idx}\n")
+                else:
+                    print(f"⚠️  No medical data found in Image {idx}\n")
+                    
+            except Exception as e:
+                print(f"❌ Error processing Image {idx}: {e}\n")
+                continue
+        
+        # Combine all extracted data
+        print("\n" + "="*80)
+        print("🔗 COMBINING ALL EXTRACTED DATA")
+        print("="*80)
+        
+        extracted_data = {
+            'patient_name': patient_info.get('patient_name', ''),
+            'report_date': patient_info.get('report_date', ''),
+            'report_type': patient_info.get('report_type', ''),
+            'doctor_names': patient_info.get('doctor_names', ''),
+            'total_fields_in_report': len(all_extracted_data),
+            'medical_data': all_extracted_data
+        }
+        
+        print(f"✅ Total fields extracted: {len(all_extracted_data)}")
+        print(json.dumps(extracted_data, indent=2))
+        print("="*80 + "\n")
+        
+        # SELF-VERIFICATION PASS
+        print("\n" + "="*80)
+        print("🔄 STARTING SELF-VERIFICATION PASS...")
+        print("="*80)
+        
+        verification_prompt = f"""You extracted data from {len(images_list)} medical report images individually. Review the COMBINED extraction for accuracy:
+
+COMBINED EXTRACTION:
 {json.dumps(extracted_data, indent=2)}
 
 Review checklist:
 1. Are "is_normal" flags correct? (value within normal_range = true, outside = false)
-2. Do field_value numbers match what you saw? Check decimal precision (15.75 vs 15.7)
+2. Do field_value numbers have proper decimal precision?
 3. Are doctor_names spelled correctly?
 4. Does report_type match one of the standard types exactly?
-5. Did you extract ALL fields from ALL {len(images_list)} images? (total_fields_in_report should match medical_data count)
+5. Are there duplicate entries that should be merged?
 6. Are there any obvious errors or inconsistencies?
 
 RETURN THE CORRECTED JSON in the EXACT same format. If everything is correct, return the same JSON unchanged.
@@ -382,48 +385,42 @@ RETURN THE CORRECTED JSON in the EXACT same format. If everything is correct, re
 IMPORTANT:
 - Only return valid JSON, no explanations
 - Keep the same structure
-- Fix any inaccuracies you notice"""
+- Fix any inaccuracies you notice
+- Remove duplicates if any"""
+        
+        try:
+            verification_completion = ollama_client.chat.completions.create(
+                model=model_name,
+                messages=[{'role': 'user', 'content': verification_prompt}],
+                temperature=0.1,
+            )
+            
+            verified_response = verification_completion.choices[0].message.content.strip()
+            print("\n✅ VERIFIED RESPONSE:")
+            print("="*80)
+            print(verified_response)
+            print("="*80 + "\n")
             
             try:
-                verification_completion = ollama_client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {'role': 'user', 'content': content},  # Original images + extraction request
-                        {'role': 'assistant', 'content': response_text},  # First extraction
-                        {'role': 'user', 'content': verification_prompt}  # Verification request
-                    ],
-                    temperature=0.1,
-                )
-                
-                verified_response = verification_completion.choices[0].message.content.strip()
-                print("\n" + "="*80)
-                print("✅ VERIFIED RESPONSE (SECOND PASS):")
-                print("="*80)
-                print(verified_response)
-                print("="*80 + "\n")
-                
-                # Try to parse verified response
-                try:
-                    verified_data = json.loads(verified_response)
-                    print("✅ Verification pass successful - using verified data")
-                    extracted_data = verified_data
-                except json.JSONDecodeError:
-                    # Try regex extraction
-                    import re
-                    json_match = re.search(r'\{.*\}', verified_response, re.DOTALL)
-                    if json_match:
-                        try:
-                            verified_data = json.loads(json_match.group())
-                            print("✅ Verification pass successful (after regex) - using verified data")
-                            extracted_data = verified_data
-                        except:
-                            print("⚠️  Verification pass failed to parse - using original extraction")
-                    else:
-                        print("⚠️  Verification pass failed to parse - using original extraction")
-                        
-            except Exception as verify_error:
-                print(f"⚠️  Verification pass error: {verify_error}")
-                print("Using original extraction")
+                verified_data = json.loads(verified_response)
+                print("✅ Verification successful - using verified data")
+                extracted_data = verified_data
+            except json.JSONDecodeError:
+                import re
+                json_match = re.search(r'\{.*\}', verified_response, re.DOTALL)
+                if json_match:
+                    try:
+                        verified_data = json.loads(json_match.group())
+                        print("✅ Verification successful (after regex)")
+                        extracted_data = verified_data
+                    except:
+                        print("⚠️  Using original combined data")
+                else:
+                    print("⚠️  Using original combined data")
+                    
+        except Exception as verify_error:
+            print(f"⚠️  Verification error: {verify_error}")
+            print("Using original combined data")
             
             print("\n" + "="*80)
             print("📊 FINAL EXTRACTED DATA:")
