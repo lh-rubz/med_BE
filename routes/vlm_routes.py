@@ -173,64 +173,12 @@ class ChatResource(Resource):
         image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
         image_format = image_info['format']
         
-        # Step 1: Extract text using OCR.space API
-        print("\n" + "="*80)
-        print("🔍 STEP 1: OCR TEXT EXTRACTION")
-        print("="*80)
-        
-        ocr_text = ""
-        try:
-            # For OCR.space, we need to send the file data
-            ocr_payload = {
-                'apikey': 'K87899142388957',  # Free tier API key
-                'language': 'eng',
-                'isOverlayRequired': False,
-                'detectOrientation': True,
-                'scale': True,
-                'OCREngine': 2  # Engine 2 is more accurate
-            }
-            
-            ocr_files = {
-                'file': (filename, image_info['data'], f'image/{image_format}')
-            }
-            
-            ocr_response = requests.post(
-                'https://api.ocr.space/parse/image',
-                data=ocr_payload,
-                files=ocr_files,
-                timeout=30
-            )
-            
-            if ocr_response.status_code == 200:
-                ocr_result = ocr_response.json()
-                if ocr_result.get('IsErroredOnProcessing') == False:
-                    parsed_results = ocr_result.get('ParsedResults', [])
-                    if parsed_results:
-                        ocr_text = parsed_results[0].get('ParsedText', '')
-                        print(f"✅ OCR extracted {len(ocr_text)} characters")
-                        print("\n📄 Full OCR Extracted Text:")
-                        print("=" * 80)
-                        print(ocr_text)
-                        print("=" * 80)
-                else:
-                    print(f"⚠️  OCR processing error: {ocr_result.get('ErrorMessage')}")
-            else:
-                print(f"⚠️  OCR API request failed: {ocr_response.status_code}")
-        except Exception as ocr_error:
-            print(f"⚠️  OCR extraction failed: {ocr_error}")
-            print("Continuing with VLM-only extraction...")
-        
-        print("="*80 + "\n")
-        
         report_types_list = '\n'.join([f'- "{rt}"' for rt in REPORT_TYPES])
         
-        extraction_prompt = f"""You are a medical lab report analyzer. Extract ALL medical data from this report.
-
-OCR EXTRACTED TEXT (use this for EXACT values):
-{ocr_text if ocr_text else "[OCR not available - extract from image]"}
+        extraction_prompt = f"""You are a medical lab report analyzer. Extract ALL medical data from this report image.
 
 EXTRACTION RULES:
-1. Extract EVERY test result, measurement, value visible.
+1. Extract EVERY test result, measurement, value visible in the image.
 2. Identify the REPORT TYPE from this EXACT list (choose the closest match):
 {report_types_list}
 3. Extract REFERRING PHYSICIAN names ONLY (doctors who ordered/referred the test).
@@ -248,7 +196,7 @@ EXTRACTION RULES:
    - Look for labels like "Report Date", "Reported on", "Date", "Issue Date"
    - DO NOT confuse with collection date, registration date, or patient birth date
    - Format as YYYY-MM-DD
-6. Count ALL test fields in the OCR text and ensure you extract every single one.
+6. Read carefully and extract EXACT values from the image with full decimal precision.
 
 CRITICAL - "is_normal" FIELD:
 - Set "is_normal": true ONLY if the "field_value" is STRICTLY within the "normal_range".
@@ -256,17 +204,15 @@ CRITICAL - "is_normal" FIELD:
 - If no range is provided, default to true.
 
 CRITICAL - DECIMAL PRECISION:
-- Use the OCR text above to get EXACT decimal values
-- Preserve EXACT decimal values as shown (e.g., "15.75" not "15.7" or "12.5")
-- Cross-reference OCR text with the image to ensure accuracy
-- Copy numbers character-by-character from OCR text
+- Read EXACT decimal values from the image as shown (e.g., "15.75" not "15.7" or "12.5")
+- Preserve all decimal places visible in the image
+- Double-check each number character-by-character
 
 CRITICAL - DOCTOR NAMES:
-- Use the OCR text to get exact doctor name spelling
 - Extract ONLY the REFERRING PHYSICIAN (doctor who ordered the test)
 - DO NOT extract examining doctors, lab directors, or clinic signatures
 - Only include doctors specifically tied to this patient's case
-- Double-check spelling and titles (Dr., Prof., etc.) against OCR text
+- Read the name carefully from the image and spell it exactly
 - If multiple referring doctors, separate with commas
 
 CRITICAL - HANDLING DIFFERENT VALUE TYPES:
