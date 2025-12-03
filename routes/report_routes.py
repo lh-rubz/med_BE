@@ -72,6 +72,11 @@ class UserReports(Resource):
                 all_files = glob.glob(os.path.join(user_folder, "*"))
                 report_timestamp = report.created_at
                 
+                # Ensure report_timestamp is timezone-aware
+                from datetime import datetime, timezone
+                if report_timestamp.tzinfo is None:
+                    report_timestamp = report_timestamp.replace(tzinfo=timezone.utc)
+                
                 for file_path in all_files:
                     if file_path in matching_files:
                         continue
@@ -173,6 +178,11 @@ class UserReportDetail(Resource):
             # Also look for files created within a 5-minute window
             all_files = glob.glob(os.path.join(user_folder, "*"))
             report_timestamp = report.created_at
+            
+            # Ensure report_timestamp is timezone-aware
+            from datetime import datetime, timezone
+            if report_timestamp.tzinfo is None:
+                report_timestamp = report_timestamp.replace(tzinfo=timezone.utc)
             
             for file_path in all_files:
                 if file_path in matching_files:
@@ -280,6 +290,11 @@ class ReportImages(Resource):
             all_files = glob.glob(os.path.join(user_folder, "*"))
             report_timestamp = report.created_at
             
+            # Ensure report_timestamp is timezone-aware
+            from datetime import datetime, timezone
+            if report_timestamp.tzinfo is None:
+                report_timestamp = report_timestamp.replace(tzinfo=timezone.utc)
+            
             for file_path in all_files:
                 if file_path in matching_files:
                     continue
@@ -352,6 +367,11 @@ class ReportImageByIndex(Resource):
             # Also look for files created within a 5-minute window
             all_files = glob.glob(os.path.join(user_folder, "*"))
             report_timestamp = report.created_at
+            
+            # Ensure report_timestamp is timezone-aware
+            from datetime import datetime, timezone
+            if report_timestamp.tzinfo is None:
+                report_timestamp = report_timestamp.replace(tzinfo=timezone.utc)
             
             for file_path in all_files:
                 if file_path in matching_files:
