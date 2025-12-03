@@ -67,6 +67,7 @@ upload_parser.add_argument('file',
                           location='files',
                           type=FileStorage, 
                           required=True,
+                          action='append',
                           help='Upload medical report image or PDF file. You can select multiple files at once.')
 
 

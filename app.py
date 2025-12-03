@@ -22,11 +22,7 @@ db.init_app(app)
 jwt = JWTManager(app)
 mail = Mail(app)
 
-# Serve the test upload HTML page
-@app.route('/test-upload')
-def test_upload():
-    """Serve the test upload HTML page"""
-    return app.send_static_file('test_upload.html')
+
 
 # Initialize API with Swagger documentation
 api = Api(
