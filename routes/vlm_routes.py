@@ -3,6 +3,7 @@ from flask_restx import Resource, Namespace, fields
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime, timezone
 from werkzeug.utils import secure_filename
+from werkzeug.datastructures import FileStorage
 import requests
 import base64
 import json
@@ -60,9 +61,12 @@ REPORT_TYPES = [
 ]
 
 # API Models
-report_extraction_model = vlm_ns.model('ReportExtraction', {
-    'file': fields.String(required=True, description='Medical report image or PDF file (multipart/form-data)')
-})
+upload_parser = vlm_ns.parser()
+upload_parser.add_argument('file', 
+                          location='files',
+                          type=FileStorage, 
+                          required=True,
+                          help='Medical report image or PDF file')
 
 
 def allowed_file(filename):
@@ -96,6 +100,7 @@ def pdf_to_images(pdf_path):
 @vlm_ns.route('/chat')
 class ChatResource(Resource):
     @vlm_ns.doc(security='Bearer Auth')
+    @vlm_ns.expect(upload_parser)
     @jwt_required()
     def post(self):
         """Extract medical report data from uploaded image/PDF file and save to database"""
