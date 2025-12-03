@@ -151,7 +151,6 @@ class ChatResource(Resource):
         }
     )
     @vlm_ns.expect(upload_parser)
-    @vlm_ns.consumes('multipart/form-data')
     @jwt_required()
     def post(self):
         """Extract medical report data from uploaded image/PDF file(s) and save to database. Multiple images/pages will be combined into a single report."""
