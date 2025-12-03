@@ -2,11 +2,15 @@ from flask import request
 from flask_restx import Resource, Namespace, fields
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime, timezone
+from werkzeug.utils import secure_filename
 import requests
 import base64
 import json
 import hashlib
 import os
+import fitz  # PyMuPDF
+from PIL import Image
+import io
 
 from models import db, User, Report, ReportField
 from config import ollama_client, Config
@@ -57,30 +61,112 @@ REPORT_TYPES = [
 
 # API Models
 report_extraction_model = vlm_ns.model('ReportExtraction', {
-    'image_url': fields.String(required=True, description='URL to medical report image for extraction')
+    'file': fields.String(required=True, description='Medical report image or PDF file (multipart/form-data)')
 })
+
+
+def allowed_file(filename):
+    """Check if file has an allowed extension"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in Config.ALLOWED_EXTENSIONS
+
+
+def ensure_upload_folder(user_identifier):
+    """Create user-specific upload folder if it doesn't exist"""
+    user_folder = os.path.join(Config.UPLOAD_FOLDER, str(user_identifier))
+    os.makedirs(user_folder, exist_ok=True)
+    return user_folder
+
+
+def pdf_to_images(pdf_path):
+    """Convert PDF to images using PyMuPDF"""
+    images = []
+    pdf_document = fitz.open(pdf_path)
+    
+    for page_num in range(len(pdf_document)):
+        page = pdf_document[page_num]
+        # Render page to an image with high quality
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
+        img_data = pix.tobytes("png")
+        images.append(img_data)
+    
+    pdf_document.close()
+    return images
 
 
 @vlm_ns.route('/chat')
 class ChatResource(Resource):
     @vlm_ns.doc(security='Bearer Auth')
     @jwt_required()
-    @vlm_ns.expect(report_extraction_model)
     def post(self):
-        """Extract medical report data and save to database"""
+        """Extract medical report data from uploaded image/PDF file and save to database"""
         current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
             return {'message': 'User not found'}, 404
         
-        data = request.json or {}
-        image_url = data.get('image_url')
+        # Check if file is in request
+        if 'file' not in request.files:
+            return {'error': 'No file part in the request. Please upload a file using form-data with key "file"'}, 400
         
-        if not image_url:
-            return {'error': 'image_url is required for report extraction'}, 400
+        file = request.files['file']
+        
+        if file.filename == '':
+            return {'error': 'No file selected'}, 400
+        
+        if not allowed_file(file.filename):
+            return {'error': f'File type not allowed. Allowed types: {", ".join(Config.ALLOWED_EXTENSIONS)}'}, 400
 
         patient_name = user.first_name + " " + user.last_name
+        
+        # Create user-specific folder (using user_id for security)
+        user_folder = ensure_upload_folder(f"user_{current_user_id}")
+        
+        # Save file with secure filename
+        filename = secure_filename(file.filename)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_filename = f"{timestamp}_{filename}"
+        file_path = os.path.join(user_folder, unique_filename)
+        
+        file.save(file_path)
+        print(f"✅ File saved to: {file_path}")
+        
+        # Determine if it's a PDF or image
+        file_extension = filename.rsplit('.', 1)[1].lower()
+        
+        # Process the file
+        image_data_list = []
+        
+        if file_extension == 'pdf':
+            print("📄 Processing PDF file...")
+            try:
+                images = pdf_to_images(file_path)
+                for img_data in images:
+                    image_data_list.append({
+                        'data': img_data,
+                        'format': 'png'
+                    })
+                print(f"✅ Converted PDF to {len(images)} image(s)")
+            except Exception as e:
+                print(f"❌ Error converting PDF: {str(e)}")
+                return {'error': f'Failed to process PDF: {str(e)}'}, 400
+        else:
+            # It's an image file
+            print(f"🖼️ Processing image file ({file_extension})...")
+            with open(file_path, 'rb') as f:
+                image_data = f.read()
+                image_data_list.append({
+                    'data': image_data,
+                    'format': file_extension
+                })
+        
+        # Process the first image/page (you can extend this to process multiple pages)
+        if not image_data_list:
+            return {'error': 'No valid image data to process'}, 400
+        
+        image_info = image_data_list[0]
+        image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
+        image_format = image_info['format']
         
         # Step 1: Extract text using OCR.space API
         print("\n" + "="*80)
@@ -89,8 +175,8 @@ class ChatResource(Resource):
         
         ocr_text = ""
         try:
+            # For OCR.space, we need to send the file data
             ocr_payload = {
-                'url': image_url,
                 'apikey': 'K87899142388957',  # Free tier API key
                 'language': 'eng',
                 'isOverlayRequired': False,
@@ -99,9 +185,14 @@ class ChatResource(Resource):
                 'OCREngine': 2  # Engine 2 is more accurate
             }
             
+            ocr_files = {
+                'file': (filename, image_info['data'], f'image/{image_format}')
+            }
+            
             ocr_response = requests.post(
                 'https://api.ocr.space/parse/image',
                 data=ocr_payload,
+                files=ocr_files,
                 timeout=30
             )
             
@@ -206,25 +297,7 @@ RULES:
 - report_type MUST match one of the provided options exactly"""
 
         try:
-            session = requests.Session()
-            img_response = session.get(image_url, timeout=60)
-            img_response.raise_for_status()
-            
-            image_base64 = base64.b64encode(img_response.content).decode('utf-8')
-            
-            content_type = img_response.headers.get('Content-Type', '')
-            if 'jpeg' in content_type or 'jpg' in content_type or image_url.lower().endswith(('.jpg', '.jpeg')):
-                image_format = 'jpeg'
-            elif 'png' in content_type or image_url.lower().endswith('.png'):
-                image_format = 'png'
-            elif 'webp' in content_type or image_url.lower().endswith('.webp'):
-                image_format = 'webp'
-            else:
-                from io import BytesIO
-                from PIL import Image
-                img = Image.open(BytesIO(img_response.content))
-                image_format = img.format.lower() if img.format else 'jpeg'
-            
+            # Image data is already loaded from file
             content = [
                 {
                     'type': 'text',
@@ -238,9 +311,9 @@ RULES:
                 }
             ]
         except Exception as e:
-            print(f"\n❌ ERROR downloading/processing image: {str(e)}")
+            print(f"\n❌ ERROR processing image: {str(e)}")
             return {
-                'message': 'Failed to download or process image',
+                'message': 'Failed to process image',
                 'error': str(e)
             }, 400
 
@@ -469,7 +542,8 @@ IMPORTANT:
                     report_date=datetime.now(timezone.utc),
                     report_hash=report_hash,
                     report_type=extracted_data.get('report_type', 'General Medical Report'),
-                    doctor_names=extracted_data.get('doctor_names', '')
+                    doctor_names=extracted_data.get('doctor_names', ''),
+                    original_filename=filename
                 )
                 db.session.add(new_report)
                 db.session.flush()
@@ -526,6 +600,7 @@ IMPORTANT:
                     'report_date': extracted_data.get('report_date', ''),
                     'report_type': new_report.report_type,
                     'doctor_names': new_report.doctor_names,
+                    'original_filename': new_report.original_filename,
                     'medical_data': medical_entries,
                     'total_fields_extracted': len(medical_entries)
                 }, 201

@@ -2,6 +2,7 @@ from flask import Flask
 from flask_restx import Api
 from flask_jwt_extended import JWTManager
 from flask_mail import Mail
+import os
 
 from config import Config
 from models import db
@@ -12,6 +13,9 @@ app = Flask(__name__)
 
 # Load configuration
 app.config.from_object(Config)
+
+# Ensure upload folder exists
+os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
 
 # Initialize extensions
 db.init_app(app)

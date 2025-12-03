@@ -1,6 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timezone
 import bcrypt
+import os
 
 db = SQLAlchemy()
 
@@ -40,8 +41,21 @@ class Report(db.Model):
     report_hash = db.Column(db.String(255), nullable=False)
     report_type = db.Column(db.String(100))
     doctor_names = db.Column(db.Text)  # Comma-separated list of doctor names
+    original_filename = db.Column(db.String(255))  # Original filename for reference
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     fields = db.relationship('ReportField', backref='report', lazy=True, cascade='all, delete-orphan')
+    
+    def get_file_path(self):
+        """Reconstruct file path from user_id and report metadata"""
+        from config import Config
+        if self.original_filename:
+            user_folder = os.path.join(Config.UPLOAD_FOLDER, f"user_{self.user_id}")
+            # Find file that matches the pattern
+            if os.path.exists(user_folder):
+                for filename in os.listdir(user_folder):
+                    if filename.endswith(self.original_filename):
+                        return os.path.join(user_folder, filename)
+        return None
 
 
 class ReportData(db.Model):

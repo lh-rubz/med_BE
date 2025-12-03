@@ -1,6 +1,7 @@
-from flask import request
+from flask import request, send_file
 from flask_restx import Resource, Namespace
 from flask_jwt_extended import jwt_required, get_jwt_identity
+import os
 
 from models import db, User, Report, ReportField, AdditionalField
 
@@ -164,3 +165,41 @@ class UserReportDetail(Resource):
                 'message': 'Failed to delete report',
                 'error': str(e)
             }, 500
+
+
+@reports_ns.route('/<int:report_id>/image')
+class ReportImage(Resource):
+    @reports_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    def get(self, report_id):
+        """Get the uploaded image/PDF file for a specific report"""
+        current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+        
+        report = Report.query.filter_by(id=report_id, user_id=current_user_id).first()
+        
+        if not report:
+            return {'message': 'Report not found'}, 404
+        
+        # Get the file path using the Report model method
+        file_path = report.get_file_path()
+        
+        if not file_path or not os.path.exists(file_path):
+            return {'message': 'File not found for this report'}, 404
+        
+        # Determine mimetype based on file extension
+        file_extension = file_path.rsplit('.', 1)[1].lower()
+        mimetype_map = {
+            'png': 'image/png',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'gif': 'image/gif',
+            'webp': 'image/webp',
+            'pdf': 'application/pdf'
+        }
+        mimetype = mimetype_map.get(file_extension, 'application/octet-stream')
+        
+        return send_file(file_path, mimetype=mimetype, as_attachment=False)
