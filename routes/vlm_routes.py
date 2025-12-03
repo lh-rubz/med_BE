@@ -143,6 +143,7 @@ class ChatResource(Resource):
     @vlm_ns.doc(
         security='Bearer Auth',
         description='Upload medical report images or PDF files. Multiple files will be combined into ONE report.',
+        consumes=['multipart/form-data'],
         responses={
             200: 'Success - Report created',
             400: 'Bad Request - Invalid file or missing data',
