@@ -1,5 +1,5 @@
-from flask import request
-from flask_restx import Resource, Namespace, fields
+from flask import request, make_response
+from flask_restx import Resource, Namespace, fields, reqparse
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime, timezone
 from werkzeug.utils import secure_filename
@@ -61,9 +61,8 @@ REPORT_TYPES = [
 ]
 
 # API Models for file upload
-# Note: Using a simple file argument without 'append' for better Swagger compatibility
-# Multiple files can still be uploaded by selecting multiple files in the file picker
-upload_parser = vlm_ns.parser()
+# Using reqparse for better Swagger file upload compatibility
+upload_parser = reqparse.RequestParser()
 upload_parser.add_argument('file', 
                           location='files',
                           type=FileStorage, 

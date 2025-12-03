@@ -37,7 +37,9 @@ api = Api(
             'description': 'JWT Bearer token. Example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
         }
     },
-    security='Bearer Auth'
+    security='Bearer Auth',
+    # Support file uploads in Swagger
+    validate=False
 )
 
 # Register namespaces (routes)
