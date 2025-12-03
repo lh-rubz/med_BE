@@ -60,14 +60,14 @@ REPORT_TYPES = [
     "Other"
 ]
 
-# API Models
+# API Models for file upload
 upload_parser = vlm_ns.parser()
 upload_parser.add_argument('file', 
                           location='files',
                           type=FileStorage, 
                           required=True,
                           action='append',
-                          help='Medical report image or PDF file(s) - can upload multiple files')
+                          help='Upload one or more medical report images or PDF files. Multiple files will be combined into a single report.')
 
 
 def allowed_file(filename):
@@ -139,8 +139,18 @@ def compress_image(image_data, format_hint='png'):
 
 @vlm_ns.route('/chat')
 class ChatResource(Resource):
-    @vlm_ns.doc(security='Bearer Auth')
+    @vlm_ns.doc(
+        security='Bearer Auth',
+        description='Upload medical report images or PDF files. Multiple files will be combined into ONE report.',
+        responses={
+            200: 'Success - Report created',
+            400: 'Bad Request - Invalid file or missing data',
+            404: 'User not found',
+            413: 'File too large'
+        }
+    )
     @vlm_ns.expect(upload_parser)
+    @vlm_ns.consumes('multipart/form-data')
     @jwt_required()
     def post(self):
         """Extract medical report data from uploaded image/PDF file(s) and save to database. Multiple images/pages will be combined into a single report."""
