@@ -65,7 +65,7 @@ class Config:
     # File upload configuration
     UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf'}
-    MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
+    MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB max file size
 
 
 def send_brevo_email(recipient_email, subject, html_content):
