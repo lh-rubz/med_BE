@@ -359,55 +359,39 @@ RULES:
             if 'patient_name' not in extracted_data:
                 extracted_data['patient_name'] = ''
             
-            # SELF-VERIFICATION PASS
+            # SELF-VERIFICATION PASS (text-only to avoid payload size issues)
             print("\n" + "="*80)
             print("🔄 STARTING SELF-VERIFICATION PASS...")
             print("="*80)
             
-            verification_prompt = f"""You are reviewing a medical report extraction that you just performed.
+            verification_prompt = f"""You just extracted data from {len(images_list)} medical report images. Review your extraction for accuracy:
 
 ORIGINAL EXTRACTION:
 {json.dumps(extracted_data, indent=2)}
 
-Your task is to:
-1. Review the extracted data for accuracy by comparing against the {len(images_list)} images
-2. Check if "is_normal" flags are correct based on values vs normal ranges
-3. CRITICAL: Verify all field_value numbers have EXACT decimal precision from the images (e.g., 15.75 not 12.5)
-4. CRITICAL: Verify doctor_names are spelled correctly and match the images exactly
-5. Ensure report_type matches one of the standard types
-6. Check that ALL fields from ALL {len(images_list)} images are extracted (compare total_fields_in_report with actual count)
-7. Correct any errors you find
+Review checklist:
+1. Are "is_normal" flags correct? (value within normal_range = true, outside = false)
+2. Do field_value numbers match what you saw? Check decimal precision (15.75 vs 15.7)
+3. Are doctor_names spelled correctly?
+4. Does report_type match one of the standard types exactly?
+5. Did you extract ALL fields from ALL {len(images_list)} images? (total_fields_in_report should match medical_data count)
+6. Are there any obvious errors or inconsistencies?
 
-RETURN THE CORRECTED JSON in the EXACT same format. If everything is correct, return the same JSON.
+RETURN THE CORRECTED JSON in the EXACT same format. If everything is correct, return the same JSON unchanged.
 
 IMPORTANT:
-- Only return valid JSON
+- Only return valid JSON, no explanations
 - Keep the same structure
-- Fix any inaccuracies you notice
-- Pay special attention to decimal values, doctor names, and missing fields
-- Ensure all {len(images_list)} images were processed"""
-            
-            verification_content = [{'type': 'text', 'text': verification_prompt}]
-            
-            # Add all images again for verification
-            for idx, image_info in enumerate(images_list, 1):
-                image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
-                image_format = image_info['format']
-                
-                label = f"Image {idx}/{len(images_list)}"
-                if image_info.get('page_number'):
-                    label = f"Page {image_info['page_number']}"
-                
-                verification_content.append({'type': 'text', 'text': f"\n--- {label} ---"})
-                verification_content.append({
-                    'type': 'image_url',
-                    'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                })
+- Fix any inaccuracies you notice"""
             
             try:
                 verification_completion = ollama_client.chat.completions.create(
                     model=model_name,
-                    messages=[{'role': 'user', 'content': verification_content}],
+                    messages=[
+                        {'role': 'user', 'content': content},  # Original images + extraction request
+                        {'role': 'assistant', 'content': response_text},  # First extraction
+                        {'role': 'user', 'content': verification_prompt}  # Verification request
+                    ],
                     temperature=0.1,
                 )
                 
