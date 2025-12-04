@@ -44,6 +44,7 @@ class Report(db.Model):
     original_filename = db.Column(db.String(255))  # Original filename for reference
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     fields = db.relationship('ReportField', backref='report', lazy=True, cascade='all, delete-orphan')
+    files = db.relationship('ReportFile', backref='report', lazy=True, cascade='all, delete-orphan')
     
     def get_file_path(self):
         """Reconstruct file path from user_id and report metadata"""
@@ -97,4 +98,18 @@ class AdditionalField(db.Model):
     is_approved = db.Column(db.Boolean, default=False)
     approved_at = db.Column(db.DateTime)
     merged_to_profile = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ReportFile(db.Model):
+    """Track uploaded files associated with reports"""
+    id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)  # Original uploaded name
+    stored_filename = db.Column(db.String(255), nullable=False)    # Timestamped filename on disk
+    file_path = db.Column(db.String(512), nullable=False)          # Full path to file
+    file_type = db.Column(db.String(10), nullable=False)           # Extension (jpg, pdf, etc)
+    file_size = db.Column(db.Integer)                              # Size in bytes
+    page_number = db.Column(db.Integer)                            # For PDF pages, null for images
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

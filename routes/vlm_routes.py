@@ -13,7 +13,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 import io
 
-from models import db, User, Report, ReportField
+from models import db, User, Report, ReportField, ReportFile
 from config import ollama_client, Config
 
 # Create namespace
@@ -211,11 +211,22 @@ class ChatResource(Resource):
             
             file.save(file_path)
             print(f"✅ File saved to: {file_path}")
-            saved_files.append({'filename': filename, 'path': file_path})
             
-            # Determine if it's a PDF or image
+            # Get file size
+            file_size = os.path.getsize(file_path)
             file_extension = filename.rsplit('.', 1)[1].lower()
             
+            # Track saved file info for ReportFile creation
+            saved_files.append({
+                'original_filename': filename,
+                'stored_filename': unique_filename,
+                'file_path': file_path,
+                'file_type': file_extension,
+                'file_size': file_size,
+                'is_pdf': file_extension == 'pdf'
+            })
+            
+            # Determine if it's a PDF or image
             if file_extension == 'pdf':
                 print(f"📄 Processing PDF file: {filename}")
                 try:
@@ -259,7 +270,7 @@ class ChatResource(Resource):
                 all_images_to_process,
                 current_user_id,
                 user,
-                [sf['filename'] for sf in saved_files]
+                saved_files
             )
             
             return {
@@ -275,7 +286,7 @@ class ChatResource(Resource):
             traceback.print_exc()
             return {'error': f'VLM processing error: {str(e)}'}, 500
     
-    def _process_multiple_images(self, images_list, current_user_id, user, original_filenames):
+    def _process_multiple_images(self, images_list, current_user_id, user, saved_files):
         """Process each image separately, then combine all extracted data"""
         patient_name = user.first_name + " " + user.last_name
         
@@ -553,6 +564,43 @@ IMPORTANT:
         db.session.add(new_report)
         db.session.flush()
         
+        # Create ReportFile records for each uploaded file
+        print(f"\n📁 Creating ReportFile records for {len(saved_files)} file(s)...")
+        for file_info in saved_files:
+            if file_info['is_pdf']:
+                # For PDFs, create a record for each page
+                # Find how many pages this PDF has
+                pdf_pages = [img for img in images_list if img['source_filename'] == file_info['original_filename']]
+                for page_info in pdf_pages:
+                    report_file = ReportFile(
+                        report_id=new_report.id,
+                        user_id=current_user_id,
+                        original_filename=file_info['original_filename'],
+                        stored_filename=file_info['stored_filename'],
+                        file_path=file_info['file_path'],
+                        file_type=file_info['file_type'],
+                        file_size=file_info['file_size'],
+                        page_number=page_info.get('page_number')
+                    )
+                    db.session.add(report_file)
+                    print(f"  ✅ Added ReportFile: {file_info['original_filename']} (page {page_info.get('page_number')})")
+            else:
+                # For images, create a single record
+                report_file = ReportFile(
+                    report_id=new_report.id,
+                    user_id=current_user_id,
+                    original_filename=file_info['original_filename'],
+                    stored_filename=file_info['stored_filename'],
+                    file_path=file_info['file_path'],
+                    file_type=file_info['file_type'],
+                    file_size=file_info['file_size'],
+                    page_number=None
+                )
+                db.session.add(report_file)
+                print(f"  ✅ Added ReportFile: {file_info['original_filename']}")
+        
+        db.session.flush()
+        
         medical_entries = []
         for item in medical_data_list:
             if not isinstance(item, dict):
@@ -593,7 +641,7 @@ IMPORTANT:
             'doctor_names': new_report.doctor_names,
             'original_filename': new_report.original_filename,
             'total_images': len(images_list),
-            'source_files': original_filenames,
+            'source_files': [sf['original_filename'] for sf in saved_files],
             'medical_data': medical_entries,
             'total_fields_extracted': len(medical_entries)
         }

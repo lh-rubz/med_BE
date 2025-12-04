@@ -4,7 +4,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 import os
 import glob
 
-from models import db, User, Report, ReportField, AdditionalField
+from models import db, User, Report, ReportField, AdditionalField, ReportFile
 from config import Config
 
 # Create namespace
@@ -60,46 +60,18 @@ class UserReports(Resource):
                     'merged_at': str(add_field.approved_at) if add_field.approved_at else None
                 })
             
-            # Get images info for this report
-            user_folder = os.path.join(Config.UPLOAD_FOLDER, f"user_{current_user_id}")
+            
+            # Get images info for this report from database
+            report_files = ReportFile.query.filter_by(report_id=report.id).order_by(ReportFile.id).all()
             images_info = []
             
-            if os.path.exists(user_folder) and report.original_filename:
-                pattern = os.path.join(user_folder, f"*{report.original_filename}")
-                matching_files = glob.glob(pattern)
-                
-                # Also look for files created within a 5-minute window
-                all_files = glob.glob(os.path.join(user_folder, "*"))
-                report_timestamp = report.created_at
-                
-                # Ensure report_timestamp is timezone-aware
-                from datetime import datetime, timezone
-                if report_timestamp.tzinfo is None:
-                    report_timestamp = report_timestamp.replace(tzinfo=timezone.utc)
-                
-                for file_path in all_files:
-                    if file_path in matching_files:
-                        continue
-                    
-                    file_mtime = os.path.getmtime(file_path)
-                    from datetime import datetime, timezone
-                    file_datetime = datetime.fromtimestamp(file_mtime, tz=timezone.utc)
-                    time_diff = abs((report_timestamp - file_datetime).total_seconds())
-                    
-                    if time_diff <= 300:
-                        matching_files.append(file_path)
-                
-                matching_files.sort()
-                
-                for idx, file_path in enumerate(matching_files, 1):
-                    filename = os.path.basename(file_path)
-                    file_extension = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
-                    images_info.append({
-                        'index': idx,
-                        'filename': filename,
-                        'file_type': file_extension,
-                        'url': f'/reports/{report.id}/images/{idx}'
-                    })
+            for idx, report_file in enumerate(report_files, 1):
+                images_info.append({
+                    'index': idx,
+                    'filename': report_file.original_filename,
+                    'file_type': report_file.file_type,
+                    'url': f'/reports/{report.id}/images/{idx}'
+                })
             
             reports_data.append({
                 'report_id': report.id,
@@ -167,46 +139,18 @@ class UserReportDetail(Resource):
                 'merged_at': str(add_field.approved_at) if add_field.approved_at else None
             })
         
-        # Get images info for this report
-        user_folder = os.path.join(Config.UPLOAD_FOLDER, f"user_{current_user_id}")
+        
+        # Get images info for this report from database
+        report_files = ReportFile.query.filter_by(report_id=report.id).order_by(ReportFile.id).all()
         images_info = []
         
-        if os.path.exists(user_folder) and report.original_filename:
-            pattern = os.path.join(user_folder, f"*{report.original_filename}")
-            matching_files = glob.glob(pattern)
-            
-            # Also look for files created within a 5-minute window
-            all_files = glob.glob(os.path.join(user_folder, "*"))
-            report_timestamp = report.created_at
-            
-            # Ensure report_timestamp is timezone-aware
-            from datetime import datetime, timezone
-            if report_timestamp.tzinfo is None:
-                report_timestamp = report_timestamp.replace(tzinfo=timezone.utc)
-            
-            for file_path in all_files:
-                if file_path in matching_files:
-                    continue
-                
-                file_mtime = os.path.getmtime(file_path)
-                from datetime import datetime, timezone
-                file_datetime = datetime.fromtimestamp(file_mtime, tz=timezone.utc)
-                time_diff = abs((report_timestamp - file_datetime).total_seconds())
-                
-                if time_diff <= 300:
-                    matching_files.append(file_path)
-            
-            matching_files.sort()
-            
-            for idx, file_path in enumerate(matching_files, 1):
-                filename = os.path.basename(file_path)
-                file_extension = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
-                images_info.append({
-                    'index': idx,
-                    'filename': filename,
-                    'file_type': file_extension,
-                    'url': f'/reports/{report.id}/images/{idx}'
-                })
+        for idx, report_file in enumerate(report_files, 1):
+            images_info.append({
+                'index': idx,
+                'filename': report_file.original_filename,
+                'file_type': report_file.file_type,
+                'url': f'/reports/{report.id}/images/{idx}'
+            })
         
         return {
             'message': 'Report retrieved successfully',
@@ -272,64 +216,26 @@ class ReportImages(Resource):
         if not report:
             return {'message': 'Report not found'}, 404
         
-        # Get user folder
-        user_folder = os.path.join(Config.UPLOAD_FOLDER, f"user_{current_user_id}")
         
-        if not os.path.exists(user_folder):
-            return {'message': 'No files found for this report'}, 404
-        
-        # Find all files that could belong to this report
-        report_files = []
-        
-        if report.original_filename:
-            # Find all files that end with this filename (accounting for timestamp prefix)
-            pattern = os.path.join(user_folder, f"*{report.original_filename}")
-            matching_files = glob.glob(pattern)
-            
-            # Also look for files created within a 5-minute window of the report
-            all_files = glob.glob(os.path.join(user_folder, "*"))
-            report_timestamp = report.created_at
-            
-            # Ensure report_timestamp is timezone-aware
-            from datetime import datetime, timezone
-            if report_timestamp.tzinfo is None:
-                report_timestamp = report_timestamp.replace(tzinfo=timezone.utc)
-            
-            for file_path in all_files:
-                if file_path in matching_files:
-                    continue
-                    
-                # Check file modification time is close to report creation time
-                file_mtime = os.path.getmtime(file_path)
-                from datetime import datetime, timezone
-                file_datetime = datetime.fromtimestamp(file_mtime, tz=timezone.utc)
-                time_diff = abs((report_timestamp - file_datetime).total_seconds())
-                
-                # If file was created within 5 minutes of report, include it
-                if time_diff <= 300:  # 5 minutes = 300 seconds
-                    matching_files.append(file_path)
-            
-            # Sort by filename to ensure consistent ordering
-            matching_files.sort()
-            
-            for idx, file_path in enumerate(matching_files, 1):
-                filename = os.path.basename(file_path)
-                file_extension = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
-                
-                report_files.append({
-                    'index': idx,
-                    'filename': filename,
-                    'file_type': file_extension,
-                    'download_url': f'/reports/{report_id}/images/{idx}'
-                })
+        # Get all files for this report from database
+        report_files = ReportFile.query.filter_by(report_id=report_id).order_by(ReportFile.id).all()
         
         if not report_files:
             return {'message': 'No files found for this report'}, 404
         
+        files_list = []
+        for idx, report_file in enumerate(report_files, 1):
+            files_list.append({
+                'index': idx,
+                'filename': report_file.original_filename,
+                'file_type': report_file.file_type,
+                'download_url': f'/reports/{report_id}/images/{idx}'
+            })
+        
         return {
             'report_id': report_id,
-            'total_files': len(report_files),
-            'files': report_files
+            'total_files': len(files_list),
+            'files': files_list
         }, 200
 
 
@@ -350,59 +256,25 @@ class ReportImageByIndex(Resource):
         if not report:
             return {'message': 'Report not found'}, 404
         
-        # Get user folder
-        user_folder = os.path.join(Config.UPLOAD_FOLDER, f"user_{current_user_id}")
         
-        if not os.path.exists(user_folder):
-            return {'message': 'No files found for this report'}, 404
+        # Get all files for this report from database
+        report_files = ReportFile.query.filter_by(report_id=report_id).order_by(ReportFile.id).all()
         
-        # Find all files that could belong to this report
-        matching_files = []
-        
-        if report.original_filename:
-            # Find all files that end with this filename
-            pattern = os.path.join(user_folder, f"*{report.original_filename}")
-            matching_files = glob.glob(pattern)
-            
-            # Also look for files created within a 5-minute window
-            all_files = glob.glob(os.path.join(user_folder, "*"))
-            report_timestamp = report.created_at
-            
-            # Ensure report_timestamp is timezone-aware
-            from datetime import datetime, timezone
-            if report_timestamp.tzinfo is None:
-                report_timestamp = report_timestamp.replace(tzinfo=timezone.utc)
-            
-            for file_path in all_files:
-                if file_path in matching_files:
-                    continue
-                    
-                file_mtime = os.path.getmtime(file_path)
-                from datetime import datetime, timezone
-                file_datetime = datetime.fromtimestamp(file_mtime, tz=timezone.utc)
-                time_diff = abs((report_timestamp - file_datetime).total_seconds())
-                
-                if time_diff <= 300:
-                    matching_files.append(file_path)
-            
-            # Sort by filename to ensure consistent ordering
-            matching_files.sort()
-        
-        if not matching_files:
+        if not report_files:
             return {'message': 'No files found for this report'}, 404
         
         # Check if index is valid
-        if image_index < 1 or image_index > len(matching_files):
-            return {'message': f'Invalid image index. Valid range: 1-{len(matching_files)}'}, 404
+        if image_index < 1 or image_index > len(report_files):
+            return {'message': f'Invalid image index. Valid range: 1-{len(report_files)}'}, 404
         
         # Get the file at the specified index (1-based)
-        file_path = matching_files[image_index - 1]
+        report_file = report_files[image_index - 1]
+        file_path = report_file.file_path
         
         if not os.path.exists(file_path):
-            return {'message': 'File not found'}, 404
+            return {'message': 'File not found on disk'}, 404
         
         # Determine mimetype based on file extension
-        file_extension = file_path.rsplit('.', 1)[1].lower()
         mimetype_map = {
             'png': 'image/png',
             'jpg': 'image/jpeg',
@@ -411,7 +283,7 @@ class ReportImageByIndex(Resource):
             'webp': 'image/webp',
             'pdf': 'application/pdf'
         }
-        mimetype = mimetype_map.get(file_extension, 'application/octet-stream')
+        mimetype = mimetype_map.get(report_file.file_type, 'application/octet-stream')
         
         return send_file(file_path, mimetype=mimetype, as_attachment=False)
 
