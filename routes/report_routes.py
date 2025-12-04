@@ -304,8 +304,8 @@ class DeleteAllReports(Resource):
         if not user:
             return {'message': 'User not found'}, 404
         
-        # Check for admin password
-        password = request.args.get('password') or request.json.get('password') if request.json else None
+        # Check for admin password in query parameters
+        password = request.args.get('password')
         
         if password != 'testingAdmin':
             return {
