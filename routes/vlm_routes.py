@@ -464,12 +464,13 @@ RESPONSE FORMAT - Return ONLY valid JSON:
         print(json.dumps(extracted_data, indent=2))
         print("="*80 + "\n")
         
-        # SELF-VERIFICATION PASS
-        print("\n" + "="*80)
-        print("🔄 STARTING SELF-VERIFICATION PASS...")
-        print("="*80)
-        
-        verification_prompt = f"""You extracted data from {len(images_list)} medical report images individually. Review the COMBINED extraction for accuracy:
+        # SELF-VERIFICATION PASS (skip for large reports to avoid timeout)
+        if len(images_list) <= 10:  # Only verify for reports with 10 or fewer pages
+            print("\n" + "="*80)
+            print("🔄 STARTING SELF-VERIFICATION PASS...")
+            print("="*80)
+            
+            verification_prompt = f"""You extracted data from {len(images_list)} medical report images individually. Review the COMBINED extraction for accuracy:
 
 COMBINED EXTRACTION:
 {json.dumps(extracted_data, indent=2)}
@@ -489,40 +490,45 @@ IMPORTANT:
 - Keep the same structure
 - Fix any inaccuracies you notice
 - Remove duplicates if any"""
-        
-        try:
-            verification_completion = ollama_client.chat.completions.create(
-                model=model_name,
-                messages=[{'role': 'user', 'content': verification_prompt}],
-                temperature=0.1,
-            )
-            
-            verified_response = verification_completion.choices[0].message.content.strip()
-            print("\n✅ VERIFIED RESPONSE:")
-            print("="*80)
-            print(verified_response)
-            print("="*80 + "\n")
             
             try:
-                verified_data = json.loads(verified_response)
-                print("✅ Verification successful - using verified data")
-                extracted_data = verified_data
-            except json.JSONDecodeError:
-                import re
-                json_match = re.search(r'\{.*\}', verified_response, re.DOTALL)
-                if json_match:
-                    try:
-                        verified_data = json.loads(json_match.group())
-                        print("✅ Verification successful (after regex)")
-                        extracted_data = verified_data
-                    except:
-                        print("⚠️  Using original combined data")
-                else:
-                    print("⚠️  Using original combined data")
-                    
-        except Exception as verify_error:
-            print(f"⚠️  Verification error: {verify_error}")
-            print("Using original combined data")
+                verification_completion = ollama_client.chat.completions.create(
+                    model=model_name,
+                    messages=[{'role': 'user', 'content': verification_prompt}],
+                    temperature=0.1,
+                )
+                
+                verified_response = verification_completion.choices[0].message.content.strip()
+                print("\n✅ VERIFIED RESPONSE:")
+                print("="*80)
+                print(verified_response)
+                print("="*80 + "\n")
+                
+                try:
+                    verified_data = json.loads(verified_response)
+                    print("✅ Verification successful - using verified data")
+                    extracted_data = verified_data
+                except json.JSONDecodeError:
+                    import re
+                    json_match = re.search(r'\{.*\}', verified_response, re.DOTALL)
+                    if json_match:
+                        try:
+                            verified_data = json.loads(json_match.group())
+                            print("✅ Verification successful (after regex)")
+                            extracted_data = verified_data
+                        except:
+                            print("⚠️  Verification JSON parsing failed - using original data")
+                    else:
+                        print("⚠️  Verification returned invalid format - using original data")
+                        
+            except Exception as verify_error:
+                print(f"⚠️  Verification error: {verify_error}")
+                print("Using original extracted data")
+        else:
+            print("\n" + "="*80)
+            print(f"⚠️  SKIPPING SELF-VERIFICATION (report has {len(images_list)} pages - too large)")
+            print("Using original extracted data without verification")
+            print("="*80 + "\n")
         
         # Continue with saving regardless of verification success/failure
         print("\n" + "="*80)
