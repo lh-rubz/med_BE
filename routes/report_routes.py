@@ -287,3 +287,60 @@ class ReportImageByIndex(Resource):
         
         return send_file(file_path, mimetype=mimetype, as_attachment=False)
 
+
+@reports_ns.route('/delete-all')
+class DeleteAllReports(Resource):
+    @reports_ns.doc(
+        security='Bearer Auth',
+        description='DELETE ALL REPORTS - FOR TESTING ONLY - Requires admin password',
+        params={'password': 'Admin password (testingAdmin)'}
+    )
+    @jwt_required()
+    def delete(self):
+        """Delete ALL reports for the current user - FOR TESTING PURPOSES ONLY"""
+        current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+        
+        # Check for admin password
+        password = request.args.get('password') or request.json.get('password') if request.json else None
+        
+        if password != 'testingAdmin':
+            return {
+                'message': 'Unauthorized - Invalid admin password',
+                'hint': 'Use password=testingAdmin'
+            }, 403
+        
+        try:
+            # Get all reports for this user
+            reports = Report.query.filter_by(user_id=current_user_id).all()
+            report_count = len(reports)
+            
+            if report_count == 0:
+                return {
+                    'message': 'No reports to delete',
+                    'deleted_count': 0
+                }, 200
+            
+            # Delete all reports (cascade will handle ReportField, AdditionalField, and ReportFile)
+            for report in reports:
+                db.session.delete(report)
+            
+            db.session.commit()
+            
+            return {
+                'message': f'Successfully deleted all reports for user (TESTING MODE)',
+                'deleted_count': report_count,
+                'user_id': current_user_id,
+                'user_email': user.email
+            }, 200
+            
+        except Exception as e:
+            db.session.rollback()
+            return {
+                'message': 'Failed to delete reports',
+                'error': str(e)
+            }, 500
+
