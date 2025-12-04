@@ -551,7 +551,7 @@ IMPORTANT:
         # Save to database
         medical_data_str = json.dumps(medical_data_list, sort_keys=True)
         report_hash = hashlib.sha256(medical_data_str.encode()).hexdigest()
-        first_filename = original_filenames[0] if original_filenames else "unknown"
+        first_filename = saved_files[0]['original_filename'] if saved_files else "unknown"
         
         new_report = Report(
             user_id=current_user_id,
