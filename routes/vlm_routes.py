@@ -308,33 +308,54 @@ class ChatResource(Resource):
 
 EXTRACTION RULES:
 1. Extract EVERY test result, measurement, value visible in this image.
+   - Extract each test ONLY ONCE - do not duplicate tests
+   - If a test appears multiple times (e.g., "RDW" and "RDW-CV"), extract it only once with the most specific name
+   
 2. Identify the REPORT TYPE from this EXACT list (choose the closest match):
 {report_types_list}
+
 3. Extract REFERRING PHYSICIAN names ONLY (doctors who ordered/referred the test).
    - DO NOT include template doctors, clinic signatures, or lab directors
    - Only extract doctors specifically associated with THIS patient's case
+   - Look for "Ref. By:", "Referred By:", or similar labels
+   
 4. For each result provide: test name, value, unit, normal range, if normal/abnormal.
    - Extract BOTH numeric values (e.g., "13.5 g/dL") AND qualitative results (e.g., "Normal", "NAD", "Negative")
    - "NAD" means "No Abnormality Detected" - treat as normal result
    - For qualitative results, put the assessment in field_value
    - SKIP category headers - only extract tests with actual values
+   - DO NOT extract section headers like "BLOOD INDICES", "DIFFERENTIAL COUNT", etc.
+   
 5. Extract the REPORT DATE - the date the report was generated/issued.
-   - Look for "Report Date", "Reported on", "Date", "Issue Date"
+   - Look for "Reported on:", "Report Date", "Date", "Issue Date"
    - Format as YYYY-MM-DD
-6. Count ALL test fields in THIS image.
+   
+6. Count ALL test fields in THIS image (excluding headers).
+
+CRITICAL - EXACT VALUE READING:
+- Read EVERY number EXACTLY as shown - triple-check each digit
+- Preserve all decimal places visible (e.g., "15.75" not "15.7")
+- For ranges, read BOTH numbers exactly (e.g., "150000-410000" not "150000-400000")
+- Pay special attention to:
+  * Leading zeros (e.g., "00-06" not "0-6")
+  * Large numbers (e.g., "320000" not "32000")
+  * Decimal precision (e.g., "87.75" not "87.7")
 
 CRITICAL - "is_normal" FIELD:
 - Set "is_normal": true ONLY if "field_value" is STRICTLY within "normal_range"
 - Set "is_normal": false if outside range or marked abnormal
 - If no range provided, default to true
 
-CRITICAL - DECIMAL PRECISION:
-- Read EXACT decimal values (e.g., "15.75" not "15.7")
-- Preserve all decimal places visible
+CRITICAL - "notes" FIELD:
+- If the report shows "Low" or "High" next to a value, add it to notes
+- Example: if value is marked "Low", set notes: "Marked as Low on report"
+- Example: if value is marked "High", set notes: "Marked as High on report"
+- Otherwise leave notes empty
 
 CRITICAL - DOCTOR NAMES:
 - Extract ONLY REFERRING PHYSICIAN (who ordered the test)
-- Read name carefully and spell exactly
+- Read name carefully and spell exactly as shown
+- Look for "Ref. By:" or "Referred By:" labels
 
 RESPONSE FORMAT - Return ONLY valid JSON:
 {{
@@ -350,7 +371,8 @@ RESPONSE FORMAT - Return ONLY valid JSON:
             "field_unit": "g/dL or empty",
             "normal_range": "13.5-17.5 or empty",
             "is_normal": true,
-            "field_type": "measurement"
+            "field_type": "measurement",
+            "notes": "Marked as Low on report OR empty"
         }}
     ]
 }}"""
