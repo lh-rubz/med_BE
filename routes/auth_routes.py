@@ -411,42 +411,50 @@ class ChangePassword(Resource):
     @auth_ns.expect(change_password_model)
     def post(self):
         """Change user password"""
-        data = request.json
-        email = data.get('email')
-        old_password = data.get('old_password')
-        new_password = data.get('new_password')
-        
-        if not email or not old_password or not new_password:
-            return {'message': 'Email, old password, and new password are required'}, 400
-            
-        user = User.query.filter_by(email=email).first()
-        
-        if not user:
-            return {'message': 'User not found'}, 404
-            
-        if not user.check_password(old_password):
-            return {'message': 'Incorrect current password'}, 401
-            
-        # Validate password strength
-        is_valid, error_message = validate_password_strength(new_password)
-        if not is_valid:
-            return {'message': error_message}, 400
-            
         try:
-            user.set_password(new_password)
-            db.session.commit()
+            data = request.json
+            email = data.get('email')
+            old_password = data.get('old_password')
+            new_password = data.get('new_password')
             
+            if not email or not old_password or not new_password:
+                return {'message': 'Please provide email, current password, and new password'}, 400
+                
+            user = User.query.filter_by(email=email).first()
+            
+            if not user:
+                return {'message': 'No account found with this email address'}, 404
+                
+            if not user.check_password(old_password):
+                return {'message': 'The current password you entered is incorrect'}, 401
+                
+            if old_password == new_password:
+                return {'message': 'New password cannot be the same as your current password'}, 400
+                
+            # Validate password strength
+            is_valid, error_message = validate_password_strength(new_password)
+            if not is_valid:
+                return {'message': error_message}, 400
+                
             try:
-                html_content = get_password_changed_email(user.first_name)
-                send_brevo_email(
-                    recipient_email=user.email,
-                    subject='Password Changed - MediScan',
-                    html_content=html_content
-                )
-            except Exception as email_error:
-                print(f"Failed to send password change confirmation: {str(email_error)}")
-            
-            return {'message': 'Password changed successfully'}, 200
+                user.set_password(new_password)
+                db.session.commit()
+                
+                try:
+                    html_content = get_password_changed_email(user.first_name)
+                    send_brevo_email(
+                        recipient_email=user.email,
+                        subject='Password Changed - MediScan',
+                        html_content=html_content
+                    )
+                except Exception as email_error:
+                    print(f"Failed to send password change confirmation: {str(email_error)}")
+                
+                return {'message': 'Password changed successfully'}, 200
+            except Exception as e:
+                db.session.rollback()
+                print(f"Database error during password change: {str(e)}")
+                return {'message': 'An internal error occurred while changing password. Please try again.'}, 500
+                
         except Exception as e:
-            db.session.rollback()
-            return {'message': 'Failed to change password', 'error': str(e)}, 500
+            return {'message': 'Invalid request format', 'error': str(e)}, 400
