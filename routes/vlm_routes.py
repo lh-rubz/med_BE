@@ -329,7 +329,11 @@ RULES:
 5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
 6. Extract report date as YYYY-MM-DD
 7. If value marked "High" or "Low", add to notes
-8. IMPORTANT - Extract category/section for EACH test:
+8. IMPORTANT - Extract normal_range WITHOUT units:
+   - Remove units from range (e.g., "12 - 16 g/dL" → "12 - 16")
+   - Keep only the numeric range values
+   - For text ranges (e.g., "Normal: <5.7"), keep the text but remove units
+9. IMPORTANT - Extract category/section for EACH test:
    - Look for section headers like "DIFFERENTIAL COUNT", "BLOOD INDICES", "ABSOLUTE COUNT", "WBC COUNT", "PLATELET COUNT"
    - Assign each test to its category (use exact header text in UPPERCASE)
    - If no category header visible, use empty string
