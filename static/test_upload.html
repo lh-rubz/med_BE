@@ -348,7 +348,7 @@
             }
         }
 
-        async function uploadFiles() {
+        function uploadFiles() {
             const filesInput = document.getElementById('files');
             const files = filesInput.files;
             const uploadBtn = document.querySelector('#uploadCard .btn-success');
@@ -356,6 +356,9 @@
             const uploadStatus = document.getElementById('uploadStatus');
             const responseContainer = document.getElementById('responseContainer');
             const responseContent = document.getElementById('responseContent');
+            const progressBar = document.getElementById('progressBar');
+            const progressContainer = document.querySelector('.progress-container');
+            const progressText = document.getElementById('progressText');
 
             if (files.length === 0) {
                 showStatus(uploadStatus, '⚠️ Please select at least one file', 'error');
@@ -368,44 +371,113 @@
             uploadStatus.classList.add('hidden');
             responseContainer.classList.add('hidden');
 
+            // Show progress bar
+            if (progressContainer) {
+                progressContainer.classList.remove('hidden');
+                progressBar.style.width = '0%';
+                progressBar.className = 'progress-bar bg-primary';
+                progressText.textContent = 'Starting upload...';
+            }
+
             // Create FormData
             const formData = new FormData();
             for (let i = 0; i < files.length; i++) {
                 formData.append('file', files[i]);
             }
 
-            try {
-                const response = await fetch(`${API_BASE}/vlm/chat`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${authToken}`
-                    },
-                    body: formData
-                });
+            // Use XMLHttpRequest for tracking upload progress
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `${API_BASE}/vlm/chat`, true);
+            xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
 
-                const data = await response.json();
-
-                // Show response
-                responseContent.textContent = JSON.stringify(data, null, 2);
-                responseContainer.classList.remove('hidden');
-
-                if (response.ok) {
-                    showStatus(uploadStatus,
-                        `✅ Success! Processed ${data.total_images_processed || files.length} image(s) and created report #${data.report?.report_id || 'N/A'}`,
-                        'success');
-                } else {
-                    showStatus(uploadStatus,
-                        `❌ Upload failed (${response.status}): ${data.error || data.message || 'Unknown error'}`,
-                        'error');
+            // Upload progress
+            xhr.upload.onprogress = function (e) {
+                if (e.lengthComputable) {
+                    const percentComplete = (e.loaded / e.total) * 100;
+                    if (percentComplete < 100) {
+                        progressBar.style.width = percentComplete + '%';
+                        progressText.textContent = `Uploading: ${Math.round(percentComplete)}%`;
+                    } else {
+                        progressBar.style.width = '100%';
+                        progressBar.className = 'progress-bar bg-info progress-bar-striped progress-bar-animated';
+                        progressText.textContent = 'Processing on server... (this may take a moment)';
+                    }
                 }
-            } catch (error) {
-                showStatus(uploadStatus, `❌ Network error: ${error.message}`, 'error');
-                responseContent.textContent = `Error: ${error.message}\n\n${error.stack}`;
-                responseContainer.classList.remove('hidden');
-            } finally {
+            };
+
+            // Handle streaming response
+            let lastProcessedIndex = 0;
+
+            xhr.onprogress = function () {
+                const responseText = xhr.responseText;
+                const newContent = responseText.substring(lastProcessedIndex);
+
+                // Process each line
+                const lines = newContent.split('\n');
+
+                for (let line of lines) {
+                    if (!line.trim()) continue;
+
+                    try {
+                        const data = JSON.parse(line);
+
+                        // Handle different message types
+                        if (data.type === 'progress') {
+                            progressText.textContent = data.message;
+                            if (data.percent) {
+                                progressBar.style.width = data.percent + '%';
+                            }
+                        } else if (data.type === 'result') {
+                            // Final success
+                            showStatus(uploadStatus,
+                                `✅ Success! Report #${data.data?.report_id || 'N/A'} created.`,
+                                'success');
+                            responseContent.textContent = JSON.stringify(data.data, null, 2);
+                            responseContainer.classList.remove('hidden');
+
+                            // Finish progress bar
+                            progressBar.style.width = '100%';
+                            progressBar.className = 'progress-bar bg-success';
+                            progressText.textContent = 'Complete!';
+                        } else if (data.type === 'error') {
+                            showStatus(uploadStatus, `❌ Error: ${data.error}`, 'error');
+                            progressBar.className = 'progress-bar bg-danger';
+                            progressText.textContent = 'Failed';
+                        }
+                    } catch (e) {
+                        // Incomplete JSON chunk, wait for next packet
+                    }
+                }
+
+                // Update index for next chunk, but check if the last line was partial
+                // In a robust implementation we'd handle partial lines better, 
+                // but usually NDJSON splits cleanly or we just retry parsing.
+                // A safer way is to only advance index if we found newlines.
+                lastProcessedIndex = responseText.lastIndexOf('\n') + 1;
+            };
+
+            xhr.onload = function () {
                 uploadBtn.disabled = false;
                 uploadBtnText.textContent = 'Upload and Process';
-            }
+
+                if (xhr.status !== 200) {
+                    try {
+                        const errorData = JSON.parse(xhr.responseText);
+                        showStatus(uploadStatus, `❌ Error (${xhr.status}): ${errorData.message || errorData.error}`, 'error');
+                    } catch (e) {
+                        showStatus(uploadStatus, `❌ Upload failed (${xhr.status})`, 'error');
+                    }
+                    progressBar.className = 'progress-bar bg-danger';
+                }
+            };
+
+            xhr.onerror = function () {
+                showStatus(uploadStatus, '❌ Network Error', 'error');
+                uploadBtn.disabled = false;
+                uploadBtnText.textContent = 'Upload and Process';
+            };
+
+            xhr.send(formData);
         }
 
         function showStatus(element, message, type) {
