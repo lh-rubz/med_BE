@@ -59,6 +59,7 @@ verify_reset_code_model = auth_ns.model('VerifyResetCode', {
 })
 
 change_password_model = auth_ns.model('ChangePassword', {
+    'email': fields.String(required=True, description='User email address'),
     'old_password': fields.String(required=True, description='Current password'),
     'new_password': fields.String(required=True, description='New password')
 })
@@ -407,28 +408,45 @@ class ResetPassword(Resource):
 
 @auth_ns.route('/change-password')
 class ChangePassword(Resource):
-    @auth_ns.doc(security='Bearer Auth')
-    @jwt_required()
     @auth_ns.expect(change_password_model)
     def post(self):
         """Change user password"""
-        current_user_id = int(get_jwt_identity())
-        user = User.query.get(current_user_id)
+        data = request.json
+        email = data.get('email')
+        old_password = data.get('old_password')
+        new_password = data.get('new_password')
+        
+        if not email or not old_password or not new_password:
+            return {'message': 'Email, old password, and new password are required'}, 400
+            
+        user = User.query.filter_by(email=email).first()
         
         if not user:
             return {'message': 'User not found'}, 404
             
-        data = request.json
-        old_password = data.get('old_password')
-        new_password = data.get('new_password')
-        
-        if not old_password or not new_password:
-            return {'message': 'Old and new passwords are required'}, 400
-            
         if not user.check_password(old_password):
             return {'message': 'Incorrect current password'}, 401
             
-        user.set_password(new_password)
-        db.session.commit()
-        
-        return {'message': 'Password changed successfully'}, 200
+        # Validate password strength
+        is_valid, error_message = validate_password_strength(new_password)
+        if not is_valid:
+            return {'message': error_message}, 400
+            
+        try:
+            user.set_password(new_password)
+            db.session.commit()
+            
+            try:
+                html_content = get_password_changed_email(user.first_name)
+                send_brevo_email(
+                    recipient_email=user.email,
+                    subject='Password Changed - MediScan',
+                    html_content=html_content
+                )
+            except Exception as email_error:
+                print(f"Failed to send password change confirmation: {str(email_error)}")
+            
+            return {'message': 'Password changed successfully'}, 200
+        except Exception as e:
+            db.session.rollback()
+            return {'message': 'Failed to change password', 'error': str(e)}, 500
