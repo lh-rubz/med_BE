@@ -16,6 +16,7 @@ import io
 from models import db, User, Report, ReportField, ReportFile
 from config import ollama_client, Config
 from utils.medical_validator import validate_medical_data, MedicalValidator
+from utils.ocr_extractor import get_ocr_instance
 
 # Create namespace
 vlm_ns = Namespace('vlm', description='VLM and Report operations')
@@ -359,16 +360,51 @@ Return ONLY valid JSON:
     ]
 }}"""
             
+            # STEP 1: Extract text using OCR for better Arabic accuracy
+            print(f"📝 Step 1: Extracting text with OCR...")
+            ocr_text = None
+            try:
+                ocr = get_ocr_instance(languages=['ar', 'en'])
+                ocr_text = ocr.extract_text(image_info['data'])
+                print(f"✅ OCR extracted {len(ocr_text)} characters")
+                print(f"📄 OCR Text Preview:\n{ocr_text[:300]}...\n")
+            except Exception as ocr_error:
+                print(f"⚠️  OCR failed: {ocr_error}, using image-only mode")
+            
+            # STEP 2: Send BOTH image and OCR text to VLM
+            # Image = layout/structure, OCR = accurate Arabic text
+            print(f"🤖 Step 2: Structuring data with VLM (hybrid mode)...")
+            
             image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
             image_format = image_info['format']
             
-            content = [
-                {'type': 'text', 'text': prompt_text},
-                {
-                    'type': 'image_url',
-                    'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                }
-            ]
+            if ocr_text:
+                # Hybrid mode: Image + OCR text
+                enhanced_prompt = f"""{prompt_text}
+
+IMPORTANT: I've also extracted the text using OCR below. Use this OCR text for ACCURATE Arabic character recognition, but use the IMAGE for understanding the layout and structure.
+
+OCR EXTRACTED TEXT:
+{ocr_text}
+
+Use the OCR text to get accurate Arabic names and values, but rely on the image to understand which values belong to which tests."""
+                
+                content = [
+                    {'type': 'text', 'text': enhanced_prompt},
+                    {
+                        'type': 'image_url',
+                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                    }
+                ]
+            else:
+                # Fallback: Image-only mode
+                content = [
+                    {'type': 'text', 'text': prompt_text},
+                    {
+                        'type': 'image_url',
+                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                    }
+                ]
             
             try:
                 model_name = Config.OLLAMA_MODEL
@@ -408,6 +444,7 @@ Return ONLY valid JSON:
                     continue
                 
                 # Store patient info from first valid extraction
+                # (VLM now processes OCR text, so names should be accurate)
                 if not patient_info and extracted_data.get('patient_name'):
                     patient_info = {
                         'patient_name': extracted_data.get('patient_name', ''),
