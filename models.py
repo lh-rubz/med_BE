@@ -110,6 +110,7 @@ class ReportFile(db.Model):
     original_filename = db.Column(db.String(255), nullable=False)  # Original uploaded name
     stored_filename = db.Column(db.String(255), nullable=False)    # Timestamped filename on disk
     file_path = db.Column(db.String(512), nullable=False)          # Full path to file
+    file_hash = db.Column(db.String(64), nullable=True, index=True) # SHA256 hash of file content
     file_type = db.Column(db.String(10), nullable=False)           # Extension (jpg, pdf, etc)
     file_size = db.Column(db.Integer)                              # Size in bytes
     page_number = db.Column(db.Integer)                            # For PDF pages, null for images

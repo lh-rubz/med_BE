@@ -203,7 +203,22 @@ class ChatResource(Resource):
         for file in files:
             if file.filename == '':
                 continue
-                
+            
+            # 1. Calculate File Hash for Duplicate Detection
+            file_content = file.read()
+            file_hash = hashlib.sha256(file_content).hexdigest()
+            file.seek(0)  # Reset pointer for saving
+            
+            # Check if we've seen this file before
+            existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
+            if existing_file:
+                print(f"⚠️ Duplicate file detected: {file.filename} (Hash: {file_hash})")
+                return {
+                    'message': f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})',
+                    'error': 'Duplicate file',
+                    'report_id': existing_file.report_id
+                }, 409
+
             if not allowed_file(file.filename):
                 return {'error': f'File type not allowed for {file.filename}. Allowed types: {", ".join(Config.ALLOWED_EXTENSIONS)}'}, 400
             
@@ -227,6 +242,7 @@ class ChatResource(Resource):
                 'file_path': file_path,
                 'file_type': file_extension,
                 'file_size': file_size,
+                'file_hash': file_hash,  # Pass hash to be saved
                 'is_pdf': file_extension == 'pdf'
             })
             
@@ -610,9 +626,31 @@ Use the OCR text to get accurate Arabic names and values, but rely on the image 
         
         medical_data_list = extracted_data.get('medical_data', [])
         
-        # Check for duplicates
+        # Check for duplicates using SEMANTIC COMPARISON
         if len(medical_data_list) > 0:
-            existing_reports = Report.query.filter_by(user_id=current_user_id).all()
+            extracted_date_str = extracted_data.get('report_date')
+            existing_reports = []
+            
+            # OPTIMIZATION: If we have a date, only check reports from that date
+            if extracted_date_str and len(extracted_date_str) == 10:  # YYYY-MM-DD
+                try:
+                    # Parse date to ignore time components
+                    target_date = datetime.strptime(extracted_date_str, '%Y-%m-%d').date()
+                    # Query reports where date matches (checking range for safety)
+                    start_of_day = datetime.combine(target_date, datetime.min.time())
+                    end_of_day = datetime.combine(target_date, datetime.max.time())
+                    
+                    existing_reports = Report.query.filter(
+                        Report.user_id == current_user_id,
+                        Report.report_date >= start_of_day,
+                        Report.report_date <= end_of_day
+                    ).all()
+                    print(f"   ℹ️  Checking against {len(existing_reports)} reports from {target_date}")
+                except ValueError:
+                    # Invalid date format, fall back to checking all
+                    existing_reports = Report.query.filter_by(user_id=current_user_id).all()
+            else:
+                existing_reports = Report.query.filter_by(user_id=current_user_id).all()
             new_field_map = {str(item.get('field_name', '')).lower().strip(): str(item.get('field_value', '')).strip() 
                              for item in medical_data_list}
             
@@ -661,6 +699,7 @@ Use the OCR text to get accurate Arabic names and values, but rely on the image 
                         file_path=file_info['file_path'],
                         file_type=file_info['file_type'],
                         file_size=file_info['file_size'],
+                        file_hash=file_info.get('file_hash'),
                         page_number=page_info.get('page_number')
                     )
                     db.session.add(report_file)
@@ -675,6 +714,7 @@ Use the OCR text to get accurate Arabic names and values, but rely on the image 
                     file_path=file_info['file_path'],
                     file_type=file_info['file_type'],
                     file_size=file_info['file_size'],
+                    file_hash=file_info.get('file_hash'),
                     page_number=None
                 )
                 db.session.add(report_file)
