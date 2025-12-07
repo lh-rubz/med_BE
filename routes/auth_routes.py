@@ -1,6 +1,6 @@
 from flask import request
 from flask_restx import Resource, Namespace, fields
-from flask_jwt_extended import create_access_token
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from datetime import datetime, timedelta, timezone
 import secrets
 
@@ -56,6 +56,11 @@ reset_password_model = auth_ns.model('ResetPassword', {
 verify_reset_code_model = auth_ns.model('VerifyResetCode', {
     'email': fields.String(required=True, description='User email address'),
     'code': fields.String(required=True, description='6-digit reset code from email')
+})
+
+change_password_model = auth_ns.model('ChangePassword', {
+    'old_password': fields.String(required=True, description='Current password'),
+    'new_password': fields.String(required=True, description='New password')
 })
 
 
@@ -398,3 +403,32 @@ class ResetPassword(Resource):
         except Exception as e:
             db.session.rollback()
             return {'message': 'Password reset failed', 'error': str(e)}, 400
+
+
+@auth_ns.route('/change-password')
+class ChangePassword(Resource):
+    @auth_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    @auth_ns.expect(change_password_model)
+    def post(self):
+        """Change user password"""
+        current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+            
+        data = request.json
+        old_password = data.get('old_password')
+        new_password = data.get('new_password')
+        
+        if not old_password or not new_password:
+            return {'message': 'Old and new passwords are required'}, 400
+            
+        if not user.check_password(old_password):
+            return {'message': 'Incorrect current password'}, 401
+            
+        user.set_password(new_password)
+        db.session.commit()
+        
+        return {'message': 'Password changed successfully'}, 200
