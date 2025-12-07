@@ -136,10 +136,21 @@ class MedicalOCR:
             if date_match:
                 extracted['report_date'] = date_match.group(1).strip()
             
-            # Extract doctor name
-            doctor_match = re.search(r'(?:Doctor Name|Dr\.|Ref\. By|الطبيب)[:\s]+([^\n]+)', full_text, re.IGNORECASE)
-            if doctor_match:
-                extracted['doctor_name'] = doctor_match.group(1).strip()
+            # Extract doctor name - try multiple patterns
+            doctor_patterns = [
+                r'(?:Doctor Name|Dr\.|Ref\. By|الطبيب)[:\s]+([^\n]+)',  # Standard fields
+                r'(?:Signature)[:\s]*\n\s*([^\n]+)',  # Near signature
+                r'Dr\.?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # Dr. followed by name
+            ]
+            
+            for pattern in doctor_patterns:
+                doctor_match = re.search(pattern, full_text, re.IGNORECASE)
+                if doctor_match:
+                    doctor_name = doctor_match.group(1).strip()
+                    # Filter out common non-names
+                    if doctor_name and len(doctor_name) > 2 and doctor_name.lower() not in ['signature', 'name', ':']:
+                        extracted['doctor_name'] = doctor_name
+                        break
             
             return extracted
         except Exception as e:

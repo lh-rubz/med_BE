@@ -281,6 +281,16 @@ class ChatResource(Resource):
                 'report': report_data
             }, 201
             
+        except ValueError as e:
+            db.session.rollback()
+            error_msg = str(e)
+            if "DUPLICATE_REPORT" in error_msg:
+                print(f"⚠️  Duplicate report detected: {error_msg}")
+                return {'error': error_msg.replace("DUPLICATE_REPORT: ", ""), 'code': 'DUPLICATE_REPORT'}, 409
+            
+            print(f"❌ Value Error processing images: {error_msg}")
+            return {'error': f'Processing error: {error_msg}'}, 400
+            
         except Exception as e:
             db.session.rollback()
             print(f"❌ Error processing images: {str(e)}")
@@ -557,7 +567,7 @@ Use the OCR text to get accurate Arabic names and values, but rely on the image 
                     match_percentage = (matching_fields / len(new_field_map)) * 100 if new_field_map else 0
                     
                     if match_percentage >= 90:
-                        raise Exception(f'This report appears to be a duplicate of an existing report (#{existing_report.id})')
+                        raise ValueError(f'DUPLICATE_REPORT: This report appears to be a duplicate of an existing report (#{existing_report.id})')
         
         # Save to database
         medical_data_str = json.dumps(medical_data_list, sort_keys=True)
