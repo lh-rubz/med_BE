@@ -244,7 +244,13 @@ class ReportImageByIndex(Resource):
     @reports_ns.doc(security='Bearer Auth')
     @jwt_required()
     def get(self, report_id, image_index):
-        """Get a specific image/page by index for a report"""
+        """
+        Get a specific image/page by index for a report
+        
+        Note: This endpoint accepts the JWT token in the 'Authorization' header OR 
+        in a query parameter named 'token' (e.g., ?token=eyJhbGciOi...) to support 
+        direct access in <img> tags.
+        """
         current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
