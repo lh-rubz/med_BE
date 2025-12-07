@@ -7,6 +7,7 @@ import os
 from config import Config
 from models import db
 from routes import auth_ns, user_ns, vlm_ns, reports_ns
+from utils.medical_mappings import seed_synonyms
 
 # Create Flask app
 app = Flask(__name__)
@@ -107,6 +108,10 @@ def init_db():
         try:
             db.create_all()
             print("Database tables created successfully!")
+            
+            # Seed medical synonyms
+            from utils.medical_mappings import seed_synonyms
+            seed_synonyms()
         except Exception as e:
             print(f"Database initialization warning: {e}")
             print("App will run in read-only mode. Please verify PostgreSQL connection.")

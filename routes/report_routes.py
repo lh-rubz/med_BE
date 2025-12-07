@@ -3,9 +3,13 @@ from flask_restx import Resource, Namespace
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import os
 import glob
+from collections import defaultdict
+from datetime import datetime
 
 from models import db, User, Report, ReportField, AdditionalField, ReportFile
 from config import Config
+from utils.medical_mappings import get_search_terms
+from sqlalchemy import or_
 
 # Create namespace
 reports_ns = Namespace('reports', description='Medical reports management')
@@ -93,6 +97,123 @@ class UserReports(Resource):
                 'last_name': user.last_name
             },
             'reports': reports_data
+        }, 200
+
+
+@reports_ns.route('/timeline')
+class Timeline(Resource):
+    @reports_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    def get(self):
+        """Get chronological timeline of reports with health summaries"""
+        current_user_id = int(get_jwt_identity())
+        
+        # Get all reports ordered by date
+        reports = Report.query.filter_by(user_id=current_user_id).order_by(Report.report_date.desc()).all()
+        
+        timeline_data = []
+        for report in reports:
+            # Count abnormal fields
+            abnormal_fields = ReportField.query.filter_by(
+                report_id=report.id, 
+                is_normal=False
+            ).all()
+            
+            total_fields_count = ReportField.query.filter_by(report_id=report.id).count()
+            
+            timeline_data.append({
+                'report_id': report.id,
+                'date': report.report_date.strftime('%Y-%m-%d'),
+                'report_type': report.report_type or 'General Report',
+                'doctor_names': report.doctor_names,
+                'summary': {
+                    'total_tests': total_fields_count,
+                    'abnormal_count': len(abnormal_fields),
+                    'abnormal_fields': [f.field_name for f in abnormal_fields]
+                }
+            })
+            
+        return {'timeline': timeline_data}, 200
+
+
+@reports_ns.route('/trends')
+class HealthTrends(Resource):
+    @reports_ns.doc(security='Bearer Auth', params={'field_name': 'Comma separated test names (e.g. Hemoglobin,WBC)'})
+    @jwt_required()
+    def get(self):
+        """Get historical values for specific health metrics"""
+        current_user_id = int(get_jwt_identity())
+        field_names = request.args.get('field_name', '').split(',')
+        
+        if not field_names or field_names == ['']:
+            return {'message': 'Please provide field_name parameter'}, 400
+            
+        trends = {}
+        for name in field_names:
+            name = name.strip()
+            if not name: 
+                continue
+                
+            # Expand search terms using aliases
+            search_terms = get_search_terms(name)
+            
+            # Build query with OR condition for all aliases
+            filters = [ReportField.field_name.ilike(f"%{term}%") for term in search_terms]
+            
+            fields = db.session.query(ReportField, Report.report_date).join(Report).filter(
+                ReportField.user_id == current_user_id,
+                or_(*filters)
+            ).order_by(Report.report_date).all()
+            
+            if not fields:
+                continue
+                
+            data_points = []
+            for field, date in fields:
+                # Try to clean value (handle "12.5 mg/dL" -> 12.5)
+                try:
+                    import re
+                    numeric_match = re.search(r"[-+]?\d*\.\d+|\d+", field.field_value)
+                    clean_value = float(numeric_match.group()) if numeric_match else field.field_value
+                except:
+                    clean_value = field.field_value
+                    
+                data_points.append({
+                    'date': date.strftime('%Y-%m-%d'),
+                    'value': clean_value,
+                    'raw_value': field.field_value,
+                    'unit': field.field_unit,
+                    'is_normal': field.is_normal,
+                    'report_id': field.report_id
+                })
+            
+            trends[name] = data_points
+            
+        return {'trends': trends}, 200
+
+
+@reports_ns.route('/stats')
+class TimelineStats(Resource):
+    @reports_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    def get(self):
+        """Get high-level statistics for the timeline header"""
+        current_user_id = int(get_jwt_identity())
+        
+        total_reports = Report.query.filter_by(user_id=current_user_id).count()
+        last_report = Report.query.filter_by(user_id=current_user_id).order_by(Report.report_date.desc()).first()
+        
+        # Calculate overall health status based on recent abnormal results
+        health_status = "Good"
+        if last_report:
+            abnormal_count = ReportField.query.filter_by(report_id=last_report.id, is_normal=False).count()
+            if abnormal_count > 0:
+                health_status = "Attention Needed"
+                
+        return {
+            'total_reports': total_reports,
+            'last_checkup': last_report.report_date.strftime('%Y-%m-%d') if last_report else None,
+            'health_status': health_status
         }, 200
 
 
@@ -349,4 +470,3 @@ class DeleteAllReports(Resource):
                 'message': 'Failed to delete reports',
                 'error': str(e)
             }, 500
-

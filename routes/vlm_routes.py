@@ -13,10 +13,12 @@ import fitz  # PyMuPDF
 from PIL import Image
 import io
 
-from models import db, User, Report, ReportField, ReportFile
+from models import db, User, Report, ReportField, ReportFile, MedicalSynonym
 from config import ollama_client, Config
 from utils.medical_validator import validate_medical_data, MedicalValidator
 from utils.ocr_extractor import get_ocr_instance
+from utils.medical_mappings import add_new_alias
+from ollama import Client
 
 # Create namespace
 vlm_ns = Namespace('vlm', description='VLM and Report operations')
@@ -501,6 +503,64 @@ Use the OCR text to get accurate Arabic names and values, but rely on the image 
         print("="*80)
         print("Validating numeric fields, recalculating is_normal flags...")
         
+        # ---------------------------------------------------------
+        # AUTO-LEARNING SYNONYM STANDARDIZATION
+        # ---------------------------------------------------------
+        print("🧠 Standardizing and learning field names...")
+        medical_data = extracted_data.get('medical_data', [])
+        
+        for item in medical_data:
+            original_name = item.get('field_name', '').strip()
+            if not original_name:
+                continue
+                
+            # 1. Check if we already have a mapping
+            # (get_search_terms returns [synonyms, standard_name], so we check if any match)
+            # Actually, we want to know the STANDARD NAME for this alias.
+            
+            # Simple direct DB lookup
+            synonym_record = MedicalSynonym.query.filter_by(synonym=original_name.lower()).first()
+            
+            if synonym_record:
+                # Known alias -> Use standard name
+                print(f"   ✓ Normalized: '{original_name}' -> '{synonym_record.standard_name}'")
+                item['field_name'] = synonym_record.standard_name
+            else:
+                # Unknown -> Ask Ollama to standardize
+                # Only ask if it looks like a medical term (not empty/garbage)
+                if len(original_name) > 1:
+                    print(f"   ❓ Unknown term: '{original_name}' - Asking AI...")
+                    try:
+                        learning_prompt = f"""Identify the standard medical name for the test: "{original_name}".
+                        Return ONLY the standard name (e.g. if 'Hgb', return 'Hemoglobin').
+                        If it IS already standard, return it as is.
+                        Return 'UNKNOWN' if not a valid medical test.
+                        Do not add any punctuation or explanation."""
+                        
+                        client = Client(host=Config.OLLAMA_BASE_URL)
+                        response = client.chat(model='gemma3:4b', messages=[
+                            {'role': 'user', 'content': learning_prompt}
+                        ])
+                        
+                        standardized = response['message']['content'].strip().replace('"', '').replace("'", "")
+                        
+                        if standardized and standardized != 'UNKNOWN' and len(standardized) < 50:
+                            # Learn it!
+                            if standardized.lower() != original_name.lower():
+                                print(f"   💡 Learned: '{original_name}' is alias for '{standardized}'")
+                                add_new_alias(original_name, standardized)
+                                item['field_name'] = standardized
+                                # Also ensure standard name is in DB as a self-mapping
+                                add_new_alias(standardized, standardized)
+                            else:
+                                # It's a new standard term
+                                add_new_alias(standardized, standardized)
+                                print(f"   📝 registered new standard term: '{standardized}'")
+                    except Exception as learn_err:
+                        print(f"   ⚠️ Learning failed: {learn_err}")
+
+        # ---------------------------------------------------------
+
         try:
             # Apply medical validator for 100% accuracy
             validated_data = validate_medical_data(extracted_data)

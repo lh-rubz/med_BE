@@ -114,3 +114,12 @@ class ReportFile(db.Model):
     file_size = db.Column(db.Integer)                              # Size in bytes
     page_number = db.Column(db.Integer)                            # For PDF pages, null for images
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class MedicalSynonym(db.Model):
+    """Store variations of medical test names mapping to a standard canonical name"""
+    id = db.Column(db.Integer, primary_key=True)
+    standard_name = db.Column(db.String(100), nullable=False)  # e.g., "Hemoglobin"
+    synonym = db.Column(db.String(100), nullable=False, unique=True)  # e.g., "Hgb"
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
