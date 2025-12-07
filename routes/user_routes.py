@@ -23,6 +23,7 @@ delete_user_model = user_ns.model('DeleteUser', {
     'admin_password': fields.String(required=True, description='Admin password for testing')
 })
 
+test_email_model = user_ns.model('TestEmail', {
     'to_email': fields.String(required=True, description='Recipient email address'),
     'subject': fields.String(required=True, description='Email subject'),
     'body': fields.String(required=True, description='Email body/message'),
