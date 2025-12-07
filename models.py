@@ -83,6 +83,7 @@ class ReportField(db.Model):
     normal_range = db.Column(db.String(255))
     is_normal = db.Column(db.Boolean)
     field_type = db.Column(db.String(50))
+    category = db.Column(db.String(100))  # Category/section name (e.g., "DIFFERENTIAL COUNT", "BLOOD INDICES")
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 

@@ -324,6 +324,10 @@ RULES:
 5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
 6. Extract report date as YYYY-MM-DD
 7. If value marked "High" or "Low", add to notes
+8. IMPORTANT - Extract category/section for EACH test:
+   - Look for section headers like "DIFFERENTIAL COUNT", "BLOOD INDICES", "ABSOLUTE COUNT", "WBC COUNT", "PLATELET COUNT"
+   - Assign each test to its category (use exact header text in UPPERCASE)
+   - If no category header visible, use empty string
 
 Return ONLY valid JSON:
 {{
@@ -340,6 +344,7 @@ Return ONLY valid JSON:
             "normal_range": "13.5-17.5 or empty",
             "is_normal": true,
             "field_type": "measurement",
+            "category": "DIFFERENTIAL COUNT or empty",
             "notes": "Marked as Low on report OR empty"
         }}
     ]
@@ -575,6 +580,7 @@ Return ONLY valid JSON:
                 normal_range=str(item.get('normal_range', '')),
                 is_normal=bool(item.get('is_normal', True)),
                 field_type=str(item.get('field_type', 'measurement')),
+                category=str(item.get('category', '')),
                 notes=str(item.get('notes', ''))
             )
             db.session.add(field)
@@ -588,6 +594,7 @@ Return ONLY valid JSON:
                 'normal_range': field.normal_range,
                 'is_normal': field.is_normal,
                 'field_type': field.field_type,
+                'category': field.category,
                 'notes': field.notes
             })
         
