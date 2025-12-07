@@ -319,7 +319,12 @@ class ChatResource(Resource):
 RULES:
 1. Extract EVERY test with its value, unit, normal range. Skip headers.
 2. Report type from: {', '.join(REPORT_TYPES[:10])}... (choose closest match)
-3. Extract referring physician ONLY (look for "Ref. By:", "Referred By:")
+3. IMPORTANT - Extract doctor names:
+   - Look for "Ref. By:", "Ref By:", "Referred By:", "Referring Doctor:", or "Dr." followed by a name
+   - Extract the FULL name (e.g., "Dr. Hiren Shah" → "Hiren Shah", "Dr. M. Patel" → "M. Patel")
+   - Include middle initials if present
+   - If multiple doctors, separate with commas
+   - CRITICAL: Do NOT leave empty - if you see ANY doctor name on the report, extract it
 4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7")
 5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
 6. Extract report date as YYYY-MM-DD
