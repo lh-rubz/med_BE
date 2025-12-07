@@ -190,6 +190,32 @@
                 transform: rotate(360deg);
             }
         }
+
+        .progress-container {
+            width: 100%;
+            background-color: #f0f0f0;
+            border-radius: 8px;
+            margin-top: 15px;
+            margin-bottom: 15px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 0%;
+            height: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            text-align: center;
+            font-size: 13px;
+            color: #666;
+            margin-top: 5px;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
     </style>
 </head>
 
@@ -233,6 +259,11 @@
             <button class="btn btn-success" onclick="uploadFiles()">
                 <span id="uploadBtnText">Upload and Process</span>
             </button>
+
+            <div id="progressContainer" class="progress-container">
+                <div id="progressBar" class="progress-bar"></div>
+            </div>
+            <div id="progressText" class="progress-text hidden"></div>
 
             <div id="uploadStatus" class="hidden"></div>
 
@@ -348,7 +379,7 @@
             }
         }
 
-        async function uploadFiles() {
+        function uploadFiles() {
             const filesInput = document.getElementById('files');
             const files = filesInput.files;
             const uploadBtn = document.querySelector('#uploadCard .btn-success');
@@ -356,6 +387,9 @@
             const uploadStatus = document.getElementById('uploadStatus');
             const responseContainer = document.getElementById('responseContainer');
             const responseContent = document.getElementById('responseContent');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
 
             if (files.length === 0) {
                 showStatus(uploadStatus, '⚠️ Please select at least one file', 'error');
@@ -364,9 +398,16 @@
 
             // Disable button and show loading
             uploadBtn.disabled = true;
-            uploadBtnText.innerHTML = '<span class="loading"></span> Processing...';
+            uploadBtnText.innerHTML = '<span class="loading"></span> Initializing...';
             uploadStatus.classList.add('hidden');
             responseContainer.classList.add('hidden');
+
+            // Reset and show progress bar
+            progressBar.style.width = '0%';
+            progressBar.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'; // Reset color
+            progressContainer.style.display = 'block';
+            progressText.textContent = 'Starting upload...';
+            progressText.classList.remove('hidden');
 
             // Create FormData
             const formData = new FormData();
@@ -374,38 +415,101 @@
                 formData.append('file', files[i]);
             }
 
-            try {
-                const response = await fetch(`${API_BASE}/vlm/chat`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${authToken}`
-                    },
-                    body: formData
-                });
+            // Use XMLHttpRequest instead of fetch for progress tracking
+            const xhr = new XMLHttpRequest();
+            let processedChars = 0;
 
-                const data = await response.json();
-
-                // Show response
-                responseContent.textContent = JSON.stringify(data, null, 2);
-                responseContainer.classList.remove('hidden');
-
-                if (response.ok) {
-                    showStatus(uploadStatus,
-                        `✅ Success! Processed ${data.total_images_processed || files.length} image(s) and created report #${data.report?.report_id || 'N/A'}`,
-                        'success');
-                } else {
-                    showStatus(uploadStatus,
-                        `❌ Upload failed (${response.status}): ${data.error || data.message || 'Unknown error'}`,
-                        'error');
+            // Upload progress handler (Client -> Server)
+            xhr.upload.onprogress = function (event) {
+                if (event.lengthComputable) {
+                    const percentComplete = (event.loaded / event.total) * 100;
+                    // Only update bar if we are still uploading (not processing yet)
+                    if (percentComplete < 100) {
+                        progressBar.style.width = percentComplete + '%';
+                        progressText.textContent = `Uploading: ${Math.round(percentComplete)}%`;
+                        uploadBtnText.innerHTML = '<span class="loading"></span> Uploading...';
+                    }
                 }
-            } catch (error) {
-                showStatus(uploadStatus, `❌ Network error: ${error.message}`, 'error');
-                responseContent.textContent = `Error: ${error.message}\n\n${error.stack}`;
-                responseContainer.classList.remove('hidden');
-            } finally {
+            };
+
+            // Download progress handler (Server -> Client Streaming)
+            xhr.onprogress = function (event) {
+                const response = xhr.responseText;
+                const newContent = response.substring(processedChars);
+                processedChars = response.length;
+
+                const lines = newContent.split('\n');
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+
+                    try {
+                        const data = JSON.parse(line);
+
+                        if (data.type === 'progress') {
+                            // Update progress bar
+                            progressBar.style.width = data.percent + '%';
+                            progressBar.style.background = 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)'; // Processing color
+                            progressText.textContent = `${data.message} (${data.percent}%)`;
+
+                            if (data.details) {
+                                showStatus(uploadStatus, `⏳ ${data.details}`, 'info');
+                            }
+                        } else if (data.type === 'result') {
+                            // Final result
+                            responseContent.textContent = JSON.stringify(data.data, null, 2);
+                            responseContainer.classList.remove('hidden');
+
+                            showStatus(uploadStatus,
+                                `✅ Success! Processed ${data.data.total_images} image(s) and created report #${data.data.report_id}`,
+                                'success');
+
+                            progressText.textContent = 'Completed!';
+                            progressBar.style.width = '100%';
+                            progressBar.style.background = 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)'; // Green
+                        } else if (data.type === 'error') {
+                            showStatus(uploadStatus, `❌ Error: ${data.error}`, 'error');
+                            progressBar.style.background = '#e57373'; // Red
+                        }
+                    } catch (e) {
+                        // Incomplete chunk, ignore
+                    }
+                }
+            };
+
+            // Completion handler
+            xhr.onload = function () {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    // Handled by streaming loop (result type)
+                } else {
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        showStatus(uploadStatus,
+                            `❌ Upload failed (${xhr.status}): ${data.error || data.message || 'Unknown error'}`,
+                            'error');
+                    } catch (e) {
+                        if (!uploadStatus.textContent.includes('Error')) {
+                            showStatus(uploadStatus, `❌ Upload failed (${xhr.status})`, 'error');
+                        }
+                    }
+                    progressBar.style.background = '#e57373'; // Red
+                }
+
                 uploadBtn.disabled = false;
                 uploadBtnText.textContent = 'Upload and Process';
-            }
+            };
+
+            // Error handler
+            xhr.onerror = function () {
+                showStatus(uploadStatus, `❌ Network error`, 'error');
+                uploadBtn.disabled = false;
+                uploadBtnText.textContent = 'Upload and Process';
+                progressBar.style.background = '#e57373'; // Red
+            };
+
+            xhr.open('POST', `${API_BASE}/vlm/chat`, true);
+            xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
+            xhr.send(formData);
         }
 
         function showStatus(element, message, type) {
