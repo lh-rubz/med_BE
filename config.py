@@ -40,7 +40,8 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'MedicalApp@2025SecureKey123')
     JWT_SECRET_KEY = SECRET_KEY
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=1)
-    JWT_TOKEN_LOCATION = ['headers']
+    JWT_TOKEN_LOCATION = ['headers', 'query_string']
+    JWT_QUERY_STRING_NAME = 'token'
     JWT_HEADER_NAME = 'Authorization'
     JWT_HEADER_TYPE = 'Bearer'
     
@@ -61,6 +62,11 @@ class Config:
     # Ollama configuration
     OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434/v1')
     OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gemma3:27b')
+    
+    # File upload configuration
+    UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf'}
+    MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB max file size
 
 
 def send_brevo_email(recipient_email, subject, html_content):

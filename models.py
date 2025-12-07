@@ -1,6 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timezone
 import bcrypt
+import os
 
 db = SQLAlchemy()
 
@@ -40,8 +41,22 @@ class Report(db.Model):
     report_hash = db.Column(db.String(255), nullable=False)
     report_type = db.Column(db.String(100))
     doctor_names = db.Column(db.Text)  # Comma-separated list of doctor names
+    original_filename = db.Column(db.String(255))  # Original filename for reference
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     fields = db.relationship('ReportField', backref='report', lazy=True, cascade='all, delete-orphan')
+    files = db.relationship('ReportFile', backref='report', lazy=True, cascade='all, delete-orphan')
+    
+    def get_file_path(self):
+        """Reconstruct file path from user_id and report metadata"""
+        from config import Config
+        if self.original_filename:
+            user_folder = os.path.join(Config.UPLOAD_FOLDER, f"user_{self.user_id}")
+            # Find file that matches the pattern
+            if os.path.exists(user_folder):
+                for filename in os.listdir(user_folder):
+                    if filename.endswith(self.original_filename):
+                        return os.path.join(user_folder, filename)
+        return None
 
 
 class ReportData(db.Model):
@@ -68,6 +83,7 @@ class ReportField(db.Model):
     normal_range = db.Column(db.String(255))
     is_normal = db.Column(db.Boolean)
     field_type = db.Column(db.String(50))
+    category = db.Column(db.String(100))  # Category/section name (e.g., "DIFFERENTIAL COUNT", "BLOOD INDICES")
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -83,4 +99,18 @@ class AdditionalField(db.Model):
     is_approved = db.Column(db.Boolean, default=False)
     approved_at = db.Column(db.DateTime)
     merged_to_profile = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ReportFile(db.Model):
+    """Track uploaded files associated with reports"""
+    id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)  # Original uploaded name
+    stored_filename = db.Column(db.String(255), nullable=False)    # Timestamped filename on disk
+    file_path = db.Column(db.String(512), nullable=False)          # Full path to file
+    file_type = db.Column(db.String(10), nullable=False)           # Extension (jpg, pdf, etc)
+    file_size = db.Column(db.Integer)                              # Size in bytes
+    page_number = db.Column(db.Integer)                            # For PDF pages, null for images
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

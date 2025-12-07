@@ -23,11 +23,15 @@ delete_user_model = user_ns.model('DeleteUser', {
     'admin_password': fields.String(required=True, description='Admin password for testing')
 })
 
-test_email_model = user_ns.model('TestEmail', {
     'to_email': fields.String(required=True, description='Recipient email address'),
     'subject': fields.String(required=True, description='Email subject'),
     'body': fields.String(required=True, description='Email body/message'),
     'admin_password': fields.String(required=True, description='Admin password (testingAdmin)')
+})
+
+change_password_model = user_ns.model('ChangePassword', {
+    'old_password': fields.String(required=True, description='Current password'),
+    'new_password': fields.String(required=True, description='New password')
 })
 
 
@@ -83,6 +87,35 @@ class UserProfile(Resource):
         except Exception as e:
             db.session.rollback()
             return {'message': 'Update failed', 'error': str(e)}, 400
+
+
+@user_ns.route('/change-password')
+class ChangePassword(Resource):
+    @user_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    @user_ns.expect(change_password_model)
+    def post(self):
+        """Change user password"""
+        current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+            
+        data = request.json
+        old_password = data.get('old_password')
+        new_password = data.get('new_password')
+        
+        if not old_password or not new_password:
+            return {'message': 'Old and new passwords are required'}, 400
+            
+        if not user.check_password(old_password):
+            return {'message': 'Incorrect current password'}, 401
+            
+        user.set_password(new_password)
+        db.session.commit()
+        
+        return {'message': 'Password changed successfully'}, 200
 
 
 @user_ns.route('/delete-user-testing')

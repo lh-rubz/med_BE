@@ -30,6 +30,4 @@ bcrypt
 python-dotenv
 ollama
 Pillow
-
-ollama
-Pillow
+PyMuPDF

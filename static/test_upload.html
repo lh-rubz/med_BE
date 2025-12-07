@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VLM Chat Test - Medical Report Upload</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        input[type="email"],
+        input[type="password"],
+        input[type="file"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="email"]:focus,
+        input[type="password"]:focus,
+        input[type="file"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            width: 100%;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(56, 239, 125, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .status {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .status-info {
+            background: #e3f2fd;
+            color: #1976d2;
+            border-left: 4px solid #1976d2;
+        }
+
+        .status-success {
+            background: #e8f5e9;
+            color: #388e3c;
+            border-left: 4px solid #388e3c;
+        }
+
+        .status-error {
+            background: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #c62828;
+        }
+
+        .response-container {
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .response-header {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .file-info {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, .3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Login Card -->
+        <div class="card" id="loginCard">
+            <h1>🔐 Login</h1>
+            <p class="subtitle">Enter your credentials to test the VLM chat endpoint</p>
+
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" placeholder="your.email@example.com" required>
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="Enter your password" required>
+            </div>
+
+            <button class="btn btn-primary" onclick="login()">
+                <span id="loginBtnText">Login</span>
+            </button>
+
+            <div id="loginStatus" class="hidden"></div>
+        </div>
+
+        <!-- Upload Card -->
+        <div class="card hidden" id="uploadCard">
+            <h1>📤 Upload Medical Report</h1>
+            <p class="subtitle">Upload one or multiple medical report images or PDF files</p>
+
+            <div id="userInfo" class="status status-info"></div>
+
+            <div class="form-group">
+                <label for="files">Select Files (Images or PDFs)</label>
+                <input type="file" id="files" multiple accept="image/*,.pdf">
+                <div id="fileInfo" class="file-info hidden"></div>
+            </div>
+
+            <button class="btn btn-success" onclick="uploadFiles()">
+                <span id="uploadBtnText">Upload and Process</span>
+            </button>
+
+            <div id="uploadStatus" class="hidden"></div>
+
+            <div id="responseContainer" class="hidden">
+                <div class="response-container">
+                    <div class="response-header">📊 Backend Response:</div>
+                    <pre id="responseContent"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let authToken = null;
+        let currentUser = null;
+
+        // API Base URL
+        const API_BASE = window.location.origin;
+
+        // File input change handler
+        document.getElementById('files').addEventListener('change', function (e) {
+            const files = e.target.files;
+            const fileInfo = document.getElementById('fileInfo');
+
+            if (files.length > 0) {
+                let info = `Selected ${files.length} file(s):\n`;
+                for (let i = 0; i < files.length; i++) {
+                    const size = (files[i].size / 1024).toFixed(2);
+                    info += `• ${files[i].name} (${size} KB)\n`;
+                }
+                fileInfo.textContent = info;
+                fileInfo.classList.remove('hidden');
+            } else {
+                fileInfo.classList.add('hidden');
+            }
+        });
+
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const loginBtn = document.querySelector('#loginCard .btn');
+            const loginBtnText = document.getElementById('loginBtnText');
+            const loginStatus = document.getElementById('loginStatus');
+
+            if (!email || !password) {
+                showStatus(loginStatus, 'Please enter both email and password', 'error');
+                return;
+            }
+
+            // Disable button and show loading
+            loginBtn.disabled = true;
+            loginBtnText.innerHTML = '<span class="loading"></span> Logging in...';
+            loginStatus.classList.add('hidden');
+
+            try {
+                const response = await fetch(`${API_BASE}/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.access_token) {
+                    authToken = data.access_token;
+
+                    // Fetch user profile
+                    try {
+                        const profileResponse = await fetch(`${API_BASE}/users/profile`, {
+                            headers: {
+                                'Authorization': `Bearer ${authToken}`
+                            }
+                        });
+
+                        if (profileResponse.ok) {
+                            currentUser = await profileResponse.json();
+                            showStatus(loginStatus, `✅ Login successful! Welcome ${currentUser.first_name}`, 'success');
+
+                            // Show upload card after 1 second
+                            setTimeout(() => {
+                                document.getElementById('loginCard').classList.add('hidden');
+                                document.getElementById('uploadCard').classList.remove('hidden');
+                                document.getElementById('userInfo').textContent =
+                                    `Logged in as: ${currentUser.first_name} ${currentUser.last_name} (${currentUser.email})`;
+                            }, 1000);
+                        } else {
+                            showStatus(loginStatus, `✅ Login successful!`, 'success');
+                            setTimeout(() => {
+                                document.getElementById('loginCard').classList.add('hidden');
+                                document.getElementById('uploadCard').classList.remove('hidden');
+                                document.getElementById('userInfo').textContent = `Logged in as: ${email}`;
+                            }, 1000);
+                        }
+                    } catch (profileError) {
+                        // If profile fetch fails, still proceed with login
+                        showStatus(loginStatus, `✅ Login successful!`, 'success');
+                        setTimeout(() => {
+                            document.getElementById('loginCard').classList.add('hidden');
+                            document.getElementById('uploadCard').classList.remove('hidden');
+                            document.getElementById('userInfo').textContent = `Logged in as: ${email}`;
+                        }, 1000);
+                    }
+                } else {
+                    showStatus(loginStatus, `❌ Login failed: ${data.message || 'Invalid credentials'}`, 'error');
+                }
+            } catch (error) {
+                showStatus(loginStatus, `❌ Network error: ${error.message}`, 'error');
+            } finally {
+                loginBtn.disabled = false;
+                loginBtnText.textContent = 'Login';
+            }
+        }
+
+        async function uploadFiles() {
+            const filesInput = document.getElementById('files');
+            const files = filesInput.files;
+            const uploadBtn = document.querySelector('#uploadCard .btn-success');
+            const uploadBtnText = document.getElementById('uploadBtnText');
+            const uploadStatus = document.getElementById('uploadStatus');
+            const responseContainer = document.getElementById('responseContainer');
+            const responseContent = document.getElementById('responseContent');
+
+            if (files.length === 0) {
+                showStatus(uploadStatus, '⚠️ Please select at least one file', 'error');
+                return;
+            }
+
+            // Disable button and show loading
+            uploadBtn.disabled = true;
+            uploadBtnText.innerHTML = '<span class="loading"></span> Processing...';
+            uploadStatus.classList.add('hidden');
+            responseContainer.classList.add('hidden');
+
+            // Create FormData
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append('file', files[i]);
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/vlm/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                // Show response
+                responseContent.textContent = JSON.stringify(data, null, 2);
+                responseContainer.classList.remove('hidden');
+
+                if (response.ok) {
+                    showStatus(uploadStatus,
+                        `✅ Success! Processed ${data.total_images_processed || files.length} image(s) and created report #${data.report?.report_id || 'N/A'}`,
+                        'success');
+                } else {
+                    showStatus(uploadStatus,
+                        `❌ Upload failed (${response.status}): ${data.error || data.message || 'Unknown error'}`,
+                        'error');
+                }
+            } catch (error) {
+                showStatus(uploadStatus, `❌ Network error: ${error.message}`, 'error');
+                responseContent.textContent = `Error: ${error.message}\n\n${error.stack}`;
+                responseContainer.classList.remove('hidden');
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtnText.textContent = 'Upload and Process';
+            }
+        }
+
+        function showStatus(element, message, type) {
+            element.textContent = message;
+            element.className = `status status-${type}`;
+            element.classList.remove('hidden');
+        }
+
+        // Allow Enter key to submit login
+        document.getElementById('password').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+    </script>
+</body>
+
+</html>

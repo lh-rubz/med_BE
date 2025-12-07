@@ -2,6 +2,7 @@ from flask import Flask
 from flask_restx import Api
 from flask_jwt_extended import JWTManager
 from flask_mail import Mail
+import os
 
 from config import Config
 from models import db
@@ -13,10 +14,21 @@ app = Flask(__name__)
 # Load configuration
 app.config.from_object(Config)
 
+# Ensure upload folder exists
+os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
+
 # Initialize extensions
 db.init_app(app)
 jwt = JWTManager(app)
 mail = Mail(app)
+
+
+# Serve the test upload HTML page
+@app.route('/test-upload')
+def test_upload():
+    """Serve the test upload HTML page"""
+    return app.send_static_file('test_upload.html')
+
 
 # Initialize API with Swagger documentation
 api = Api(
@@ -33,7 +45,9 @@ api = Api(
             'description': 'JWT Bearer token. Example: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
         }
     },
-    security='Bearer Auth'
+    security='Bearer Auth',
+    # Support file uploads in Swagger
+    validate=False
 )
 
 # Register namespaces (routes)
