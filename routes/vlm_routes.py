@@ -357,8 +357,11 @@ RULES:
 4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7")
 5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
 6. Extract report date as YYYY-MM-DD
-7. If value marked "High" or "Low", add to notes
-8. IMPORTANT - Extract normal_range WITHOUT units:
+7. Extract patient details:
+   - patient_age: Extract age if found (e.g. "45", "45 Y", "45 Years"). If not found, use null or empty string.
+   - patient_gender: Extract gender if found (e.g. "Male", "Female", "M", "F"). Expand "M"/"F" to full words.
+8. If value marked "High" or "Low", add to notes
+9. IMPORTANT - Extract normal_range WITHOUT units:
    - Remove units from range (e.g., "12 - 16 g/dL" → "12 - 16")
    - Keep only the numeric range values
    - For text ranges (e.g., "Normal: <5.7"), keep the text but remove units
@@ -370,6 +373,8 @@ RULES:
 Return ONLY valid JSON:
 {{
     "patient_name": "...",
+    "patient_age": "...",
+    "patient_gender": "...",
     "report_date": "YYYY-MM-DD",
     "report_type": "...",
     "doctor_names": "...",
@@ -476,6 +481,8 @@ Use the OCR text to get accurate Arabic names and values, but rely on the image 
                 if not patient_info and extracted_data.get('patient_name'):
                     patient_info = {
                         'patient_name': extracted_data.get('patient_name', ''),
+                        'patient_age': extracted_data.get('patient_age', ''),
+                        'patient_gender': extracted_data.get('patient_gender', ''),
                         'report_date': extracted_data.get('report_date', ''),
                         'report_type': extracted_data.get('report_type', ''),
                         'doctor_names': extracted_data.get('doctor_names', '')
@@ -502,6 +509,8 @@ Use the OCR text to get accurate Arabic names and values, but rely on the image 
         
         extracted_data = {
             'patient_name': patient_info.get('patient_name', ''),
+            'patient_age': patient_info.get('patient_age', ''),
+            'patient_gender': patient_info.get('patient_gender', ''),
             'report_date': patient_info.get('report_date', ''),
             'report_type': patient_info.get('report_type', ''),
             'doctor_names': patient_info.get('doctor_names', ''),
@@ -677,6 +686,8 @@ Use the OCR text to get accurate Arabic names and values, but rely on the image 
             report_date=datetime.now(timezone.utc),
             report_hash=report_hash,
             report_type=extracted_data.get('report_type', 'General Medical Report'),
+            patient_age=extracted_data.get('patient_age', ''),
+            patient_gender=extracted_data.get('patient_gender', ''),
             doctor_names=extracted_data.get('doctor_names', ''),
             original_filename=first_filename
         )
@@ -759,6 +770,8 @@ Use the OCR text to get accurate Arabic names and values, but rely on the image 
         return {
             'report_id': new_report.id,
             'patient_name': extracted_data.get('patient_name', ''),
+            'patient_age': new_report.patient_age,
+            'patient_gender': new_report.patient_gender,
             'report_date': extracted_data.get('report_date', ''),
             'report_type': new_report.report_type,
             'doctor_names': new_report.doctor_names,

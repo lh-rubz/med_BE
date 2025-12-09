@@ -40,6 +40,8 @@ class Report(db.Model):
     report_date = db.Column(db.DateTime, nullable=False)
     report_hash = db.Column(db.String(255), nullable=False)
     report_type = db.Column(db.String(100))
+    patient_age = db.Column(db.String(50))    # e.g. "45 years", "2 months"
+    patient_gender = db.Column(db.String(20)) # e.g. "Male", "Female"
     doctor_names = db.Column(db.Text)  # Comma-separated list of doctor names
     original_filename = db.Column(db.String(255))  # Original filename for reference
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

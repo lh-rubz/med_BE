@@ -80,6 +80,10 @@ class UserReports(Resource):
             reports_data.append({
                 'report_id': report.id,
                 'report_date': str(report.report_date),
+                'report_type': report.report_type,
+                'doctor_names': report.doctor_names,
+                'patient_age': report.patient_age,
+                'patient_gender': report.patient_gender,
                 'created_at': str(report.created_at),
                 'total_fields': len(fields_data),
                 'total_images': len(images_info),
@@ -278,6 +282,10 @@ class UserReportDetail(Resource):
             'report': {
                 'report_id': report.id,
                 'report_date': str(report.report_date),
+                'report_type': report.report_type,
+                'doctor_names': report.doctor_names,
+                'patient_age': report.patient_age,
+                'patient_gender': report.patient_gender,
                 'created_at': str(report.created_at),
                 'total_fields': len(fields_data),
                 'total_images': len(images_info),
