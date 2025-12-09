@@ -4,7 +4,7 @@ from datetime import datetime
 from flask_restx import Resource, Namespace, fields
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
-from models import db, User, Report, ReportField, AdditionalField
+from models import db, User, Report, ReportField, AdditionalField, ReportFile
 from config import send_brevo_email, Config
 from email_templates import get_test_email
 import os
