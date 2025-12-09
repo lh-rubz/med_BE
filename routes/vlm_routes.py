@@ -475,19 +475,6 @@ Return ONLY valid JSON:
                     except:
                         pass  # Continue if date parsing fails
                 
-        except Exception as e:
-             print(f"Duplicate Check Error: {e}")
-        
-        # Step 3: Validation
-        yield f"data: {json.dumps({'percent': 75, 'message': 'Double-checking the results...'})}\\n\\n"
-            # ---------------------------------------------------------
-            # AUTO-LEARNING SYNONYM STANDARDIZATION
-            # ---------------------------------------------------------
-            yield f"data: {json.dumps({'percent': 80, 'message': 'Standardizing and learning field names...'})}\n\n"
-            print("🧠 Standardizing and learning field names...")
-            
-            # Create a modifiable list for synonym processing
-            medical_data_list = final_data.get('medical_data', [])
             unknown_terms = []
             
             # 1. First Pass: check DB for existing synonyms
