@@ -459,6 +459,7 @@
                     if (done) break;
 
                     buffer += decoder.decode(value, { stream: true });
+                    console.log("📨 Received chunk:", value ? value.length : 0, "bytes. Buffer len:", buffer.length);
 
                     // Split by double newline (SSE event separator)
                     const parts = buffer.split('\n\n');
@@ -488,14 +489,28 @@
 
                                 // Success/Completion
                                 if (data.percent === 100) {
-                                    console.log('✅ Final Result:', data);
-                                    showStatus(uploadStatus, `✅ Success! Report #${data.report_id || 'Created'}`, 'success');
-
-                                    // Show final data
-                                    responseContent.textContent = JSON.stringify(data, null, 2);
-                                    responseContainer.classList.remove('hidden');
-
+                                    console.log('✅ Final Result (ID received):', data);
+                                    showStatus(uploadStatus, `✅ Analysis Complete! Fetching full report #${data.report_id}...`, 'success');
+                                    progressBar.style.width = '100%';
+                                    progressBar.textContent = '100%';
                                     progressBar.style.background = '#38ef7d'; // Success green
+
+                                    // Fetch full report data
+                                    try {
+                                        const reportResponse = await fetch(`${API_BASE}/reports/${data.report_id}`, {
+                                            headers: { 'Authorization': `Bearer ${authToken}` }
+                                        });
+                                        const reportJson = await reportResponse.json();
+
+                                        // Show final data in HTML
+                                        responseContent.textContent = JSON.stringify(reportJson, null, 2);
+                                        responseContainer.classList.remove('hidden');
+                                        showStatus(uploadStatus, `✅ Success! Report #${data.report_id} Ready`, 'success');
+
+                                    } catch (fetchErr) {
+                                        console.error("Failed to fetch report details:", fetchErr);
+                                        showStatus(uploadStatus, `⚠️ Report Created (#${data.report_id}) but failed to load details.`, 'warning');
+                                    }
                                 }
 
                             } catch (e) {
