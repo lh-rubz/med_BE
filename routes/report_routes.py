@@ -328,6 +328,54 @@ class UserReportDetail(Resource):
             }, 500
 
 
+
+@reports_ns.route('/<int:report_id>/categorized')
+class ReportCategorized(Resource):
+    @reports_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    def get(self, report_id):
+        """Get report data grouped by categories"""
+        current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+        
+        report = Report.query.filter_by(id=report_id, user_id=current_user_id).first()
+        
+        if not report:
+            return {'message': 'Report not found'}, 404
+        
+        report_fields = ReportField.query.filter_by(report_id=report.id).all()
+        
+        # Group by category
+        categorized_data = defaultdict(list)
+        
+        for field in report_fields:
+            category = field.category if field.category and field.category.strip() else "General"
+            categorized_data[category].append({
+                'id': field.id,
+                'field_name': field.field_name,
+                'field_value': field.field_value,
+                'field_unit': field.field_unit,
+                'normal_range': field.normal_range,
+                'is_normal': field.is_normal,
+                'field_type': field.field_type,
+                'notes': field.notes
+            })
+            
+        return {
+            'report_id': report.id,
+            'patient_name': f"{user.first_name} {user.last_name}", 
+            'patient_age': report.patient_age,
+            'patient_gender': report.patient_gender,
+            'report_date': str(report.report_date),
+            'report_type': report.report_type,
+            'doctor_names': report.doctor_names,
+            'categories': categorized_data
+        }, 200
+
+
 @reports_ns.route('/<int:report_id>/images')
 class ReportImages(Resource):
     @reports_ns.doc(security='Bearer Auth')
