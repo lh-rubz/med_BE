@@ -268,21 +268,36 @@ class ChatResource(Resource):
         
         yield f"data: {json.dumps({'percent': 20, 'message': f'Analyzing medical report...'})}\n\n"
         
+        print(f"\n{'='*80}")
+        print(f"🔄 STREAMING PROCESS STARTED: {total_pages} page(s)")
+        print(f"{'='*80}")
+        
         for idx, image_info in enumerate(images_list, 1):
             # Progress calculation: 20% -> 70%
             current_progress = 20 + int((idx / total_pages) * 50)
             
+            print(f"\n{'='*80}")
+            print(f"📄 Processing Page {idx}/{total_pages} ({int((idx-1)/total_pages*100)}% complete)")
+            print(f"📁 File: {image_info['source_filename']}")
+            if image_info.get('page_number'):
+                print(f"📖 PDF Page: {image_info['page_number']}/{image_info.get('total_pages', '?')}")
+            print(f"{'='*80}\n")
+            
             # Step 1: OCR
             yield f"data: {json.dumps({'percent': current_progress, 'message': f'Reading text details (Page {idx}/{total_pages})...'})}\n\n"
+            print(f"📝 Step 1: Extracting text with OCR...")
             
             ocr_text = None
             try:
                 ocr = get_ocr_instance(languages=['ar', 'en'])
                 ocr_text = ocr.extract_text(image_info['data'])
+                print(f"✅ OCR extracted {len(ocr_text)} characters")
+                print(f"📄 OCR Text Preview:\n{ocr_text[:300]}...\n")
             except Exception as e:
-                print(f"OCR Error: {e}")
+                print(f"⚠️  OCR failed: {e}, using image-only mode")
             
             # Step 2: VLM
+            print(f"🤖 Step 2: Structuring data with VLM (hybrid mode)...")
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Understanding medical values (Page {idx}/{total_pages})...'})}\n\n"
             
             # Build prompt (Reusing logic)
@@ -335,6 +350,7 @@ Return ONLY valid JSON:
                     temperature=0.1
                 )
                 response_text = completion.choices[0].message.content.strip()
+                print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
                 
                 # Parsing logic
                 extracted_data = {}
@@ -343,21 +359,26 @@ Return ONLY valid JSON:
                     json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
                     if json_match:
                         extracted_data = json.loads(json_match.group())
+                        print(f"✅ JSON extracted after regex for Image {idx}")
                 except:
                     pass
                 
                 if extracted_data.get('medical_data'):
                     all_extracted_data.extend(extracted_data['medical_data'])
+                    print(f"✅ Extracted {len(extracted_data['medical_data'])} field(s) from page {idx}")
                 
                 # Capture patient info from first good page
                 if not patient_info and extracted_data.get('patient_name'):
                      patient_info = extracted_data
+
+                print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")
                      
             except Exception as e:
-                print(f"VLM Error: {e}")
+                print(f"❌ VLM Error on page {idx}: {e}")
 
         # Step 3: Validation
         yield f"data: {json.dumps({'percent': 75, 'message': 'Reviewing results for accuracy...'})}\n\n"
+        print(f"🔍 Validating aggregated data ({len(all_extracted_data)} total items)...")
         
         # Combine data
         final_data = {
@@ -375,12 +396,13 @@ Return ONLY valid JSON:
         try:
             # Auto-learning synonyms (Simplified version of original logic)
             yield f"data: {json.dumps({'percent': 80, 'message': 'Standardizing medical terms...'})}\n\n"
-            # (Skipping full auto-learning block for stream brevity, can be re-added if critical)
             
             validated = validate_medical_data(final_data)
             final_data = validated
         except Exception as e:
             print(f"Validation Error: {e}")
+            import traceback
+            traceback.print_exc()
 
         # Step 4: Duplicate Check
         yield f"data: {json.dumps({'percent': 85, 'message': 'Checking for duplicates...'})}\n\n"
@@ -431,10 +453,13 @@ Return ONLY valid JSON:
 
         # Step 5: Saving
         yield f"data: {json.dumps({'percent': 90, 'message': 'Finalizing your report...'})}\n\n"
+        print(f"💾 Saving report to database...")
         
         new_report_id = None
         try:
+            # Calculate report hash
             report_hash = hashlib.sha256(json.dumps(final_data['medical_data'], sort_keys=True).encode()).hexdigest()
+            
             new_report = Report(
                 user_id=current_user_id,
                 report_date=datetime.now(timezone.utc),
@@ -504,718 +529,9 @@ Return ONLY valid JSON:
                 'report_name': new_report.report_name,
                 'total_fields': len(medical_entries)
             }
+            print(f"✅ SUCCESS: Report #{new_report.id} created with {len(medical_entries)} fields.")
             yield f"data: {json.dumps(success_payload)}\n\n"
             
         except Exception as e:
             db.session.rollback()
-            yield f"data: {json.dumps({'error': f'Database Error: {str(e)}'})}\n\n"
-
-
-
-        """Stream processing progress via SSE"""
-        current_user_id = int(get_jwt_identity())
-        user = User.query.get(current_user_id)
-        
-        if not user:
-            return {'message': 'User not found'}, 404
-            
-        if 'file' not in request.files:
-            return {'error': 'No file part'}, 400
-            
-        files = request.files.getlist('file')
-        if not files or len(files) == 0:
-            return {'error': 'No file selected'}, 400
-
-        # Create user-specific folder
-        user_folder = ensure_upload_folder(f"user_{current_user_id}")
-        
-        # Generator for streaming response
-        def generate_progress():
-            try:
-                yield f"data: {json.dumps({'percent': 5, 'message': 'Validating input...'})}\n\n"
-                
-                all_images_to_process = []
-                saved_files = []
-                
-                # Pre-processing loop
-                total_files = len(files)
-                for i, file in enumerate(files):
-                    if file.filename == '': continue
-                    
-                    yield f"data: {json.dumps({'percent': 10 + int((i/total_files)*10), 'message': f'Preprocessing file {i+1}/{total_files}...'})}\n\n"
-                    
-                    # Save and process file logic (simplified from main route)
-                    filename = secure_filename(file.filename)
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    unique_filename = f"{timestamp}_{filename}"
-                    file_path = os.path.join(user_folder, unique_filename)
-                    file.save(file_path)
-                    
-                    file_content = open(file_path, 'rb').read()
-                    file_hash = hashlib.sha256(file_content).hexdigest()
-                    file_size = os.path.getsize(file_path)
-                    file_extension = filename.rsplit('.', 1)[1].lower()
-                    
-                    saved_files.append({
-                        'original_filename': filename,
-                        'stored_filename': unique_filename,
-                        'file_path': file_path,
-                        'file_type': file_extension,
-                        'file_size': file_size,
-                        'file_hash': file_hash,
-                        'is_pdf': file_extension == 'pdf'
-                    })
-                    
-                    if file_extension == 'pdf':
-                        images = pdf_to_images(file_path)
-                        for page_num, img_data in enumerate(images, 1):
-                            all_images_to_process.append({
-                                'data': img_data,
-                                'format': 'jpeg',
-                                'source_filename': filename,
-                                'page_number': page_num
-                            })
-                    else:
-                        with open(file_path, 'rb') as f:
-                            image_data = f.read()
-                            compressed_data = compress_image(image_data, file_extension)
-                            all_images_to_process.append({
-                                'data': compressed_data,
-                                'format': 'jpeg',
-                                'source_filename': filename
-                            })
-                
-                if not all_images_to_process:
-                    yield f"data: {json.dumps({'error': 'No valid images to process'})}\n\n"
-                    return
-
-                # Call the streaming processor
-                yield from self._process_multiple_images_stream(all_images_to_process, current_user_id, user, saved_files)
-                
-            except Exception as e:
-                print(f"Stream Error: {e}")
-                import traceback
-                traceback.print_exc()
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
-
-        return Response(stream_with_context(generate_progress()), content_type='text/event-stream')
-
-    def _process_multiple_images_stream(self, images_list, current_user_id, user, saved_files):
-        """Generator that yields progress for image processing steps"""
-        total_pages = len(images_list)
-        all_extracted_data = []
-        patient_info = {}
-        
-        yield f"data: {json.dumps({'percent': 25, 'message': f'Starting analysis of {total_pages} page(s)...'})}\n\n"
-        
-        for idx, image_info in enumerate(images_list, 1):
-            current_progress = 25 + int((idx / total_pages) * 40) # 25% to 65%
-            
-            # Step 1: OCR
-            yield f"data: {json.dumps({'percent': current_progress, 'message': f'Page {idx}: Running Arabic OCR...'})}\n\n"
-            
-            ocr_text = None
-            try:
-                ocr = get_ocr_instance(languages=['ar', 'en'])
-                ocr_text = ocr.extract_text(image_info['data'])
-            except Exception as e:
-                print(f"OCR Error: {e}")
-            
-            # Step 2: VLM
-            yield f"data: {json.dumps({'percent': current_progress + 5, 'message': f'Page {idx}: Analyzing medical data with VLM...'})}\n\n"
-            
-            # ... (VLM Logic - Simplified for streaming demonstration, ideally we refactor common logic)
-            # For now, to ensure functionality without huge refactoring, I'll call the core VLM logic here
-            # Copying prompt construction and call from existing method but adapting for stream
-            
-            prompt_text = "Extract ALL medical data..." # (Use exact prompt from before)
-            # To avoid huge code duplication, let's assume I can reuse the prompt string by making it a constant or property
-            # Ideally I should refactor get_prompt() but for now I will use a simplified VLM call for the stream
-            # or better: call the SAME logic.
-            
-            # Let's actually execute the VLM call here using the same parameters
-            try:
-                image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
-                
-                # REUSING PROMPT LOGIC (Condensed)
-                prompt_content = f"""Extract ALL medical data. Rules: 1. Extract tests/values/units/ranges. 2. Report Name strict. 3. Doctor Names strict. 4. Patient Info. 5. JSON only.
-                Return JSON structure matching: {{ "patient_name": "...", "medical_data": [...] }}"""
-                
-                content = [{'type': 'text', 'text': prompt_content}]
-                if ocr_text:
-                     content[0]['text'] += f"\n\nOCR TEXT:\n{ocr_text}"
-                
-                content.append({
-                    'type': 'image_url',
-                    'image_url': {'url': f'data:image/jpeg;base64,{image_base64}'}
-                })
-                
-                completion = ollama_client.chat.completions.create(
-                    model=Config.OLLAMA_MODEL,
-                    messages=[{'role': 'user', 'content': content}],
-                    temperature=0.1
-                )
-                response_text = completion.choices[0].message.content.strip()
-                
-                # Parsing logic
-                extracted_data = {}
-                try:
-                    import re
-                    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                    if json_match:
-                        extracted_data = json.loads(json_match.group())
-                except:
-                    pass
-                
-                if extracted_data.get('medical_data'):
-                    all_extracted_data.extend(extracted_data['medical_data'])
-                
-                # Capture patient info from first good page
-                if not patient_info and extracted_data.get('patient_name'):
-                     patient_info = extracted_data
-                     
-            except Exception as e:
-                print(f"VLM Error: {e}")
-
-        # Step 3: Validation
-        yield f"data: {json.dumps({'percent': 70, 'message': 'Validating and standardizing medical data...'})}\n\n"
-        
-        # Combine data
-        final_data = {
-            'patient_name': patient_info.get('patient_name', ''),
-            'patient_age': patient_info.get('patient_age', ''),
-            'patient_gender': patient_info.get('patient_gender', ''),
-            'report_date': patient_info.get('report_date', ''),
-            'report_name': patient_info.get('report_name', 'Medical Report'),
-            'report_type': patient_info.get('report_type', 'General'),
-            'doctor_names': patient_info.get('doctor_names', ''),
-            'medical_data': all_extracted_data
-        }
-        
-        # Validation Logic (Call utils)
-        try:
-            validated = validate_medical_data(final_data)
-            final_data = validated
-        except Exception as e:
-            print(f"Validation Error: {e}")
-
-        # Step 4: Saving
-        yield f"data: {json.dumps({'percent': 85, 'message': 'Saving report to database...'})}\n\n"
-        
-        # Save logic
-        try:
-            report_hash = hashlib.sha256(json.dumps(final_data['medical_data'], sort_keys=True).encode()).hexdigest()
-            new_report = Report(
-                user_id=current_user_id,
-                report_date=datetime.now(timezone.utc),
-                report_hash=report_hash,
-                report_name=final_data.get('report_name'),
-                report_type=final_data.get('report_type'),
-                patient_age=final_data.get('patient_age'),
-                patient_gender=final_data.get('patient_gender'),
-                doctor_names=final_data.get('doctor_names'),
-                original_filename=saved_files[0]['original_filename'] if saved_files else "unknown"
-            )
-            db.session.add(new_report)
-            db.session.flush()
-            
-            # Save files and fields (Simplified loop)
-            for f in saved_files:
-                rf = ReportFile(report_id=new_report.id, user_id=current_user_id, **{k:v for k,v in f.items() if k!='is_pdf'})
-                db.session.add(rf)
-                
-            for item in final_data['medical_data']:
-                if isinstance(item, dict):
-                    db.session.add(ReportField(
-                        report_id=new_report.id,
-                        user_id=current_user_id,
-                        field_name=item.get('field_name', 'Unknown'),
-                        field_value=str(item.get('field_value', '')),
-                        field_unit=str(item.get('field_unit', '')),
-                        normal_range=str(item.get('normal_range', '')),
-                        is_normal=bool(item.get('is_normal', True)),
-                        field_type=str(item.get('field_type', 'measurement')),
-                        category=str(item.get('category', '')),
-                        notes=str(item.get('notes', ''))
-                    ))
-            
-            db.session.commit()
-            
-            # Final Success
-            yield f"data: {json.dumps({'percent': 100, 'message': 'Completed successfully!', 'report_id': new_report.id})}\n\n"
-            
-        except Exception as e:
-            db.session.rollback()
-            yield f"data: {json.dumps({'error': f'Database Error: {str(e)}'})}\n\n"
-    
-    def _process_multiple_images(self, images_list, current_user_id, user, saved_files):
-        """Process each image separately, then combine all extracted data"""
-        patient_name = user.first_name + " " + user.last_name
-        
-        report_types_list = '\n'.join([f'- "{rt}"' for rt in REPORT_TYPES])
-        
-        total_pages = len(images_list)
-        print(f"\n🔄 Processing {total_pages} image(s) individually...")
-        print(f"\n{'='*80}")
-        print(f"📊 PROGRESS TRACKING")
-        print(f"{'='*80}")
-        
-        all_extracted_data = []
-        patient_info = {}
-        
-        # Process each image separately
-        for idx, image_info in enumerate(images_list, 1):
-            # Calculate and display progress
-            progress_percentage = int((idx - 1) / total_pages * 100)
-            print(f"\n{'='*80}")
-            print(f"📄 Processing Page {idx}/{total_pages} ({progress_percentage}% complete)")
-            print(f"📁 File: {image_info['source_filename']}")
-            if image_info.get('page_number'):
-                print(f"📖 PDF Page: {image_info['page_number']}/{image_info.get('total_pages', '?')}")
-            print(f"{'='*80}\n")
-            
-            # Build OPTIMIZED extraction prompt (reduced by ~40%)
-            prompt_text = f"""Extract ALL medical data from this image (page {idx}/{total_pages}).
-
-RULES:
-1. Extract EVERY test with its value, unit, normal range. Skip headers.
-2. Report Identification:
-   - report_name: Extract the EXACT title written on the report (e.g., "Detailed Hemogram", "Lipid Profile"). If no title, use "Medical Report".
-   - report_type: Choose the CLOSEST match from this standard list: {', '.join(REPORT_TYPES)}. If no good match, use "Other".
-3. IMPORTANT - Extract doctor names:
-   - Look for "Ref. By:", "Ref By:", "Referred By:", "Referring Doctor:", or "Dr." followed by a name
-   - Extract the FULL name (e.g., "Dr. Hiren Shah" → "Hiren Shah", "Dr. M. Patel" → "M. Patel")
-   - Include middle initials if present
-   - If multiple doctors, separate with commas
-   - CRITICAL: Do NOT leave empty - if you see ANY doctor name on the report, extract it
-4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7")
-5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
-6. Extract report date as YYYY-MM-DD
-7. Extract patient details:
-   - patient_age: Extract age if found (e.g. "45", "45 Y", "45 Years"). If not found, use null or empty string.
-   - patient_gender: Extract gender if found (e.g. "Male", "Female", "M", "F"). Expand "M"/"F" to full words.
-8. If value marked "High" or "Low", add to notes
-9. IMPORTANT - Extract normal_range WITHOUT units:
-   - Remove units from range (e.g., "12 - 16 g/dL" → "12 - 16")
-   - Keep only the numeric range values
-   - For text ranges (e.g., "Normal: <5.7"), keep the text but remove units
-9. IMPORTANT - Extract category/section for EACH test:
-   - Look for section headers like "DIFFERENTIAL COUNT", "BLOOD INDICES", "ABSOLUTE COUNT", "WBC COUNT", "PLATELET COUNT"
-   - Assign each test to its category (use exact header text in UPPERCASE)
-   - If no category header visible, use empty string
-
-Return ONLY valid JSON:
-{{
-    "patient_name": "...",
-    "patient_age": "...",
-    "patient_gender": "...",
-    "patient_gender": "...",
-    "report_date": "YYYY-MM-DD",
-    "report_name": "...",
-    "report_type": "...",
-    "doctor_names": "...",
-    "total_fields_in_image": <count>,
-    "medical_data": [
-        {{
-            "field_name": "Test Name",
-            "field_value": "123.45 OR 'Normal'",
-            "field_unit": "g/dL or empty",
-            "normal_range": "13.5-17.5 or empty",
-            "is_normal": true,
-            "field_type": "measurement",
-            "category": "DIFFERENTIAL COUNT or empty",
-            "notes": "Marked as Low on report OR empty"
-        }}
-    ]
-}}"""
-            
-            # STEP 1: Extract text using OCR for better Arabic accuracy
-            print(f"📝 Step 1: Extracting text with OCR...")
-            ocr_text = None
-            try:
-                ocr = get_ocr_instance(languages=['ar', 'en'])
-                ocr_text = ocr.extract_text(image_info['data'])
-                print(f"✅ OCR extracted {len(ocr_text)} characters")
-                print(f"📄 OCR Text Preview:\n{ocr_text[:300]}...\n")
-            except Exception as ocr_error:
-                print(f"⚠️  OCR failed: {ocr_error}, using image-only mode")
-            
-            # STEP 2: Send BOTH image and OCR text to VLM
-            # Image = layout/structure, OCR = accurate Arabic text
-            print(f"🤖 Step 2: Structuring data with VLM (hybrid mode)...")
-            
-            image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
-            image_format = image_info['format']
-            
-            if ocr_text:
-                # Hybrid mode: Image + OCR text
-                enhanced_prompt = f"""{prompt_text}
-
-IMPORTANT: I've also extracted the text using OCR below. Use this OCR text for ACCURATE Arabic character recognition, but use the IMAGE for understanding the layout and structure.
-
-OCR EXTRACTED TEXT:
-{ocr_text}
-
-Use the OCR text to get accurate Arabic names and values, but rely on the image to understand which values belong to which tests."""
-                
-                content = [
-                    {'type': 'text', 'text': enhanced_prompt},
-                    {
-                        'type': 'image_url',
-                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                    }
-                ]
-            else:
-                # Fallback: Image-only mode
-                content = [
-                    {'type': 'text', 'text': prompt_text},
-                    {
-                        'type': 'image_url',
-                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                    }
-                ]
-            
-            try:
-                model_name = Config.OLLAMA_MODEL
-                
-                # Extract from single image
-                completion = ollama_client.chat.completions.create(
-                    model=model_name,
-                    messages=[{'role': 'user', 'content': content}],
-                    temperature=0.1,
-                )
-
-                response_text = completion.choices[0].message.content.strip()
-                print(f"🔍 RAW RESPONSE for Image {idx}:")
-                print("="*80)
-                print(response_text)
-                print("="*80 + "\n")
-                
-                extracted_data = None
-                try:
-                    extracted_data = json.loads(response_text)
-                except json.JSONDecodeError as e:
-                    import re
-                    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                    if json_match:
-                        try:
-                            extracted_data = json.loads(json_match.group())
-                            print(f"✅ JSON extracted after regex for Image {idx}")
-                        except:
-                            pass
-                    
-                    if not extracted_data:
-                        print(f"❌ Failed to parse Image {idx}: {e}")
-                        continue
-                
-                if not isinstance(extracted_data, dict):
-                    print(f"❌ Invalid response structure for Image {idx}")
-                    continue
-                
-                # Store patient info from first valid extraction
-                # (VLM now processes OCR text, so names should be accurate)
-                if not patient_info and extracted_data.get('patient_name'):
-                    patient_info = {
-                        'patient_name': extracted_data.get('patient_name', ''),
-                        'patient_age': extracted_data.get('patient_age', ''),
-                        'patient_gender': extracted_data.get('patient_gender', ''),
-                        'report_date': extracted_data.get('report_date', ''),
-                        'report_type': extracted_data.get('report_type', ''),
-                        'doctor_names': extracted_data.get('doctor_names', '')
-                    }
-                
-                # Collect medical data
-                medical_data = extracted_data.get('medical_data', [])
-                if medical_data:
-                    all_extracted_data.extend(medical_data)
-                    extraction_progress = int(idx / total_pages * 100)
-                    print(f"✅ Extracted {len(medical_data)} field(s) from page {idx}")
-                    print(f"📊 Overall Progress: {extraction_progress}% ({idx}/{total_pages} pages)\n")
-                else:
-                    print(f"⚠️  No medical data found in page {idx}\n")
-                    
-            except Exception as e:
-                print(f"❌ Error processing Image {idx}: {e}\n")
-                continue
-        
-        # Combine all extracted data
-        print("\n" + "="*80)
-        print("🔗 COMBINING ALL EXTRACTED DATA (95% complete)")
-        print("="*80)
-        
-        extracted_data = {
-            'patient_name': patient_info.get('patient_name', ''),
-            'patient_age': patient_info.get('patient_age', ''),
-            'patient_gender': patient_info.get('patient_gender', ''),
-            'report_date': patient_info.get('report_date', ''),
-            'report_type': patient_info.get('report_type', ''),
-            'doctor_names': patient_info.get('doctor_names', ''),
-            'total_fields_in_report': len(all_extracted_data),
-            'medical_data': all_extracted_data
-        }
-        
-        print(f"✅ Total fields extracted: {len(all_extracted_data)}")
-        print(json.dumps(extracted_data, indent=2))
-        print("="*80 + "\n")
-        
-        # DETERMINISTIC VALIDATION PASS (replaces VLM verification)
-        print("\n" + "="*80)
-        print("🔍 APPLYING DETERMINISTIC VALIDATION (98% complete)")
-        print("="*80)
-        print("Validating numeric fields, recalculating is_normal flags...")
-        
-        # ---------------------------------------------------------
-        # AUTO-LEARNING SYNONYM STANDARDIZATION
-        # ---------------------------------------------------------
-        print("🧠 Standardizing and learning field names...")
-        medical_data = extracted_data.get('medical_data', [])
-        
-        for item in medical_data:
-            original_name = item.get('field_name', '').strip()
-            if not original_name:
-                continue
-                
-            # 1. Check if we already have a mapping
-            # (get_search_terms returns [synonyms, standard_name], so we check if any match)
-            # Actually, we want to know the STANDARD NAME for this alias.
-            
-            # Simple direct DB lookup
-            synonym_record = MedicalSynonym.query.filter_by(synonym=original_name.lower()).first()
-            
-            if synonym_record:
-                # Known alias -> Use standard name
-                print(f"   ✓ Normalized: '{original_name}' -> '{synonym_record.standard_name}'")
-                item['field_name'] = synonym_record.standard_name
-            else:
-                # Unknown -> Ask Ollama to standardize
-                # Only ask if it looks like a medical term (not empty/garbage)
-                if len(original_name) > 1:
-                    print(f"   ❓ Unknown term: '{original_name}' - Asking AI...")
-                    try:
-                        learning_prompt = f"""Identify the standard medical name for the test: "{original_name}".
-                        Return ONLY the standard name (e.g. if 'Hgb', return 'Hemoglobin').
-                        If it IS already standard, return it as is.
-                        Return 'UNKNOWN' if not a valid medical test.
-                        Do not add any punctuation or explanation."""
-                        
-                        client = Client(host=Config.OLLAMA_BASE_URL)
-                        response = client.chat(model='gemma3:4b', messages=[
-                            {'role': 'user', 'content': learning_prompt}
-                        ])
-                        
-                        standardized = response['message']['content'].strip().replace('"', '').replace("'", "")
-                        
-                        if standardized and standardized != 'UNKNOWN' and len(standardized) < 50:
-                            # Learn it!
-                            if standardized.lower() != original_name.lower():
-                                print(f"   💡 Learned: '{original_name}' is alias for '{standardized}'")
-                                add_new_alias(original_name, standardized)
-                                item['field_name'] = standardized
-                                # Also ensure standard name is in DB as a self-mapping
-                                add_new_alias(standardized, standardized)
-                            else:
-                                # It's a new standard term
-                                add_new_alias(standardized, standardized)
-                                print(f"   📝 registered new standard term: '{standardized}'")
-                    except Exception as learn_err:
-                        print(f"   ⚠️ Learning failed: {learn_err}")
-
-        # ---------------------------------------------------------
-
-        try:
-            # Apply medical validator for 100% accuracy
-            validated_data = validate_medical_data(extracted_data)
-            
-            original_count = len(extracted_data.get('medical_data', []))
-            validated_count = len(validated_data.get('medical_data', []))
-            
-            print(f"✅ Validation complete!")
-            print(f"   - Original fields: {original_count}")
-            print(f"   - After deduplication: {validated_count}")
-            print(f"   - Removed duplicates: {original_count - validated_count}")
-            print(f"   - All numeric validations: PASSED")
-            print(f"   - All is_normal flags: RECALCULATED")
-            
-            extracted_data = validated_data
-            
-        except Exception as validation_error:
-            print(f"⚠️  Validation error: {validation_error}")
-            print("Using original extracted data")
-            import traceback
-            traceback.print_exc()
-        
-        # Continue with saving regardless of verification success/failure
-        print("\n" + "="*80)
-        print("💾 SAVING TO DATABASE (100% complete)")
-        print("="*80)
-        print(json.dumps(extracted_data, indent=2))
-        print("="*80 + "\n")
-        
-        # Verify field count
-        medical_data_list = extracted_data.get('medical_data', [])
-        total_fields_claimed = extracted_data.get('total_fields_in_report', 0)
-        actual_extracted = len(medical_data_list)
-        
-        print("\n" + "="*80)
-        print("🔍 FIELD COUNT VERIFICATION:")
-        print("="*80)
-        print(f"Total fields claimed by VLM: {total_fields_claimed}")
-        print(f"Fields actually extracted: {actual_extracted}")
-        
-        if total_fields_claimed > 0 and actual_extracted < total_fields_claimed:
-            missing_count = total_fields_claimed - actual_extracted
-            print(f"⚠️  WARNING: {missing_count} field(s) may be missing!")
-        elif actual_extracted >= total_fields_claimed:
-            print("✅ All fields appear to be extracted")
-        print("="*80 + "\n")
-        
-        medical_data_list = extracted_data.get('medical_data', [])
-        
-        # Check for duplicates using SEMANTIC COMPARISON
-        if len(medical_data_list) > 0:
-            extracted_date_str = extracted_data.get('report_date')
-            existing_reports = []
-            
-            # OPTIMIZATION: If we have a date, only check reports from that date
-            if extracted_date_str and len(extracted_date_str) == 10:  # YYYY-MM-DD
-                try:
-                    # Parse date to ignore time components
-                    target_date = datetime.strptime(extracted_date_str, '%Y-%m-%d').date()
-                    # Query reports where date matches (checking range for safety)
-                    start_of_day = datetime.combine(target_date, datetime.min.time())
-                    end_of_day = datetime.combine(target_date, datetime.max.time())
-                    
-                    existing_reports = Report.query.filter(
-                        Report.user_id == current_user_id,
-                        Report.report_date >= start_of_day,
-                        Report.report_date <= end_of_day
-                    ).all()
-                    print(f"   ℹ️  Checking against {len(existing_reports)} reports from {target_date}")
-                except ValueError:
-                    # Invalid date format, fall back to checking all
-                    existing_reports = Report.query.filter_by(user_id=current_user_id).all()
-            else:
-                existing_reports = Report.query.filter_by(user_id=current_user_id).all()
-            new_field_map = {str(item.get('field_name', '')).lower().strip(): str(item.get('field_value', '')).strip() 
-                             for item in medical_data_list}
-            
-            for existing_report in existing_reports:
-                existing_fields = ReportField.query.filter_by(report_id=existing_report.id).all()
-                existing_field_map = {str(field.field_name).lower().strip(): str(field.field_value).strip() 
-                                      for field in existing_fields}
-                
-                if existing_field_map:
-                    matching_fields = sum(1 for fn, fv in new_field_map.items() 
-                                          if fn in existing_field_map and existing_field_map[fn] == fv)
-                    match_percentage = (matching_fields / len(new_field_map)) * 100 if new_field_map else 0
-                    
-                    if match_percentage >= 90:
-                        raise ValueError(f'DUPLICATE_REPORT: This report appears to be a duplicate of an existing report (#{existing_report.id})')
-        
-        # Save to database
-        medical_data_str = json.dumps(medical_data_list, sort_keys=True)
-        report_hash = hashlib.sha256(medical_data_str.encode()).hexdigest()
-        first_filename = saved_files[0]['original_filename'] if saved_files else "unknown"
-        
-        new_report = Report(
-            user_id=current_user_id,
-            report_date=datetime.now(timezone.utc),
-            report_hash=report_hash,
-            report_name=extracted_data.get('report_name', 'Medical Report'),
-            report_type=extracted_data.get('report_type', 'General Medical Report'),
-            patient_age=extracted_data.get('patient_age', ''),
-            patient_gender=extracted_data.get('patient_gender', ''),
-            doctor_names=extracted_data.get('doctor_names', ''),
-            original_filename=first_filename
-        )
-        db.session.add(new_report)
-        db.session.flush()
-
-        print(f"\n📁 Creating ReportFile records for {len(saved_files)} file(s)...")
-        for file_info in saved_files:
-            if file_info['is_pdf']:
-                # For PDFs, create a record for each page
-                # Find how many pages this PDF has
-                pdf_pages = [img for img in images_list if img['source_filename'] == file_info['original_filename']]
-                for page_info in pdf_pages:
-                    report_file = ReportFile(
-                        report_id=new_report.id,
-                        user_id=current_user_id,
-                        original_filename=file_info['original_filename'],
-                        stored_filename=file_info['stored_filename'],
-                        file_path=file_info['file_path'],
-                        file_type=file_info['file_type'],
-                        file_size=file_info['file_size'],
-                        file_hash=file_info.get('file_hash'),
-                        page_number=page_info.get('page_number')
-                    )
-                    db.session.add(report_file)
-                    print(f"  ✅ Added ReportFile: {file_info['original_filename']} (page {page_info.get('page_number')})")
-            else:
-                # For images, create a single record
-                report_file = ReportFile(
-                    report_id=new_report.id,
-                    user_id=current_user_id,
-                    original_filename=file_info['original_filename'],
-                    stored_filename=file_info['stored_filename'],
-                    file_path=file_info['file_path'],
-                    file_type=file_info['file_type'],
-                    file_size=file_info['file_size'],
-                    file_hash=file_info.get('file_hash'),
-                    page_number=None
-                )
-                db.session.add(report_file)
-                print(f"  ✅ Added ReportFile: {file_info['original_filename']}")
-        
-        db.session.flush()
-        
-        medical_entries = []
-        for item in medical_data_list:
-            if not isinstance(item, dict):
-                continue
-            
-            field = ReportField(
-                report_id=new_report.id,
-                user_id=current_user_id,
-                field_name=str(item.get('field_name', 'Unknown')),
-                field_value=str(item.get('field_value', '')),
-                field_unit=str(item.get('field_unit', '')),
-                normal_range=str(item.get('normal_range', '')),
-                is_normal=bool(item.get('is_normal', True)),
-                field_type=str(item.get('field_type', 'measurement')),
-                category=str(item.get('category', '')),
-                notes=str(item.get('notes', ''))
-            )
-            db.session.add(field)
-            db.session.flush()
-            
-            medical_entries.append({
-                'id': field.id,
-                'field_name': field.field_name,
-                'field_value': field.field_value,
-                'field_unit': field.field_unit,
-                'normal_range': field.normal_range,
-                'is_normal': field.is_normal,
-                'field_type': field.field_type,
-                'category': field.category,
-                'notes': field.notes
-            })
-        
-        db.session.commit()
-        
-        return {
-            'report_id': new_report.id,
-            'patient_name': extracted_data.get('patient_name', ''),
-            'patient_age': new_report.patient_age,
-            'patient_gender': new_report.patient_gender,
-            'report_date': extracted_data.get('report_date', ''),
-            'report_name': new_report.report_name,
-            'report_type': new_report.report_type,
-            'doctor_names': new_report.doctor_names,
-            'original_filename': new_report.original_filename,
-            'total_images': len(images_list),
-            'source_files': [sf['original_filename'] for sf in saved_files],
-            'medical_data': medical_entries,
-            'total_fields_extracted': len(medical_entries)
-        }
-
+            yield f"data: {json.dumps({'error': f'❌ Database Error: {str(e)}'})}\n\n"

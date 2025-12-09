@@ -244,14 +244,19 @@ class MedicalValidator:
         # Normalize field value (preserve decimal precision)
         field_value = validated.get('field_value', '')
         if field_value:
-            validated['field_value'] = MedicalValidator.normalize_decimal(str(field_value))
+            normalized = MedicalValidator.normalize_decimal(str(field_value))
+            validated['field_value'] = normalized
+            field_value = normalized
+        else:
+            # Ensure key exists even if empty
+            validated['field_value'] = ''
         
         # Recalculate is_normal deterministically
         normal_range = validated.get('normal_range', '')
         current_is_normal = validated.get('is_normal')
         
         validated['is_normal'] = MedicalValidator.calculate_is_normal(
-            validated['field_value'],
+            field_value,
             normal_range,
             current_is_normal
         )
