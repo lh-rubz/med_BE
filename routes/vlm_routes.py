@@ -647,3 +647,4 @@ Return ONLY valid JSON:
         except Exception as e:
             db.session.rollback()
             yield f"data: {json.dumps({'error': f'❌ Database Error: {str(e)}'})}\n\n"
+
