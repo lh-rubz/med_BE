@@ -14,8 +14,7 @@ user_update_model = user_ns.model('UserUpdate', {
     'first_name': fields.String(description='First name'),
     'last_name': fields.String(description='Last name'),
     'phone_number': fields.String(description='Phone number'),
-    'medical_history': fields.String(description='Medical history'),
-    'allergies': fields.String(description='Allergies information')
+    'phone_number': fields.String(description='Phone number')
 })
 
 delete_user_model = user_ns.model('DeleteUser', {
@@ -51,8 +50,6 @@ class UserProfile(Resource):
             'last_name': user.last_name,
             'date_of_birth': str(user.date_of_birth),
             'phone_number': user.phone_number,
-            'medical_history': user.medical_history,
-            'allergies': user.allergies,
             'created_at': str(user.created_at)
         }
 
@@ -75,10 +72,6 @@ class UserProfile(Resource):
                 user.last_name = data['last_name']
             if 'phone_number' in data:
                 user.phone_number = data['phone_number']
-            if 'medical_history' in data:
-                user.medical_history = data['medical_history']
-            if 'allergies' in data:
-                user.allergies = data['allergies']
 
             db.session.commit()
             return {'message': 'Profile updated successfully'}, 200

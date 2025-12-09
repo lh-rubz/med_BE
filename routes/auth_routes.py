@@ -24,9 +24,7 @@ register_model = auth_ns.model('Registration', {
     'first_name': fields.String(required=True, description='First name'),
     'last_name': fields.String(required=True, description='Last name'),
     'date_of_birth': fields.Date(required=True, description='Date of birth (YYYY-MM-DD)'),
-    'phone_number': fields.String(required=True, description='Phone number'),
-    'medical_history': fields.String(required=False, description='Medical history'),
-    'allergies': fields.String(required=False, description='Allergies information')
+    'phone_number': fields.String(required=True, description='Phone number')
 })
 
 login_model = auth_ns.model('Login', {
@@ -89,8 +87,6 @@ class Register(Resource):
                 last_name=data['last_name'],
                 date_of_birth=datetime.strptime(str(data['date_of_birth']), '%Y-%m-%d').date(),
                 phone_number=data['phone_number'],
-                medical_history=data.get('medical_history', ''),
-                allergies=data.get('allergies', ''),
                 verification_code=verification_code,
                 verification_code_expires=datetime.now(timezone.utc) + timedelta(minutes=15),
                 email_verified=False
