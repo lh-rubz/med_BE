@@ -304,7 +304,16 @@ class ChatResource(Resource):
             error_msg = str(e)
             if "DUPLICATE_REPORT" in error_msg:
                 print(f"⚠️  Duplicate report detected: {error_msg}")
-                return {'error': error_msg.replace("DUPLICATE_REPORT: ", ""), 'code': 'DUPLICATE_REPORT'}, 409
+                # Extract report ID if present
+                import re
+                report_id_match = re.search(r'#(\d+)', error_msg)
+                report_id = int(report_id_match.group(1)) if report_id_match else None
+                
+                return {
+                    'error': error_msg.replace("DUPLICATE_REPORT: ", ""), 
+                    'code': 'DUPLICATE_REPORT',
+                    'report_id': report_id
+                }, 409
             
             print(f"❌ Value Error processing images: {error_msg}")
             return {'error': f'Processing error: {error_msg}'}, 400
