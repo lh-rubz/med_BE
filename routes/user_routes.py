@@ -1,4 +1,6 @@
 from flask import request
+import re
+from datetime import datetime
 from flask_restx import Resource, Namespace, fields
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
@@ -14,7 +16,8 @@ user_update_model = user_ns.model('UserUpdate', {
     'first_name': fields.String(description='First name'),
     'last_name': fields.String(description='Last name'),
     'phone_number': fields.String(description='Phone number'),
-    'phone_number': fields.String(description='Phone number')
+    'date_of_birth': fields.String(description='Date of Birth (YYYY-MM-DD)'),
+    'gender': fields.String(description='Gender')
 })
 
 delete_user_model = user_ns.model('DeleteUser', {
@@ -48,8 +51,9 @@ class UserProfile(Resource):
             'email': user.email,
             'first_name': user.first_name,
             'last_name': user.last_name,
-            'date_of_birth': str(user.date_of_birth),
+            'date_of_birth': user.date_of_birth.strftime('%Y-%m-%d') if user.date_of_birth else None,
             'phone_number': user.phone_number,
+            'gender': user.gender,
             'created_at': str(user.created_at)
         }
 
@@ -66,12 +70,33 @@ class UserProfile(Resource):
 
         data = request.json
         try:
+            # 1. Name Validation
+            name_pattern = re.compile(r"^[a-zA-Z\s]+$")
+            
             if 'first_name' in data:
+                if not name_pattern.match(data['first_name']):
+                    return {'message': 'First name must contain only letters and spaces'}, 400
                 user.first_name = data['first_name']
+                
             if 'last_name' in data:
+                if not name_pattern.match(data['last_name']):
+                    return {'message': 'Last name must contain only letters and spaces'}, 400
                 user.last_name = data['last_name']
+
+            # 2. Date of Birth Handling
+            if 'date_of_birth' in data and data['date_of_birth']:
+                try:
+                    dob_obj = datetime.strptime(data['date_of_birth'], '%Y-%m-%d').date()
+                    user.date_of_birth = dob_obj
+                except ValueError:
+                    return {'message': 'Invalid date format. Use YYYY-MM-DD'}, 400
+
+            # 3. Other Fields
             if 'phone_number' in data:
                 user.phone_number = data['phone_number']
+                
+            if 'gender' in data:
+                user.gender = data['gender']
 
             db.session.commit()
             return {'message': 'Profile updated successfully'}, 200

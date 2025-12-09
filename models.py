@@ -14,6 +14,7 @@ class User(db.Model):
     last_name = db.Column(db.String(50), nullable=False)
     date_of_birth = db.Column(db.Date, nullable=False)
     phone_number = db.Column(db.String(20), nullable=False)
+    gender = db.Column(db.String(20))
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     is_active = db.Column(db.Boolean, default=True)
     email_verified = db.Column(db.Boolean, default=False)
