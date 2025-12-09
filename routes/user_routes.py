@@ -114,12 +114,23 @@ class DeleteAccount(Resource):
     @user_ns.doc(security='Bearer Auth')
     @jwt_required()
     def delete(self):
-        """Delete current user's account and all associated data"""
+        """Delete current user's account and all associated data - requires password confirmation"""
         current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
             return {'message': 'User not found'}, 404
+        
+        # Get password from request body
+        data = request.json
+        password = data.get('password') if data else None
+        
+        if not password:
+            return {'message': 'Password is required to delete account'}, 400
+        
+        # Verify password
+        if not user.check_password(password):
+            return {'message': 'Incorrect password'}, 401
         
         try:
             # Manually clean up related records to ensure thorough deletion
@@ -154,6 +165,7 @@ class DeleteAccount(Resource):
                 'message': 'Failed to delete account',
                 'error': str(e)
             }, 500
+
 
 
 @user_ns.route('/delete-user-testing')
