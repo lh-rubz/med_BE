@@ -178,7 +178,7 @@ class ChatResource(Resource):
         # Generator for streaming response
         def generate_progress():
             try:
-                yield f"data: {json.dumps({'percent': 2, 'message': 'Preparing upload...'})}\n\n"
+                yield f"data: {json.dumps({'percent': 2, 'message': 'Preparing your file for analysis...'})}\n\n"
                 
                 all_images_to_process = []
                 saved_files = []
@@ -188,7 +188,7 @@ class ChatResource(Resource):
                 for i, file in enumerate(files):
                     if file.filename == '': continue
                     
-                    yield f"data: {json.dumps({'percent': 5 + int((i/total_files)*15), 'message': f'Optimizing file {i+1} of {total_files}...'})}\n\n"
+                    yield f"data: {json.dumps({'percent': 5 + int((i/total_files)*15), 'message': f'Wait a second, Optimizing file {i+1} of {total_files}...'})}\n\n"
                     
                     # 1. Calculate File Hash for Duplicate Detection
                     file_content = file.read()
@@ -223,7 +223,7 @@ class ChatResource(Resource):
                     })
                     
                     if file_extension == 'pdf':
-                        yield f"data: {json.dumps({'percent': 15, 'message': f'Processing document pages...'})}\n\n"
+                        yield f"data: {json.dumps({'percent': 15, 'message': f'Scanning your document pages...'})}\n\n"
                         images = pdf_to_images(file_path)
                         for page_num, img_data in enumerate(images, 1):
                             all_images_to_process.append({
@@ -266,7 +266,7 @@ class ChatResource(Resource):
         all_extracted_data = []
         patient_info = {}
         
-        yield f"data: {json.dumps({'percent': 20, 'message': f'Analyzing medical report...'})}\n\n"
+        yield f"data: {json.dumps({'percent': 20, 'message': f'Analyzing your medical report...'})}\n\n"
         
         print(f"\n{'='*80}")
         print(f"🔄 STREAMING PROCESS STARTED: {total_pages} page(s)")
@@ -284,7 +284,7 @@ class ChatResource(Resource):
             print(f"{'='*80}\n")
             
             # Step 1: OCR
-            yield f"data: {json.dumps({'percent': current_progress, 'message': f'Reading text details (Page {idx}/{total_pages})...'})}\n\n"
+            yield f"data: {json.dumps({'percent': current_progress, 'message': f'Reading text from page {idx} of {total_pages}...'})}\n\n"
             print(f"📝 Step 1: Extracting text with OCR...")
             
             ocr_text = None
@@ -298,7 +298,7 @@ class ChatResource(Resource):
             
             # Step 2: VLM
             print(f"🤖 Step 2: Structuring data with VLM (hybrid mode)...")
-            yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Understanding medical values (Page {idx}/{total_pages})...'})}\n\n"
+            yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Understanding medical values on page {idx}...'})}\n\n"
             
             # Build prompt (Reusing logic)
             prompt_text = f"""Extract ALL medical data from this image (page {idx}/{total_pages}).
@@ -377,7 +377,7 @@ Return ONLY valid JSON:
                 print(f"❌ VLM Error on page {idx}: {e}")
 
         # Step 3: Validation
-        yield f"data: {json.dumps({'percent': 75, 'message': 'Reviewing results for accuracy...'})}\n\n"
+        yield f"data: {json.dumps({'percent': 75, 'message': 'Double-checking the results...'})}\n\n"
         print(f"🔍 Validating aggregated data ({len(all_extracted_data)} total items)...")
         
         # Combine data
@@ -395,7 +395,7 @@ Return ONLY valid JSON:
         # Validation Logic (Call utils)
         try:
             # Auto-learning synonyms (Simplified version of original logic)
-            yield f"data: {json.dumps({'percent': 80, 'message': 'Standardizing medical terms...'})}\n\n"
+            yield f"data: {json.dumps({'percent': 80, 'message': 'Organizing medical terms...'})}\n\n"
             
             validated = validate_medical_data(final_data)
             final_data = validated
@@ -405,7 +405,7 @@ Return ONLY valid JSON:
             traceback.print_exc()
 
         # Step 4: Duplicate Check
-        yield f"data: {json.dumps({'percent': 85, 'message': 'Checking for duplicates...'})}\n\n"
+        yield f"data: {json.dumps({'percent': 85, 'message': 'Ensuring this is a new report...'})}\n\n"
         
         try:
             medical_data_list = final_data.get('medical_data', [])
@@ -452,7 +452,7 @@ Return ONLY valid JSON:
              print(f"Duplicate Check Error: {e}")
 
         # Step 5: Saving
-        yield f"data: {json.dumps({'percent': 90, 'message': 'Finalizing your report...'})}\n\n"
+        yield f"data: {json.dumps({'percent': 90, 'message': 'Saving your report...'})}\n\n"
         print(f"💾 Saving report to database...")
         
         new_report_id = None
