@@ -190,6 +190,40 @@
                 transform: rotate(360deg);
             }
         }
+
+        .progress-wrapper {
+            margin: 20px 0;
+            display: none;
+        }
+
+        .progress-bar-bg {
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            height: 20px;
+            overflow: hidden;
+            width: 100%;
+        }
+
+        .progress-bar-fill {
+            background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .progress-text {
+            text-align: center;
+            margin-top: 8px;
+            font-size: 14px;
+            color: #555;
+            font-weight: 500;
+        }
     </style>
 </head>
 
@@ -233,6 +267,14 @@
             <button class="btn btn-success" onclick="uploadFiles()">
                 <span id="uploadBtnText">Upload and Process</span>
             </button>
+
+            <!-- Progress Bar Section -->
+            <div id="progressSection" class="progress-wrapper">
+                <div class="progress-bar-bg">
+                    <div id="progressBar" class="progress-bar-fill">0%</div>
+                </div>
+                <div id="progressText" class="progress-text">Initializing...</div>
+            </div>
 
             <div id="uploadStatus" class="hidden"></div>
 
@@ -348,7 +390,7 @@
             }
         }
 
-        function uploadFiles() {
+        async function uploadFiles() {
             const filesInput = document.getElementById('files');
             const files = filesInput.files;
             const uploadBtn = document.querySelector('#uploadCard .btn-success');
@@ -356,8 +398,9 @@
             const uploadStatus = document.getElementById('uploadStatus');
             const responseContainer = document.getElementById('responseContainer');
             const responseContent = document.getElementById('responseContent');
+
+            const progressSection = document.getElementById('progressSection');
             const progressBar = document.getElementById('progressBar');
-            const progressContainer = document.querySelector('.progress-container');
             const progressText = document.getElementById('progressText');
 
             if (files.length === 0) {
@@ -365,119 +408,108 @@
                 return;
             }
 
-            // Disable button and show loading
+            if (!authToken) {
+                showStatus(uploadStatus, '⚠️ Please login first', 'error');
+                return;
+            }
+
+            // Reset UI
             uploadBtn.disabled = true;
             uploadBtnText.innerHTML = '<span class="loading"></span> Processing...';
             uploadStatus.classList.add('hidden');
             responseContainer.classList.add('hidden');
 
-            // Show progress bar
-            if (progressContainer) {
-                progressContainer.classList.remove('hidden');
-                progressBar.style.width = '0%';
-                progressBar.className = 'progress-bar bg-primary';
-                progressText.textContent = 'Starting upload...';
-            }
+            // Show progress
+            progressSection.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+            progressBar.style.backgroundColor = ''; // Reset color
+            progressText.textContent = 'Starting upload...';
 
-            // Create FormData
             const formData = new FormData();
             for (let i = 0; i < files.length; i++) {
                 formData.append('file', files[i]);
             }
 
-            // Use XMLHttpRequest for tracking upload progress
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', `${API_BASE}/vlm/chat`, true);
-            xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
+            try {
+                const response = await fetch(`${API_BASE}/vlm/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: formData
+                });
 
-            // Upload progress
-            xhr.upload.onprogress = function (e) {
-                if (e.lengthComputable) {
-                    const percentComplete = (e.loaded / e.total) * 100;
-                    if (percentComplete < 100) {
-                        progressBar.style.width = percentComplete + '%';
-                        progressText.textContent = `Uploading: ${Math.round(percentComplete)}%`;
-                    } else {
-                        progressBar.style.width = '100%';
-                        progressBar.className = 'progress-bar bg-info progress-bar-striped progress-bar-animated';
-                        progressText.textContent = 'Processing on server... (this may take a moment)';
-                    }
-                }
-            };
-
-            // Handle streaming response
-            let lastProcessedIndex = 0;
-
-            xhr.onprogress = function () {
-                const responseText = xhr.responseText;
-                const newContent = responseText.substring(lastProcessedIndex);
-
-                // Process each line
-                const lines = newContent.split('\n');
-
-                for (let line of lines) {
-                    if (!line.trim()) continue;
-
+                if (!response.ok) {
+                    let errorMsg = `HTTP Error: ${response.status}`;
                     try {
-                        const data = JSON.parse(line);
+                        const errData = await response.json();
+                        errorMsg = errData.message || errData.error || errorMsg;
+                    } catch (e) { }
+                    throw new Error(errorMsg);
+                }
 
-                        // Handle different message types
-                        if (data.type === 'progress') {
-                            progressText.textContent = data.message;
-                            if (data.percent) {
-                                progressBar.style.width = data.percent + '%';
+                // Read the stream
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const jsonStr = line.replace('data: ', '');
+                                const data = JSON.parse(jsonStr);
+
+                                if (data.error) {
+                                    throw new Error(data.error);
+                                }
+
+                                // Update Progress
+                                if (data.percent) {
+                                    progressBar.style.width = `${data.percent}%`;
+                                    progressBar.textContent = `${data.percent}%`;
+                                }
+
+                                if (data.message) {
+                                    progressText.textContent = data.message;
+                                }
+
+                                // Success/Completion
+                                if (data.percent === 100) {
+                                    showStatus(uploadStatus, `✅ Success! Report #${data.report_id || 'Created'}`, 'success');
+
+                                    // Show final data
+                                    responseContent.textContent = JSON.stringify(data, null, 2);
+                                    responseContainer.classList.remove('hidden');
+
+                                    progressBar.style.background = '#38ef7d'; // Success green
+                                }
+
+                            } catch (e) {
+                                // Rethrow valid errors, ignore parse errors of partial chunks
+                                if (e.message && !e.message.includes("JSON")) {
+                                    throw e;
+                                }
                             }
-                        } else if (data.type === 'result') {
-                            // Final success
-                            showStatus(uploadStatus,
-                                `✅ Success! Report #${data.data?.report_id || 'N/A'} created.`,
-                                'success');
-                            responseContent.textContent = JSON.stringify(data.data, null, 2);
-                            responseContainer.classList.remove('hidden');
-
-                            // Finish progress bar
-                            progressBar.style.width = '100%';
-                            progressBar.className = 'progress-bar bg-success';
-                            progressText.textContent = 'Complete!';
-                        } else if (data.type === 'error') {
-                            showStatus(uploadStatus, `❌ Error: ${data.error}`, 'error');
-                            progressBar.className = 'progress-bar bg-danger';
-                            progressText.textContent = 'Failed';
                         }
-                    } catch (e) {
-                        // Incomplete JSON chunk, wait for next packet
                     }
                 }
 
-                // Update index for next chunk, but check if the last line was partial
-                // In a robust implementation we'd handle partial lines better, 
-                // but usually NDJSON splits cleanly or we just retry parsing.
-                // A safer way is to only advance index if we found newlines.
-                lastProcessedIndex = responseText.lastIndexOf('\n') + 1;
-            };
-
-            xhr.onload = function () {
+            } catch (error) {
+                console.error(error);
+                showStatus(uploadStatus, `❌ Error: ${error.message}`, 'error');
+                progressText.textContent = 'Process Failed';
+                progressBar.style.background = '#ff6b6b'; // Error red
+            } finally {
                 uploadBtn.disabled = false;
                 uploadBtnText.textContent = 'Upload and Process';
-
-                if (xhr.status !== 200) {
-                    try {
-                        const errorData = JSON.parse(xhr.responseText);
-                        showStatus(uploadStatus, `❌ Error (${xhr.status}): ${errorData.message || errorData.error}`, 'error');
-                    } catch (e) {
-                        showStatus(uploadStatus, `❌ Upload failed (${xhr.status})`, 'error');
-                    }
-                    progressBar.className = 'progress-bar bg-danger';
-                }
-            };
-
-            xhr.onerror = function () {
-                showStatus(uploadStatus, '❌ Network Error', 'error');
-                uploadBtn.disabled = false;
-                uploadBtnText.textContent = 'Upload and Process';
-            };
-
-            xhr.send(formData);
+            }
         }
 
         function showStatus(element, message, type) {
