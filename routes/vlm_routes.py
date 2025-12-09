@@ -347,7 +347,9 @@ class ChatResource(Resource):
 
 RULES:
 1. Extract EVERY test with its value, unit, normal range. Skip headers.
-2. Report type from: {', '.join(REPORT_TYPES[:10])}... (choose closest match)
+2. Report Identification:
+   - report_name: Extract the EXACT title written on the report (e.g., "Detailed Hemogram", "Lipid Profile"). If no title, use "Medical Report".
+   - report_type: Choose the CLOSEST match from this standard list: {', '.join(REPORT_TYPES)}. If no good match, use "Other".
 3. IMPORTANT - Extract doctor names:
    - Look for "Ref. By:", "Ref By:", "Referred By:", "Referring Doctor:", or "Dr." followed by a name
    - Extract the FULL name (e.g., "Dr. Hiren Shah" → "Hiren Shah", "Dr. M. Patel" → "M. Patel")
@@ -375,7 +377,9 @@ Return ONLY valid JSON:
     "patient_name": "...",
     "patient_age": "...",
     "patient_gender": "...",
+    "patient_gender": "...",
     "report_date": "YYYY-MM-DD",
+    "report_name": "...",
     "report_type": "...",
     "doctor_names": "...",
     "total_fields_in_image": <count>,
@@ -675,26 +679,6 @@ Use the OCR text to get accurate Arabic names and values, but rely on the image 
                     
                     if match_percentage >= 90:
                         raise ValueError(f'DUPLICATE_REPORT: This report appears to be a duplicate of an existing report (#{existing_report.id})')
-        
-        # Save to database
-        medical_data_str = json.dumps(medical_data_list, sort_keys=True)
-        report_hash = hashlib.sha256(medical_data_str.encode()).hexdigest()
-        first_filename = saved_files[0]['original_filename'] if saved_files else "unknown"
-        
-        new_report = Report(
-            user_id=current_user_id,
-            report_date=datetime.now(timezone.utc),
-            report_hash=report_hash,
-            report_type=extracted_data.get('report_type', 'General Medical Report'),
-            patient_age=extracted_data.get('patient_age', ''),
-            patient_gender=extracted_data.get('patient_gender', ''),
-            doctor_names=extracted_data.get('doctor_names', ''),
-            original_filename=first_filename
-        )
-        db.session.add(new_report)
-        db.session.flush()
-        
-        # Create ReportFile records for each uploaded file
         print(f"\n📁 Creating ReportFile records for {len(saved_files)} file(s)...")
         for file_info in saved_files:
             if file_info['is_pdf']:
@@ -773,6 +757,7 @@ Use the OCR text to get accurate Arabic names and values, but rely on the image 
             'patient_age': new_report.patient_age,
             'patient_gender': new_report.patient_gender,
             'report_date': extracted_data.get('report_date', ''),
+            'report_name': new_report.report_name,
             'report_type': new_report.report_type,
             'doctor_names': new_report.doctor_names,
             'original_filename': new_report.original_filename,

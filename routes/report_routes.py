@@ -80,6 +80,7 @@ class UserReports(Resource):
             reports_data.append({
                 'report_id': report.id,
                 'report_date': str(report.report_date),
+                'report_name': report.report_name,
                 'report_type': report.report_type,
                 'doctor_names': report.doctor_names,
                 'patient_age': report.patient_age,
@@ -282,6 +283,7 @@ class UserReportDetail(Resource):
             'report': {
                 'report_id': report.id,
                 'report_date': str(report.report_date),
+                'report_name': report.report_name,
                 'report_type': report.report_type,
                 'doctor_names': report.doctor_names,
                 'patient_age': report.patient_age,
@@ -370,6 +372,7 @@ class ReportCategorized(Resource):
             'patient_age': report.patient_age,
             'patient_gender': report.patient_gender,
             'report_date': str(report.report_date),
+            'report_name': report.report_name,
             'report_type': report.report_type,
             'doctor_names': report.doctor_names,
             'categories': categorized_data
