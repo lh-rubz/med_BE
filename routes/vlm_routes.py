@@ -580,6 +580,7 @@ Return ONLY valid JSON:
                 report_hash=report_hash,
                 report_name=final_data.get('report_name'),
                 report_type=final_data.get('report_type'),
+                patient_name=final_data.get('patient_name'),
                 patient_age=final_data.get('patient_age'),
                 patient_gender=final_data.get('patient_gender'),
                 doctor_names=final_data.get('doctor_names'),
