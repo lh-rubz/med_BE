@@ -688,6 +688,26 @@ Use the OCR text to get accurate Arabic names and values, but rely on the image 
                     
                     if match_percentage >= 90:
                         raise ValueError(f'DUPLICATE_REPORT: This report appears to be a duplicate of an existing report (#{existing_report.id})')
+        
+        # Save to database
+        medical_data_str = json.dumps(medical_data_list, sort_keys=True)
+        report_hash = hashlib.sha256(medical_data_str.encode()).hexdigest()
+        first_filename = saved_files[0]['original_filename'] if saved_files else "unknown"
+        
+        new_report = Report(
+            user_id=current_user_id,
+            report_date=datetime.now(timezone.utc),
+            report_hash=report_hash,
+            report_name=extracted_data.get('report_name', 'Medical Report'),
+            report_type=extracted_data.get('report_type', 'General Medical Report'),
+            patient_age=extracted_data.get('patient_age', ''),
+            patient_gender=extracted_data.get('patient_gender', ''),
+            doctor_names=extracted_data.get('doctor_names', ''),
+            original_filename=first_filename
+        )
+        db.session.add(new_report)
+        db.session.flush()
+
         print(f"\n📁 Creating ReportFile records for {len(saved_files)} file(s)...")
         for file_info in saved_files:
             if file_info['is_pdf']:
