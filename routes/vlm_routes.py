@@ -429,52 +429,72 @@ Return ONLY valid JSON:
             
             # Create a modifiable list for synonym processing
             medical_data_list = final_data.get('medical_data', [])
+            unknown_terms = []
             
+            # 1. First Pass: check DB for existing synonyms
             for item in medical_data_list:
                 original_name = item.get('field_name', '').strip()
-                if not original_name:
+                if not original_name or len(original_name) < 2:
                     continue
                     
-                # 1. Check if we already have a mapping
                 synonym_record = MedicalSynonym.query.filter_by(synonym=original_name.lower()).first()
-                
                 if synonym_record:
                     # Known alias -> Use standard name
                     print(f"   ✓ Normalized: '{original_name}' -> '{synonym_record.standard_name}'")
                     item['field_name'] = synonym_record.standard_name
                 else:
-                    # Unknown -> Ask Ollama to standardize
-                    # Only ask if it looks like a medical term (not empty/garbage)
-                    if len(original_name) > 1:
-                        print(f"   ❓ Unknown term: '{original_name}' - Asking AI...")
-                        try:
-                            learning_prompt = f"""Identify the standard medical name for the test: "{original_name}".
-                            Return ONLY the standard name (e.g. if 'Hgb', return 'Hemoglobin').
-                            If it IS already standard, return it as is.
-                            Return 'UNKNOWN' if not a valid medical test.
-                            Do not add any punctuation or explanation."""
-                            
-                            client = Client(host=Config.OLLAMA_BASE_URL)
-                            response = client.chat(model='gemma3:12b', messages=[
-                                {'role': 'user', 'content': learning_prompt}
-                            ])
-                            
-                            standardized = response['message']['content'].strip().replace('"', '').replace("'", "")
-                            
-                            if standardized and standardized != 'UNKNOWN' and len(standardized) < 50:
-                                # Learn it!
-                                if standardized.lower() != original_name.lower():
-                                    print(f"   💡 Learned: '{original_name}' is alias for '{standardized}'")
-                                    add_new_alias(original_name, standardized)
+                    # Unknown -> Queue for batch learning
+                    if original_name not in unknown_terms:
+                        unknown_terms.append(original_name)
+            
+            # 2. Batch Processing for Unknown Terms
+            if unknown_terms:
+                print(f"   ❓ Found {len(unknown_terms)} unknown terms. Asking AI in BATCH mode...")
+                try:
+                    terms_list_str = json.dumps(unknown_terms)
+                    learning_prompt = f"""Identify the standard medical name for these tests: {terms_list_str}.
+                    Return a JSON object mapping each original name to its standard name.
+                    Example format: {{"original_name1": "Standard Name 1", "original_name2": "Standard Name 2"}}
+                    If a term is already standard, map it to itself.
+                    If not a valid medical test, map to "UNKNOWN".
+                    Return ONLY the JSON."""
+                    
+                    client = Client(host=Config.OLLAMA_BASE_URL)
+                    # Using the larger model as requested by user, but batched for speed
+                    response = client.chat(model='gemma3:12b', messages=[
+                        {'role': 'user', 'content': learning_prompt}
+                    ])
+                    
+                    response_text = response['message']['content'].strip()
+                    # Clean markdown code blocks if present
+                    if "```json" in response_text:
+                        response_text = response_text.split("```json")[1].split("```")[0].strip()
+                    elif "```" in response_text:
+                        response_text = response_text.split("```")[1].split("```")[0].strip()
+                        
+                    learned_map = json.loads(response_text)
+                    
+                    # 3. Process learned terms
+                    for original, standardized in learned_map.items():
+                        standardized = standardized.strip()
+                        if standardized and standardized != 'UNKNOWN' and len(standardized) < 50:
+                            # Learn it (save to DB)
+                            if standardized.lower() != original.lower():
+                                print(f"   💡 Learned: '{original}' is alias for '{standardized}'")
+                                add_new_alias(original, standardized)
+                                # Also ensure standard name is in DB as a self-mapping
+                                add_new_alias(standardized, standardized)
+                            else:
+                                print(f"   📝 registered new standard term: '{standardized}'")
+                                add_new_alias(standardized, standardized)
+                                
+                            # Update items in the list
+                            for item in medical_data_list:
+                                if item.get('field_name') == original:
                                     item['field_name'] = standardized
-                                    # Also ensure standard name is in DB as a self-mapping
-                                    add_new_alias(standardized, standardized)
-                                else:
-                                    # It's a new standard term
-                                    add_new_alias(standardized, standardized)
-                                    print(f"   📝 registered new standard term: '{standardized}'")
-                        except Exception as learn_err:
-                            print(f"   ⚠️ Learning failed: {learn_err}")
+                                    
+                except Exception as learn_err:
+                    print(f"   ⚠️ Batch learning failed: {learn_err}")
 
             # Update final_data with standardized list
             final_data['medical_data'] = medical_data_list
