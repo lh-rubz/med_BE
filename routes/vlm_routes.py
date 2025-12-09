@@ -419,8 +419,67 @@ Return ONLY valid JSON:
             'medical_data': all_extracted_data
         }
         
-        # Validation Logic (Call utils)
+        # EARLY Duplicate Check (using report hash) - Before expensive validation
+        yield f"data: {json.dumps({'percent': 72, 'message': 'Checking for duplicates...'})}\\n\\n"
+        
         try:
+            medical_data_list = final_data.get('medical_data', [])
+            if len(medical_data_list) > 0:
+                # Calculate report hash
+                report_hash = hashlib.sha256(json.dumps(medical_data_list, sort_keys=True).encode()).hexdigest()
+                
+                # Check if this exact report already exists for this user
+                existing_report = Report.query.filter_by(
+                    user_id=current_user_id,
+                    report_hash=report_hash
+                ).first()
+                
+                if existing_report:
+                    error_msg = f'This report appears to be a duplicate of an existing report (#{existing_report.id})'
+                    yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_REPORT', 'report_id': existing_report.id})}\\n\\n"
+                    return
+                
+                # Fallback: Check for very similar reports (in case hash differs slightly)
+                # Get recent reports from same date if available
+                extracted_date_str = final_data.get('report_date')
+                if extracted_date_str and len(extracted_date_str) == 10:
+                    try:
+                        target_date = datetime.strptime(extracted_date_str, '%Y-%m-%d').date()
+                        start_of_day = datetime.combine(target_date, datetime.min.time())
+                        end_of_day = datetime.combine(target_date, datetime.max.time())
+                        
+                        similar_reports = Report.query.filter(
+                            Report.user_id == current_user_id,
+                            Report.report_date >= start_of_day,
+                            Report.report_date <= end_of_day
+                        ).limit(5).all()
+                        
+                        # Quick similarity check
+                        new_field_map = {str(item.get('field_name', '')).lower().strip(): str(item.get('field_value', '')).strip() 
+                                         for item in medical_data_list}
+                        
+                        for similar_report in similar_reports:
+                            similar_fields = ReportField.query.filter_by(report_id=similar_report.id).all()
+                            similar_field_map = {str(field.field_name).lower().strip(): str(field.field_value).strip() 
+                                                  for field in similar_fields}
+                            
+                            if similar_field_map and len(new_field_map) > 0:
+                                matching_fields = sum(1 for fn, fv in new_field_map.items() 
+                                                      if fn in similar_field_map and similar_field_map[fn] == fv)
+                                match_percentage = (matching_fields / len(new_field_map)) * 100
+                                
+                                if match_percentage >= 95:  # Very high threshold for fallback
+                                    error_msg = f'This report appears very similar to an existing report (#{similar_report.id})'
+                                    yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_REPORT', 'report_id': similar_report.id})}\\n\\n"
+                                    return
+                    except:
+                        pass  # Continue if date parsing fails
+                
+        except Exception as e:
+             print(f"Duplicate Check Error: {e}")
+        
+        # Step 3: Validation
+        yield f"data: {json.dumps({'percent': 75, 'message': 'Double-checking the results...'})}\\n\\n"
             # ---------------------------------------------------------
             # AUTO-LEARNING SYNONYM STANDARDIZATION
             # ---------------------------------------------------------
@@ -519,55 +578,8 @@ Return ONLY valid JSON:
             import traceback
             traceback.print_exc()
 
-        # Step 4: Duplicate Check
-        yield f"data: {json.dumps({'percent': 85, 'message': 'Ensuring this is a new report...'})}\n\n"
-        
-        try:
-            medical_data_list = final_data.get('medical_data', [])
-            if len(medical_data_list) > 0:
-                extracted_date_str = final_data.get('report_date')
-                existing_reports = []
-                
-                # Filter reports by date for optimization
-                if extracted_date_str and len(extracted_date_str) == 10:  # YYYY-MM-DD
-                    try:
-                        target_date = datetime.strptime(extracted_date_str, '%Y-%m-%d').date()
-                        start_of_day = datetime.combine(target_date, datetime.min.time())
-                        end_of_day = datetime.combine(target_date, datetime.max.time())
-                        
-                        existing_reports = Report.query.filter(
-                            Report.user_id == current_user_id,
-                            Report.report_date >= start_of_day,
-                            Report.report_date <= end_of_day
-                        ).all()
-                    except ValueError:
-                        existing_reports = Report.query.filter_by(user_id=current_user_id).all()
-                else:
-                    existing_reports = Report.query.filter_by(user_id=current_user_id).all()
-                
-                new_field_map = {str(item.get('field_name', '')).lower().strip(): str(item.get('field_value', '')).strip() 
-                                 for item in medical_data_list}
-                
-                for existing_report in existing_reports:
-                    existing_fields = ReportField.query.filter_by(report_id=existing_report.id).all()
-                    existing_field_map = {str(field.field_name).lower().strip(): str(field.field_value).strip() 
-                                          for field in existing_fields}
-                    
-                    if existing_field_map:
-                        matching_fields = sum(1 for fn, fv in new_field_map.items() 
-                                              if fn in existing_field_map and existing_field_map[fn] == fv)
-                        match_percentage = (matching_fields / len(new_field_map)) * 100 if new_field_map else 0
-                        
-                        if match_percentage >= 90:
-                             error_msg = f'This report appears to be a duplicate of an existing report (#{existing_report.id})'
-                             yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_REPORT', 'report_id': existing_report.id})}\n\n"
-                             return
-                
-        except Exception as e:
-             print(f"Duplicate Check Error: {e}")
-
         # Step 5: Saving
-        yield f"data: {json.dumps({'percent': 90, 'message': 'Saving your report...'})}\n\n"
+        yield f"data: {json.dumps({'percent': 90, 'message': 'Saving your report...'})}\\n\\n"
         print(f"💾 Saving report to database...")
         
         new_report_id = None
