@@ -7,6 +7,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from models import db, User, Report, ReportField, AdditionalField
 from config import send_brevo_email, Config
 from email_templates import get_test_email
+import os
+
 
 # Create namespace
 user_ns = Namespace('users', description='User operations')
@@ -16,8 +18,7 @@ user_update_model = user_ns.model('UserUpdate', {
     'first_name': fields.String(description='First name'),
     'last_name': fields.String(description='Last name'),
     'phone_number': fields.String(description='Phone number'),
-    'date_of_birth': fields.String(description='Date of Birth (YYYY-MM-DD)'),
-    'gender': fields.String(description='Gender')
+    'date_of_birth': fields.String(description='Date of Birth (YYYY-MM-DD)')
 })
 
 delete_user_model = user_ns.model('DeleteUser', {
@@ -54,54 +55,91 @@ class UserProfile(Resource):
             'date_of_birth': user.date_of_birth.strftime('%Y-%m-%d') if user.date_of_birth else None,
             'phone_number': user.phone_number,
             'gender': user.gender,
+            'profile_image': user.profile_image,
+            'profile_image_url': f'/users/profile-image/{user.id}',
             'created_at': str(user.created_at)
         }
 
     @user_ns.doc(security='Bearer Auth')
     @jwt_required()
-    @user_ns.expect(user_update_model)
     def put(self):
-        """Update user profile"""
+        """Update user profile (supports multipart/form-data for image upload)"""
+        from werkzeug.utils import secure_filename
         current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
             return {'message': 'User not found'}, 404
 
-        data = request.json
         try:
+            # Handle form data (for file upload)
+            first_name = request.form.get('first_name')
+            last_name = request.form.get('last_name')
+            phone_number = request.form.get('phone_number')
+            date_of_birth = request.form.get('date_of_birth')
+            profile_image = request.files.get('profile_image')
+            
             # 1. Name Validation
             name_pattern = re.compile(r"^[a-zA-Z\s]+$")
             
-            if 'first_name' in data:
-                if not name_pattern.match(data['first_name']):
+            if first_name:
+                if not name_pattern.match(first_name):
                     return {'message': 'First name must contain only letters and spaces'}, 400
-                user.first_name = data['first_name']
+                user.first_name = first_name
                 
-            if 'last_name' in data:
-                if not name_pattern.match(data['last_name']):
+            if last_name:
+                if not name_pattern.match(last_name):
                     return {'message': 'Last name must contain only letters and spaces'}, 400
-                user.last_name = data['last_name']
+                user.last_name = last_name
 
             # 2. Date of Birth Handling
-            if 'date_of_birth' in data and data['date_of_birth']:
+            if date_of_birth:
                 try:
-                    dob_obj = datetime.strptime(data['date_of_birth'], '%Y-%m-%d').date()
+                    dob_obj = datetime.strptime(date_of_birth, '%Y-%m-%d').date()
                     user.date_of_birth = dob_obj
                 except ValueError:
                     return {'message': 'Invalid date format. Use YYYY-MM-DD'}, 400
 
-            # 3. Other Fields
-            if 'phone_number' in data:
-                user.phone_number = data['phone_number']
+            # 3. Phone Number
+            if phone_number:
+                user.phone_number = phone_number
+            
+            # 4. Profile Image Upload
+            if profile_image and profile_image.filename:
+                # Validate file type
+                allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+                file_ext = profile_image.filename.rsplit('.', 1)[1].lower() if '.' in profile_image.filename else ''
                 
-            if 'gender' in data:
-                user.gender = data['gender']
+                if file_ext not in allowed_extensions:
+                    return {'message': 'Invalid image format. Allowed: png, jpg, jpeg, gif, webp'}, 400
+                
+                # Create user profile folder
+                profile_folder = os.path.join(Config.UPLOAD_FOLDER, f'user_{current_user_id}', 'profile_img')
+                os.makedirs(profile_folder, exist_ok=True)
+                
+                # Delete old profile image if not default
+                if user.profile_image and user.profile_image != 'default.jpg':
+                    old_image_path = os.path.join(profile_folder, user.profile_image)
+                    if os.path.exists(old_image_path):
+                        os.remove(old_image_path)
+                        print(f"🗑️ Deleted old profile image: {old_image_path}")
+                
+                # Save new image with fixed name (profile.ext)
+                new_filename = f'profile.{file_ext}'
+                image_path = os.path.join(profile_folder, new_filename)
+                profile_image.save(image_path)
+                
+                user.profile_image = new_filename
+                print(f"✅ Saved new profile image: {image_path}")
 
             db.session.commit()
-            return {'message': 'Profile updated successfully'}, 200
+            return {
+                'message': 'Profile updated successfully',
+                'profile_image_url': f'/users/profile-image/{user.id}'
+            }, 200
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Profile update error: {str(e)}")
             return {'message': 'Update failed', 'error': str(e)}, 400
 
 
@@ -209,6 +247,35 @@ class DeleteUserTesting(Resource):
                 'message': 'Failed to delete user',
                 'error': str(e)
             }, 500
+
+
+
+
+@user_ns.route('/profile-image/<int:user_id>')
+class ProfileImage(Resource):
+    def get(self, user_id):
+        """Get user's profile image"""
+        from flask import send_file
+        
+        user = User.query.get(user_id)
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+        
+        # Check for custom profile image
+        if user.profile_image and user.profile_image != 'default.jpg':
+            profile_folder = os.path.join(Config.UPLOAD_FOLDER, f'user_{user_id}', 'profile_img')
+            image_path = os.path.join(profile_folder, user.profile_image)
+            
+            if os.path.exists(image_path):
+                return send_file(image_path, mimetype='image/jpeg')
+        
+        # Fallback to default image
+        default_path = os.path.join('static', 'default.jpg')
+        if os.path.exists(default_path):
+            return send_file(default_path, mimetype='image/jpeg')
+        
+        return {'message': 'Profile image not found'}, 404
 
 
 @user_ns.route('/test-email')

@@ -15,6 +15,7 @@ class User(db.Model):
     date_of_birth = db.Column(db.Date, nullable=False)
     phone_number = db.Column(db.String(20), nullable=False)
     gender = db.Column(db.String(20))
+    profile_image = db.Column(db.String(255), default='default.jpg')  # Filename of profile image
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     is_active = db.Column(db.Boolean, default=True)
     email_verified = db.Column(db.Boolean, default=False)
