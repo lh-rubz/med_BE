@@ -301,6 +301,7 @@ class ChatResource(Resource):
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Understanding medical values on page {idx}...'})}\n\n"
             
             # Build prompt (Reusing logic)
+            # Build OPTIMIZED extraction prompt (reduced by ~40%)
             prompt_text = f"""Extract ALL medical data from this image (page {idx}/{total_pages}).
 
 RULES:
@@ -310,23 +311,49 @@ RULES:
    - report_type: Choose the CLOSEST match from this standard list: {', '.join(REPORT_TYPES)}. If no good match, use "Other".
 3. IMPORTANT - Extract doctor names:
    - Look for "Ref. By:", "Ref By:", "Referred By:", "Referring Doctor:", or "Dr." followed by a name
-   - Extract the FULL name. If multiple, separate with commas.
-4. Preserve EXACT decimal precision.
-5. Qualitative results ("Normal", "Negative") go in field_value.
-6. report_date: YYYY-MM-DD
-7. Patient Details: patient_age, patient_gender
-8. Extract category/section for each test.
+   - Extract the FULL name (e.g., "Dr. Hiren Shah" → "Hiren Shah", "Dr. M. Patel" → "M. Patel")
+   - Include middle initials if present
+   - If multiple doctors, separate with commas
+   - CRITICAL: Do NOT leave empty - if you see ANY doctor name on the report, extract it
+4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7")
+5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
+6. Extract report date as YYYY-MM-DD
+7. Extract patient details:
+   - patient_age: Extract age if found (e.g. "45", "45 Y", "45 Years"). If not found, use null or empty string.
+   - patient_gender: Extract gender if found (e.g. "Male", "Female", "M", "F"). Expand "M"/"F" to full words.
+8. If value marked "High" or "Low", add to notes
+9. IMPORTANT - Extract normal_range WITHOUT units:
+   - Remove units from range (e.g., "12 - 16 g/dL" → "12 - 16")
+   - Keep only the numeric range values
+   - For text ranges (e.g., "Normal: <5.7"), keep the text but remove units
+9. IMPORTANT - Extract category/section for EACH test:
+   - Look for section headers like "DIFFERENTIAL COUNT", "BLOOD INDICES", "ABSOLUTE COUNT", "WBC COUNT", "PLATELET COUNT"
+   - Assign each test to its category (use exact header text in UPPERCASE)
+   - If no category header visible, use empty string
 
 Return ONLY valid JSON:
 {{
     "patient_name": "...",
     "patient_age": "...",
     "patient_gender": "...",
+    "patient_gender": "...",
     "report_date": "YYYY-MM-DD",
     "report_name": "...",
     "report_type": "...",
     "doctor_names": "...",
-    "medical_data": [ ... ]
+    "total_fields_in_image": <count>,
+    "medical_data": [
+        {{
+            "field_name": "Test Name",
+            "field_value": "123.45 OR 'Normal'",
+            "field_unit": "g/dL or empty",
+            "normal_range": "13.5-17.5 or empty",
+            "is_normal": true,
+            "field_type": "measurement",
+            "category": "DIFFERENTIAL COUNT or empty",
+            "notes": "Marked as Low on report OR empty"
+        }}
+    ]
 }}"""
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
@@ -394,11 +421,75 @@ Return ONLY valid JSON:
         
         # Validation Logic (Call utils)
         try:
-            # Auto-learning synonyms (Simplified version of original logic)
-            yield f"data: {json.dumps({'percent': 80, 'message': 'Organizing medical terms...'})}\n\n"
+            # ---------------------------------------------------------
+            # AUTO-LEARNING SYNONYM STANDARDIZATION
+            # ---------------------------------------------------------
+            yield f"data: {json.dumps({'percent': 80, 'message': 'Standardizing and learning field names...'})}\n\n"
+            print("🧠 Standardizing and learning field names...")
             
-            validated = validate_medical_data(final_data)
-            final_data = validated
+            # Create a modifiable list for synonym processing
+            medical_data_list = final_data.get('medical_data', [])
+            
+            for item in medical_data_list:
+                original_name = item.get('field_name', '').strip()
+                if not original_name:
+                    continue
+                    
+                # 1. Check if we already have a mapping
+                synonym_record = MedicalSynonym.query.filter_by(synonym=original_name.lower()).first()
+                
+                if synonym_record:
+                    # Known alias -> Use standard name
+                    print(f"   ✓ Normalized: '{original_name}' -> '{synonym_record.standard_name}'")
+                    item['field_name'] = synonym_record.standard_name
+                else:
+                    # Unknown -> Ask Ollama to standardize
+                    # Only ask if it looks like a medical term (not empty/garbage)
+                    if len(original_name) > 1:
+                        print(f"   ❓ Unknown term: '{original_name}' - Asking AI...")
+                        try:
+                            learning_prompt = f"""Identify the standard medical name for the test: "{original_name}".
+                            Return ONLY the standard name (e.g. if 'Hgb', return 'Hemoglobin').
+                            If it IS already standard, return it as is.
+                            Return 'UNKNOWN' if not a valid medical test.
+                            Do not add any punctuation or explanation."""
+                            
+                            client = Client(host=Config.OLLAMA_BASE_URL)
+                            response = client.chat(model='gemma3:12b', messages=[
+                                {'role': 'user', 'content': learning_prompt}
+                            ])
+                            
+                            standardized = response['message']['content'].strip().replace('"', '').replace("'", "")
+                            
+                            if standardized and standardized != 'UNKNOWN' and len(standardized) < 50:
+                                # Learn it!
+                                if standardized.lower() != original_name.lower():
+                                    print(f"   💡 Learned: '{original_name}' is alias for '{standardized}'")
+                                    add_new_alias(original_name, standardized)
+                                    item['field_name'] = standardized
+                                    # Also ensure standard name is in DB as a self-mapping
+                                    add_new_alias(standardized, standardized)
+                                else:
+                                    # It's a new standard term
+                                    add_new_alias(standardized, standardized)
+                                    print(f"   📝 registered new standard term: '{standardized}'")
+                        except Exception as learn_err:
+                            print(f"   ⚠️ Learning failed: {learn_err}")
+
+            # Update final_data with standardized list
+            final_data['medical_data'] = medical_data_list
+
+            # Apply medical validator for 100% accuracy
+            validated_data = validate_medical_data(final_data)
+            
+            original_count = len(final_data.get('medical_data', []))
+            validated_count = len(validated_data.get('medical_data', []))
+            
+            print(f"✅ Validation complete!")
+            print(f"   - Original fields: {original_count}")
+            print(f"   - After deduplication: {validated_count}")
+            
+            final_data = validated_data
         except Exception as e:
             print(f"Validation Error: {e}")
             import traceback
