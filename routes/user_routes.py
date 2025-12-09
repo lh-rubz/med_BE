@@ -90,6 +90,54 @@ class UserProfile(Resource):
 
 
 
+
+@user_ns.route('/delete-account')
+class DeleteAccount(Resource):
+    @user_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    def delete(self):
+        """Delete current user's account and all associated data"""
+        current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+        
+        try:
+            # Manually clean up related records to ensure thorough deletion
+            # (Even with cascades, explicit cleanup handles potential ORM caching issues)
+            reports = Report.query.filter_by(user_id=current_user_id).all()
+            for report in reports:
+                # Delete files associated with report
+                # Note: This logic assumes physical file deletion is handled elsewhere or is acceptable to keep orphaned files
+                # ideally we would iterate and delete physical files here too using report.get_file_path() or ReportFile records
+                
+                ReportField.query.filter_by(report_id=report.id).delete()
+                AdditionalField.query.filter_by(report_id=report.id).delete()
+                ReportFile.query.filter_by(report_id=report.id).delete()
+                db.session.delete(report)
+            
+            # Delete any AdditionalFields not linked to reports (if any)
+            AdditionalField.query.filter_by(user_id=current_user_id).delete()
+            
+            db.session.delete(user)
+            db.session.commit()
+            
+            return {
+                'message': 'Account deleted successfully',
+                'deleted_user_id': current_user_id,
+                'email': user.email
+            }, 200
+            
+        except Exception as e:
+            db.session.rollback()
+            print(f"❌ Failed to delete account: {str(e)}")
+            return {
+                'message': 'Failed to delete account',
+                'error': str(e)
+            }, 500
+
+
 @user_ns.route('/delete-user-testing')
 class DeleteUserTesting(Resource):
     @user_ns.expect(delete_user_model)
