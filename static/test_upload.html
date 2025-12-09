@@ -452,18 +452,24 @@
                 // Read the stream
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
+                let buffer = '';
 
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
 
-                    const chunk = decoder.decode(value, { stream: true });
-                    const lines = chunk.split('\n\n');
+                    buffer += decoder.decode(value, { stream: true });
 
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
+                    // Split by double newline (SSE event separator)
+                    const parts = buffer.split('\n\n');
+
+                    // The last part might be incomplete, keep it in the buffer
+                    buffer = parts.pop();
+
+                    for (const part of parts) {
+                        if (part.trim().startsWith('data: ')) {
                             try {
-                                const jsonStr = line.replace('data: ', '');
+                                const jsonStr = part.replace('data: ', '').trim();
                                 const data = JSON.parse(jsonStr);
 
                                 if (data.error) {
@@ -482,6 +488,7 @@
 
                                 // Success/Completion
                                 if (data.percent === 100) {
+                                    console.log('✅ Final Result:', data);
                                     showStatus(uploadStatus, `✅ Success! Report #${data.report_id || 'Created'}`, 'success');
 
                                     // Show final data
@@ -496,10 +503,12 @@
                                 if (e.message && !e.message.includes("JSON")) {
                                     throw e;
                                 }
+                                console.warn("Parse error (likely split chunk):", e, part.substring(0, 50));
                             }
                         }
                     }
                 }
+
 
             } catch (error) {
                 console.error(error);
