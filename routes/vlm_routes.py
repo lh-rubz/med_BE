@@ -636,9 +636,18 @@ Return ONLY valid JSON:
                 'percent': 100, 
                 'message': 'Analysis Completed!', 
                 'report_id': new_report.id,
-                'patient_name': final_data.get('patient_name'),
+                'patient_name': final_data.get('patient_name', ''),
+                'patient_age': new_report.patient_age,
+                'patient_gender': new_report.patient_gender,
+                'report_date': final_data.get('report_date', ''),
                 'report_name': new_report.report_name,
-                'total_fields': len(medical_entries)
+                'report_type': new_report.report_type,
+                'doctor_names': new_report.doctor_names,
+                'original_filename': new_report.original_filename,
+                'total_images': len(images_list),
+                'source_files': [sf['original_filename'] for sf in saved_files],
+                'medical_data': medical_entries,
+                'total_fields_extracted': len(medical_entries)
             }
             print(f"✅ SUCCESS: Report #{new_report.id} created with {len(medical_entries)} fields.")
             yield f"data: {json.dumps(success_payload)}\n\n"
