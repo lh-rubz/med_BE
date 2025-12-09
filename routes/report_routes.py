@@ -38,7 +38,7 @@ class UserReports(Resource):
         
         reports_data = []
         for report in reports:
-            report_fields = ReportField.query.filter_by(report_id=report.id).all()
+            report_fields = ReportField.query.filter_by(report_id=report.id).order_by(ReportField.id).all()
             fields_data = []
             for field in report_fields:
                 fields_data.append({
@@ -239,7 +239,7 @@ class UserReportDetail(Resource):
         if not report:
             return {'message': 'Report not found'}, 404
         
-        report_fields = ReportField.query.filter_by(report_id=report.id).all()
+        report_fields = ReportField.query.filter_by(report_id=report.id).order_by(ReportField.id).all()
         fields_data = []
         for field in report_fields:
             fields_data.append({
@@ -349,7 +349,7 @@ class ReportCategorized(Resource):
         if not report:
             return {'message': 'Report not found'}, 404
         
-        report_fields = ReportField.query.filter_by(report_id=report.id).all()
+        report_fields = ReportField.query.filter_by(report_id=report.id).order_by(ReportField.id).all()
         
         # Group by category
         categorized_data = defaultdict(list)

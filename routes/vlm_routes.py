@@ -440,8 +440,8 @@ Return ONLY valid JSON:
                 synonym_record = MedicalSynonym.query.filter_by(synonym=original_name.lower()).first()
                 if synonym_record:
                     # Known alias -> Use standard name
-                    print(f"   ✓ Normalized: '{original_name}' -> '{synonym_record.standard_name}'")
-                    item['field_name'] = synonym_record.standard_name
+                    print(f"   ✓ Recognized: '{original_name}' (Standard: '{synonym_record.standard_name}')")
+                    # item['field_name'] = synonym_record.standard_name  <-- KEEP ORIGINAL NAME as requested
                 else:
                     # Unknown -> Queue for batch learning
                     if original_name not in unknown_terms:
@@ -494,7 +494,8 @@ Return ONLY valid JSON:
                             # Update items in the list
                             for item in medical_data_list:
                                 if item.get('field_name') == original:
-                                    item['field_name'] = standardized
+                                    # item['field_name'] = standardized <-- KEEP ORIGINAL NAME as requested
+                                    pass
                                     
                 except Exception as learn_err:
                     print(f"   ⚠️ Batch learning failed: {learn_err}")
