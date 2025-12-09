@@ -459,13 +459,16 @@ Return ONLY valid JSON:
                     If not a valid medical test, map to "UNKNOWN".
                     Return ONLY the JSON."""
                     
-                    client = Client(host=Config.OLLAMA_BASE_URL)
                     # Using the larger model as requested by user, but batched for speed
-                    response = client.chat(model='gemma3:12b', messages=[
-                        {'role': 'user', 'content': learning_prompt}
-                    ])
+                    # Use the existing OpenAI-compatible client to avoid URL/Proxy issues
+                    response = ollama_client.chat.completions.create(
+                        model='gemma3:12b', 
+                        messages=[
+                            {'role': 'user', 'content': learning_prompt}
+                        ]
+                    )
                     
-                    response_text = response['message']['content'].strip()
+                    response_text = response.choices[0].message.content.strip()
                     # Clean markdown code blocks if present
                     if "```json" in response_text:
                         response_text = response_text.split("```json")[1].split("```")[0].strip()

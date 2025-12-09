@@ -161,13 +161,13 @@ class MedicalOCR:
 # Global OCR instance (initialized once)
 _ocr_instance = None
 
-def get_ocr_instance(languages=['ar', 'en'], gpu=False) -> MedicalOCR:
+def get_ocr_instance(languages=['ar', 'en'], gpu=True) -> MedicalOCR:
     """
     Get or create global OCR instance (singleton pattern)
     
     Args:
         languages: List of language codes
-        gpu: Use GPU if available
+        gpu: Use GPU if available (default: True)
         
     Returns:
         MedicalOCR instance
