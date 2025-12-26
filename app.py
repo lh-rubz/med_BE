@@ -2,6 +2,7 @@ from flask import Flask
 from flask_restx import Api
 from flask_jwt_extended import JWTManager
 from flask_mail import Mail
+from flask_cors import CORS
 import os
 
 from config import Config
@@ -14,6 +15,9 @@ app = Flask(__name__)
 
 # Load configuration
 app.config.from_object(Config)
+
+# Enable CORS for all routes and origins
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Ensure upload folder exists
 os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)

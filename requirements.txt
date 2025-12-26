@@ -12,6 +12,7 @@ flask-jwt-extended==4.6.0
 PyJWT==2.10.1
 bcrypt==4.1.2
 Flask-Mail==0.9.1
+Flask-CORS==4.0.0
 sib-api-v3-sdk
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
