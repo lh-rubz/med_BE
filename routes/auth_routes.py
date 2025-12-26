@@ -10,6 +10,7 @@ from email_templates import (
     get_verification_email,
     get_resend_verification_email,
     get_password_reset_email,
+    get_password_reset_email_with_link,
     get_password_changed_email
 )
 from utils.password_validator import validate_password_strength
@@ -263,18 +264,31 @@ class ForgotPassword(Resource):
             }, 200
         
         try:
+            # Generate both a 6-digit code and a secure token
             reset_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
-            user.reset_code = reset_code
+            reset_token = secrets.token_urlsafe(32)
+            
+            # Store both in the database (token in reset_code field, code for fallback)
+            user.reset_code = reset_token  # Store token for one-click verification
             user.reset_code_expires = datetime.now(timezone.utc) + timedelta(minutes=15)
             db.session.commit()
             
             print(f"\n{'='*80}")
-            print(f"🔑 PASSWORD RESET CODE for {user.email}: {reset_code}")
-            print(f"Code expires at: {user.reset_code_expires}")
+            print(f"🔑 PASSWORD RESET for {user.email}")
+            print(f"   Token: {reset_token}")
+            print(f"   Code (fallback): {reset_code}")
+            print(f"   Expires at: {user.reset_code_expires}")
+            print(f"   Verification URL: http://localhost:8051/auth/verify-password-reset/{reset_token}")
             print(f"{'='*80}\n")
             
             try:
-                html_content = get_password_reset_email(user.first_name, reset_code)
+                # Use new email template with verification button
+                html_content = get_password_reset_email_with_link(
+                    user.first_name, 
+                    reset_token, 
+                    reset_code,
+                    base_url="http://localhost:8051"
+                )
                 success = send_brevo_email(
                     recipient_email=user.email,
                     subject='Password Reset - MediScan',
@@ -297,6 +311,192 @@ class ForgotPassword(Resource):
             return {
                 'message': 'If an account exists with this email, a password reset link has been sent.'
             }, 200
+
+
+@auth_ns.route('/verify-password-reset/<string:token>')
+class VerifyPasswordResetToken(Resource):
+    def get(self, token):
+        """Verify password reset token from email link (one-click verification)"""
+        # Find user with this reset token
+        user = User.query.filter_by(reset_code=token).first()
+        
+        if not user:
+            return """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Invalid Reset Link - MediScan</title>
+                <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+                    .container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 400px; text-align: center; }
+                    h1 { color: #ef4444; margin: 0 0 16px 0; font-size: 24px; }
+                    p { color: #6b7280; margin: 0 0 24px 0; line-height: 1.6; }
+                    a { display: inline-block; background-color: #60a5fa; color: white; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; }
+                    a:hover { background-color: #3b82f6; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>❌ Invalid Reset Link</h1>
+                    <p>This password reset link is invalid or has already been used.</p>
+                    <a href="http://localhost:8051/auth/forgot-password">Request New Reset Link</a>
+                </div>
+            </body>
+            </html>
+            """, 400
+        
+        # Check if token is expired
+        expires = user.reset_code_expires
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+            
+        if expires < datetime.now(timezone.utc):
+            return """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Link Expired - MediScan</title>
+                <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+                    .container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 400px; text-align: center; }
+                    h1 { color: #f59e0b; margin: 0 0 16px 0; font-size: 24px; }
+                    p { color: #6b7280; margin: 0 0 24px 0; line-height: 1.6; }
+                    a { display: inline-block; background-color: #60a5fa; color: white; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; }
+                    a:hover { background-color: #3b82f6; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>⏰ Link Expired</h1>
+                    <p>This password reset link has expired. Reset links are valid for 15 minutes.</p>
+                    <a href="http://localhost:8051/auth/forgot-password">Request New Reset Link</a>
+                </div>
+            </body>
+            </html>
+            """, 400
+        
+        # Token is valid - show password reset form
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Reset Your Password - MediScan</title>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }}
+                .container {{ background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 400px; width: 100%; }}
+                h1 {{ color: #111827; margin: 0 0 8px 0; font-size: 24px; text-align: center; }}
+                .subtitle {{ color: #6b7280; margin: 0 0 32px 0; text-align: center; font-size: 14px; }}
+                .form-group {{ margin-bottom: 20px; }}
+                label {{ display: block; color: #374151; font-weight: 600; margin-bottom: 8px; font-size: 14px; }}
+                input {{ width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 16px; box-sizing: border-box; }}
+                input:focus {{ outline: none; border-color: #60a5fa; }}
+                button {{ width: 100%; background-color: #60a5fa; color: white; border: none; padding: 14px; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }}
+                button:hover {{ background-color: #3b82f6; }}
+                button:disabled {{ background-color: #9ca3af; cursor: not-allowed; }}
+                .message {{ padding: 12px; border-radius: 8px; margin-bottom: 20px; display: none; }}
+                .message.error {{ background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }}
+                .message.success {{ background-color: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }}
+                .requirements {{ background-color: #eff6ff; padding: 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; }}
+                .requirements ul {{ margin: 8px 0 0 0; padding-left: 20px; color: #4b5563; }}
+                .requirements li {{ margin: 4px 0; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>🔐 Reset Your Password</h1>
+                <p class="subtitle">Hello {user.first_name}, enter your new password below</p>
+                
+                <div id="message" class="message"></div>
+                
+                <div class="requirements">
+                    <strong style="color: #1f2937;">Password Requirements:</strong>
+                    <ul>
+                        <li>At least 8 characters long</li>
+                        <li>Contains uppercase and lowercase letters</li>
+                        <li>Contains at least one number</li>
+                        <li>Contains at least one special character</li>
+                    </ul>
+                </div>
+                
+                <form id="resetForm">
+                    <div class="form-group">
+                        <label for="password">New Password</label>
+                        <input type="password" id="password" name="password" required minlength="8">
+                    </div>
+                    <div class="form-group">
+                        <label for="confirmPassword">Confirm New Password</label>
+                        <input type="password" id="confirmPassword" name="confirmPassword" required minlength="8">
+                    </div>
+                    <button type="submit" id="submitBtn">Reset Password</button>
+                </form>
+            </div>
+            
+            <script>
+                const form = document.getElementById('resetForm');
+                const messageDiv = document.getElementById('message');
+                const submitBtn = document.getElementById('submitBtn');
+                
+                function showMessage(text, type) {{
+                    messageDiv.textContent = text;
+                    messageDiv.className = 'message ' + type;
+                    messageDiv.style.display = 'block';
+                }}
+                
+                form.addEventListener('submit', async (e) => {{
+                    e.preventDefault();
+                    
+                    const password = document.getElementById('password').value;
+                    const confirmPassword = document.getElementById('confirmPassword').value;
+                    
+                    if (password !== confirmPassword) {{
+                        showMessage('Passwords do not match!', 'error');
+                        return;
+                    }}
+                    
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = 'Resetting...';
+                    
+                    try {{
+                        const response = await fetch('/auth/reset-password', {{
+                            method: 'POST',
+                            headers: {{
+                                'Content-Type': 'application/json',
+                            }},
+                            body: JSON.stringify({{
+                                email: '{user.email}',
+                                code: '{token}',
+                                new_password: password
+                            }})
+                        }});
+                        
+                        const data = await response.json();
+                        
+                        if (response.ok) {{
+                            showMessage('✅ ' + data.message, 'success');
+                            setTimeout(() => {{
+                                window.location.href = 'http://localhost:8051/swagger';
+                            }}, 2000);
+                        }} else {{
+                            showMessage('❌ ' + data.message, 'error');
+                            submitBtn.disabled = false;
+                            submitBtn.textContent = 'Reset Password';
+                        }}
+                    }} catch (error) {{
+                        showMessage('❌ Network error. Please try again.', 'error');
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Reset Password';
+                    }}
+                }});
+            </script>
+        </body>
+        </html>
+        """, 200
 
 
 @auth_ns.route('/verify-reset-code')
