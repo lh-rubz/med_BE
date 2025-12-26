@@ -9,6 +9,7 @@ from webauthn import (
     generate_authentication_options,
     verify_authentication_response,
 )
+from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
     UserVerificationRequirement,
     PublicKeyCredentialDescriptor,
