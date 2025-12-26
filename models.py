@@ -9,11 +9,11 @@ db = SQLAlchemy()
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(255), nullable=False)
+    password = db.Column(db.String(255), nullable=True)
     first_name = db.Column(db.String(50), nullable=False)
-    last_name = db.Column(db.String(50), nullable=False)
-    date_of_birth = db.Column(db.Date, nullable=False)
-    phone_number = db.Column(db.String(20), nullable=False)
+    last_name = db.Column(db.String(50), nullable=True)
+    date_of_birth = db.Column(db.Date, nullable=True)
+    phone_number = db.Column(db.String(20), nullable=True)
     gender = db.Column(db.String(20))
     profile_image = db.Column(db.String(255), default='default.jpg')  # Filename of profile image
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -21,8 +21,9 @@ class User(db.Model):
     email_verified = db.Column(db.Boolean, default=False)
     verification_code = db.Column(db.String(6), nullable=True)
     verification_code_expires = db.Column(db.DateTime, nullable=True)
-    reset_code = db.Column(db.String(6), nullable=True)
+    reset_code = db.Column(db.String(255), nullable=True)  # Increased to support secure tokens
     reset_code_expires = db.Column(db.DateTime, nullable=True)
+    google_id = db.Column(db.String(255), unique=True, nullable=True)
     reports = db.relationship('Report', backref='user', lazy=True, cascade='all, delete-orphan')
     
     def set_password(self, password):

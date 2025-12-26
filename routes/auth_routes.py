@@ -1,8 +1,10 @@
-from flask import request
+from flask import request, url_for, redirect, current_app
 from flask_restx import Resource, Namespace, fields
 from flask_jwt_extended import create_access_token
 from datetime import datetime, timedelta, timezone
 import secrets
+import os
+from authlib.integrations.flask_client import OAuth
 
 from models import db, User
 from config import send_brevo_email
@@ -17,6 +19,19 @@ from utils.password_validator import validate_password_strength
 
 # Create namespace
 auth_ns = Namespace('auth', description='Authentication operations')
+
+# Initialize OAuth
+oauth = OAuth()
+
+oauth.register(
+    name='google',
+    client_id=os.getenv('GOOGLE_CLIENT_ID'),
+    client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={
+        'scope': 'openid email profile'
+    }
+)
 
 # API Models
 register_model = auth_ns.model('Registration', {
@@ -147,7 +162,92 @@ class Login(Resource):
             }, 403
 
         access_token = create_access_token(identity=str(user.id))
+        access_token = create_access_token(identity=str(user.id))
         return {'access_token': access_token, 'email_verified': True}, 200
+
+
+@auth_ns.route('/google')
+class GoogleLogin(Resource):
+    def get(self):
+        """Initiate Google OAuth login"""
+        # Create the redirect URI
+        # We use a hardcoded compatible URI for local dev if needed, or url_for
+        # For localhost:8051, url_for should work if SERVER_NAME is set or Host header is present
+        # To be safe for the user's setup:
+        redirect_uri = url_for('auth_google_callback', _external=True)
+        
+        # If running behind a proxy or different port mapping, might need adjustment
+        # For now, rely on Flask's url_for
+        return oauth.google.authorize_redirect(redirect_uri)
+
+
+@auth_ns.route('/google/callback', endpoint='google_callback')
+class GoogleCallback(Resource):
+    def get(self):
+        """Handle Google OAuth callback"""
+        try:
+            token = oauth.google.authorize_access_token()
+            user_info = token.get('userinfo')
+            
+            if not user_info:
+                return {'message': 'Failed to get user info from Google'}, 400
+                
+            email = user_info.get('email')
+            google_id = user_info.get('sub')
+            first_name = user_info.get('given_name', '')
+            last_name = user_info.get('family_name', '')
+            picture = user_info.get('picture')
+            
+            # Check if user exists
+            user = User.query.filter((User.email == email) | (User.google_id == google_id)).first()
+            
+            if user:
+                # Update existing user
+                if not user.google_id:
+                    user.google_id = google_id
+                
+                # Check if we should update profile image
+                if picture and (not user.profile_image or user.profile_image == 'default.jpg'):
+                    user.profile_image = picture
+                    
+                # If email wasn't verified, verify it now (trust Google)
+                if not user.email_verified:
+                    user.email_verified = True
+                
+                db.session.commit()
+            else:
+                # Create new user
+                user = User(
+                    email=email,
+                    google_id=google_id,
+                    first_name=first_name,
+                    last_name=last_name or first_name, # Fallback
+                    password=None, # No password for Google users
+                    date_of_birth=None, # User can fill later
+                    phone_number=None, # User can fill later
+                    email_verified=True,
+                    profile_image=picture or 'default.jpg'
+                )
+                db.session.add(user)
+                db.session.commit()
+            
+            # Create access token
+            access_token = create_access_token(identity=str(user.id))
+            
+            # Return token (In a real app, you might redirect to frontend with token)
+            return {
+                'message': 'Login successful',
+                'access_token': access_token,
+                'user': {
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'google_login': True
+                }
+            }, 200
+            
+        except Exception as e:
+            print(f"Google Auth Error: {str(e)}")
+            return {'message': 'Authentication failed', 'error': str(e)}, 400
 
 
 @auth_ns.route('/verify-email')
@@ -264,30 +364,25 @@ class ForgotPassword(Resource):
             }, 200
         
         try:
-            # Generate both a 6-digit code and a secure token
+            # Generate 6-digit reset code
             reset_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
-            reset_token = secrets.token_urlsafe(32)
             
-            # Store both in the database (token in reset_code field, code for fallback)
-            user.reset_code = reset_token  # Store token for one-click verification
+            # Store code in the database
+            user.reset_code = reset_code
             user.reset_code_expires = datetime.now(timezone.utc) + timedelta(minutes=15)
             db.session.commit()
             
             print(f"\n{'='*80}")
             print(f"🔑 PASSWORD RESET for {user.email}")
-            print(f"   Token: {reset_token}")
-            print(f"   Code (fallback): {reset_code}")
+            print(f"   Code: {reset_code}")
             print(f"   Expires at: {user.reset_code_expires}")
-            print(f"   Verification URL: http://localhost:8051/auth/verify-password-reset/{reset_token}")
             print(f"{'='*80}\n")
             
             try:
-                # Use new email template with verification button
-                html_content = get_password_reset_email_with_link(
+                # Use simple email template with code only
+                html_content = get_password_reset_email(
                     user.first_name, 
-                    reset_token, 
-                    reset_code,
-                    base_url="http://localhost:8051"
+                    reset_code
                 )
                 success = send_brevo_email(
                     recipient_email=user.email,
@@ -311,192 +406,6 @@ class ForgotPassword(Resource):
             return {
                 'message': 'If an account exists with this email, a password reset link has been sent.'
             }, 200
-
-
-@auth_ns.route('/verify-password-reset/<string:token>')
-class VerifyPasswordResetToken(Resource):
-    def get(self, token):
-        """Verify password reset token from email link (one-click verification)"""
-        # Find user with this reset token
-        user = User.query.filter_by(reset_code=token).first()
-        
-        if not user:
-            return """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Invalid Reset Link - MediScan</title>
-                <style>
-                    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
-                    .container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 400px; text-align: center; }
-                    h1 { color: #ef4444; margin: 0 0 16px 0; font-size: 24px; }
-                    p { color: #6b7280; margin: 0 0 24px 0; line-height: 1.6; }
-                    a { display: inline-block; background-color: #60a5fa; color: white; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; }
-                    a:hover { background-color: #3b82f6; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <h1>❌ Invalid Reset Link</h1>
-                    <p>This password reset link is invalid or has already been used.</p>
-                    <a href="http://localhost:8051/auth/forgot-password">Request New Reset Link</a>
-                </div>
-            </body>
-            </html>
-            """, 400
-        
-        # Check if token is expired
-        expires = user.reset_code_expires
-        if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
-            
-        if expires < datetime.now(timezone.utc):
-            return """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Link Expired - MediScan</title>
-                <style>
-                    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
-                    .container { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 400px; text-align: center; }
-                    h1 { color: #f59e0b; margin: 0 0 16px 0; font-size: 24px; }
-                    p { color: #6b7280; margin: 0 0 24px 0; line-height: 1.6; }
-                    a { display: inline-block; background-color: #60a5fa; color: white; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; }
-                    a:hover { background-color: #3b82f6; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <h1>⏰ Link Expired</h1>
-                    <p>This password reset link has expired. Reset links are valid for 15 minutes.</p>
-                    <a href="http://localhost:8051/auth/forgot-password">Request New Reset Link</a>
-                </div>
-            </body>
-            </html>
-            """, 400
-        
-        # Token is valid - show password reset form
-        return f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Reset Your Password - MediScan</title>
-            <style>
-                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }}
-                .container {{ background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 400px; width: 100%; }}
-                h1 {{ color: #111827; margin: 0 0 8px 0; font-size: 24px; text-align: center; }}
-                .subtitle {{ color: #6b7280; margin: 0 0 32px 0; text-align: center; font-size: 14px; }}
-                .form-group {{ margin-bottom: 20px; }}
-                label {{ display: block; color: #374151; font-weight: 600; margin-bottom: 8px; font-size: 14px; }}
-                input {{ width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 16px; box-sizing: border-box; }}
-                input:focus {{ outline: none; border-color: #60a5fa; }}
-                button {{ width: 100%; background-color: #60a5fa; color: white; border: none; padding: 14px; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }}
-                button:hover {{ background-color: #3b82f6; }}
-                button:disabled {{ background-color: #9ca3af; cursor: not-allowed; }}
-                .message {{ padding: 12px; border-radius: 8px; margin-bottom: 20px; display: none; }}
-                .message.error {{ background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }}
-                .message.success {{ background-color: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }}
-                .requirements {{ background-color: #eff6ff; padding: 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; }}
-                .requirements ul {{ margin: 8px 0 0 0; padding-left: 20px; color: #4b5563; }}
-                .requirements li {{ margin: 4px 0; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>🔐 Reset Your Password</h1>
-                <p class="subtitle">Hello {user.first_name}, enter your new password below</p>
-                
-                <div id="message" class="message"></div>
-                
-                <div class="requirements">
-                    <strong style="color: #1f2937;">Password Requirements:</strong>
-                    <ul>
-                        <li>At least 8 characters long</li>
-                        <li>Contains uppercase and lowercase letters</li>
-                        <li>Contains at least one number</li>
-                        <li>Contains at least one special character</li>
-                    </ul>
-                </div>
-                
-                <form id="resetForm">
-                    <div class="form-group">
-                        <label for="password">New Password</label>
-                        <input type="password" id="password" name="password" required minlength="8">
-                    </div>
-                    <div class="form-group">
-                        <label for="confirmPassword">Confirm New Password</label>
-                        <input type="password" id="confirmPassword" name="confirmPassword" required minlength="8">
-                    </div>
-                    <button type="submit" id="submitBtn">Reset Password</button>
-                </form>
-            </div>
-            
-            <script>
-                const form = document.getElementById('resetForm');
-                const messageDiv = document.getElementById('message');
-                const submitBtn = document.getElementById('submitBtn');
-                
-                function showMessage(text, type) {{
-                    messageDiv.textContent = text;
-                    messageDiv.className = 'message ' + type;
-                    messageDiv.style.display = 'block';
-                }}
-                
-                form.addEventListener('submit', async (e) => {{
-                    e.preventDefault();
-                    
-                    const password = document.getElementById('password').value;
-                    const confirmPassword = document.getElementById('confirmPassword').value;
-                    
-                    if (password !== confirmPassword) {{
-                        showMessage('Passwords do not match!', 'error');
-                        return;
-                    }}
-                    
-                    submitBtn.disabled = true;
-                    submitBtn.textContent = 'Resetting...';
-                    
-                    try {{
-                        const response = await fetch('/auth/reset-password', {{
-                            method: 'POST',
-                            headers: {{
-                                'Content-Type': 'application/json',
-                            }},
-                            body: JSON.stringify({{
-                                email: '{user.email}',
-                                code: '{token}',
-                                new_password: password
-                            }})
-                        }});
-                        
-                        const data = await response.json();
-                        
-                        if (response.ok) {{
-                            showMessage('✅ ' + data.message, 'success');
-                            setTimeout(() => {{
-                                window.location.href = 'http://localhost:8051/swagger';
-                            }}, 2000);
-                        }} else {{
-                            showMessage('❌ ' + data.message, 'error');
-                            submitBtn.disabled = false;
-                            submitBtn.textContent = 'Reset Password';
-                        }}
-                    }} catch (error) {{
-                        showMessage('❌ Network error. Please try again.', 'error');
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = 'Reset Password';
-                    }}
-                }});
-            </script>
-        </body>
-        </html>
-        """, 200
 
 
 @auth_ns.route('/verify-reset-code')
