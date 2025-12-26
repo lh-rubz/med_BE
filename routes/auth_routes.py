@@ -274,9 +274,31 @@ class GoogleAuthPost(Resource):
             
         try:
             # Verify the ID token
-            # Note: We use the Client ID from google-services.json
-            client_id = os.getenv('GOOGLE_CLIENT_ID') or "947609033338-4fufsknkus1lj684p24mal444jue0etd.apps.googleusercontent.com"
-            idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), client_id)
+            # Note: We support both Web and Android Client IDs from google-services.json
+            client_ids = [
+                os.getenv('GOOGLE_CLIENT_ID'),
+                "947609033338-4fufsknkus1lj684p24mal444jue0etd.apps.googleusercontent.com", # Web
+                "947609033338-tvvpjselq79oc1olvbfh2emeo8d06f4d.apps.googleusercontent.com"  # Android
+            ]
+            # Filter out None values
+            client_ids = [cid for cid in client_ids if cid]
+            
+            idinfo = None
+            last_error = None
+            
+            # Try each client ID
+            for client_id in client_ids:
+                try:
+                    idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), client_id)
+                    print(f"✅ Google Token Verified successfully with client_id: {client_id}")
+                    break
+                except ValueError as e:
+                    last_error = str(e)
+                    continue
+            
+            if not idinfo:
+                print(f"❌ Google Token Verification Failed for all client IDs. Last error: {last_error}")
+                return {'message': 'Invalid token', 'error': last_error}, 401
             
             # ID token is valid. Get user info
             email = idinfo['email']
@@ -322,8 +344,10 @@ class GoogleAuthPost(Resource):
             
         except ValueError as e:
             # Invalid token
+            print(f"❌ Google Token Verification Failed (ValueError): {str(e)}")
             return {'message': 'Invalid token', 'error': str(e)}, 401
         except Exception as e:
+            print(f"❌ Google Token Verification Failed (General Error): {str(e)}")
             return {'message': 'Social authentication failed', 'error': str(e)}, 500
 
 
