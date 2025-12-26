@@ -32,3 +32,5 @@ python-dotenv
 ollama
 Pillow
 PyMuPDF
+google-auth
+authlib

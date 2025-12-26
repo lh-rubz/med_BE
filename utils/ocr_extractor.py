@@ -2,7 +2,7 @@
 EasyOCR-based text extraction for medical reports
 Provides accurate multilingual OCR with privacy (100% local processing)
 """
-import easyocr
+# import easyocr (moved to lazy import)
 import io
 from PIL import Image
 from typing import List, Dict, Tuple, Optional
@@ -21,8 +21,13 @@ class MedicalOCR:
             gpu: Use GPU if available (default: False)
         """
         print(f"🔧 Initializing EasyOCR with languages: {languages}")
-        self.reader = easyocr.Reader(languages, gpu=gpu)
-        print("✅ EasyOCR initialized successfully")
+        try:
+            import easyocr
+            self.reader = easyocr.Reader(languages, gpu=gpu)
+            print("✅ EasyOCR initialized successfully")
+        except ImportError:
+            print("❌ EasyOCR not found. OCR functionality will be disabled.")
+            self.reader = None
     
     def extract_text(self, image_data: bytes) -> str:
         """
@@ -39,6 +44,8 @@ class MedicalOCR:
             image = Image.open(io.BytesIO(image_data))
             
             # Perform OCR
+            if not self.reader:
+                return ""
             results = self.reader.readtext(image)
             
             # Combine all detected text

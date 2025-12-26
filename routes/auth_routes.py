@@ -16,6 +16,9 @@ from email_templates import (
     get_password_changed_email
 )
 from utils.password_validator import validate_password_strength
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+import requests
 
 # Create namespace
 auth_ns = Namespace('auth', description='Authentication operations')
@@ -76,6 +79,14 @@ change_password_model = auth_ns.model('ChangePassword', {
     'email': fields.String(required=True, description='User email address'),
     'old_password': fields.String(required=True, description='Current password'),
     'new_password': fields.String(required=True, description='New password')
+})
+
+google_auth_model = auth_ns.model('GoogleAuth', {
+    'id_token': fields.String(required=True, description='Google ID Token from mobile app')
+})
+
+facebook_auth_model = auth_ns.model('FacebookAuth', {
+    'access_token': fields.String(required=True, description='Facebook Access Token from mobile app')
 })
 
 
@@ -248,6 +259,142 @@ class GoogleCallback(Resource):
         except Exception as e:
             print(f"Google Auth Error: {str(e)}")
             return {'message': 'Authentication failed', 'error': str(e)}, 400
+
+
+@auth_ns.route('/google')
+class GoogleAuthPost(Resource):
+    @auth_ns.expect(google_auth_model)
+    def post(self):
+        """Verify Google ID token and login/register user"""
+        data = request.json
+        token = data.get('id_token')
+        
+        if not token:
+            return {'message': 'ID token is required'}, 400
+            
+        try:
+            # Verify the ID token
+            # Note: We use the Client ID from google-services.json
+            client_id = os.getenv('GOOGLE_CLIENT_ID') or "947609033338-4fufsknkus1lj684p24mal444jue0etd.apps.googleusercontent.com"
+            idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), client_id)
+            
+            # ID token is valid. Get user info
+            email = idinfo['email']
+            google_id = idinfo['sub']
+            first_name = idinfo.get('given_name', '')
+            last_name = idinfo.get('family_name', '')
+            picture = idinfo.get('picture')
+            
+            # Re-use the user lookup/creation logic
+            user = User.query.filter((User.email == email) | (User.google_id == google_id)).first()
+            
+            if user:
+                if not user.google_id:
+                    user.google_id = google_id
+                if picture and (not user.profile_image or user.profile_image == 'default.jpg'):
+                    user.profile_image = picture
+                if not user.email_verified:
+                    user.email_verified = True
+                db.session.commit()
+            else:
+                user = User(
+                    email=email,
+                    google_id=google_id,
+                    first_name=first_name,
+                    last_name=last_name or first_name,
+                    password=None,
+                    email_verified=True,
+                    profile_image=picture or 'default.jpg'
+                )
+                db.session.add(user)
+                db.session.commit()
+                
+            access_token = create_access_token(identity=str(user.id))
+            return {
+                'message': 'Login successful',
+                'access_token': access_token,
+                'user': {
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'social_login': True
+                }
+            }, 200
+            
+        except ValueError as e:
+            # Invalid token
+            return {'message': 'Invalid token', 'error': str(e)}, 401
+        except Exception as e:
+            return {'message': 'Social authentication failed', 'error': str(e)}, 500
+
+
+@auth_ns.route('/facebook')
+class FacebookAuthPost(Resource):
+    @auth_ns.expect(facebook_auth_model)
+    def post(self):
+        """Verify Facebook Access token and login/register user"""
+        data = request.json
+        token = data.get('access_token')
+        
+        if not token:
+            return {'message': 'Access token is required'}, 400
+            
+        try:
+            # Verify the access token with Facebook Graph API
+            fb_url = f"https://graph.facebook.com/me?fields=id,email,first_name,last_name,picture&access_token={token}"
+            response = requests.get(fb_url)
+            fb_data = response.json()
+            
+            if 'error' in fb_data:
+                return {'message': 'Invalid Facebook token', 'error': fb_data['error'].get('message')}, 401
+                
+            facebook_id = fb_data.get('id')
+            email = fb_data.get('email')
+            # If email is not provided by Facebook, we can generate a temporary one or ask user
+            # But usually it's there if the user allowed it.
+            if not email:
+                email = f"{facebook_id}@facebook.user"
+                
+            first_name = fb_data.get('first_name', '')
+            last_name = fb_data.get('last_name', '')
+            picture = fb_data.get('picture', {}).get('data', {}).get('url')
+            
+            # Check if user exists
+            user = User.query.filter((User.email == email) | (User.facebook_id == facebook_id)).first()
+            
+            if user:
+                if not user.facebook_id:
+                    user.facebook_id = facebook_id
+                if picture and (not user.profile_image or user.profile_image == 'default.jpg'):
+                    user.profile_image = picture
+                if not user.email_verified:
+                    user.email_verified = True
+                db.session.commit()
+            else:
+                user = User(
+                    email=email,
+                    facebook_id=facebook_id,
+                    first_name=first_name,
+                    last_name=last_name or first_name,
+                    password=None,
+                    email_verified=True,
+                    profile_image=picture or 'default.jpg'
+                )
+                db.session.add(user)
+                db.session.commit()
+                
+            access_token = create_access_token(identity=str(user.id))
+            return {
+                'message': 'Login successful',
+                'access_token': access_token,
+                'user': {
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'social_login': True
+                }
+            }, 200
+            
+        except Exception as e:
+            return {'message': 'Social authentication failed', 'error': str(e)}, 500
 
 
 @auth_ns.route('/verify-email')

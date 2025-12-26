@@ -24,7 +24,7 @@ class User(db.Model):
     reset_code = db.Column(db.String(255), nullable=True)  # Increased to support secure tokens
     reset_code_expires = db.Column(db.DateTime, nullable=True)
     google_id = db.Column(db.String(255), unique=True, nullable=True)
-    google_id = db.Column(db.String(255), unique=True, nullable=True)
+    facebook_id = db.Column(db.String(255), unique=True, nullable=True)
     authenticators = db.relationship('Authenticator', backref='user', lazy=True, cascade='all, delete-orphan')
     reports = db.relationship('Report', backref='user', lazy=True, cascade='all, delete-orphan')
     

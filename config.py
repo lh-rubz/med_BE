@@ -69,9 +69,8 @@ class Config:
     OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gemma3:27b')
     
     # Google OAuth
-    GOOGLE_CLIENT_ID = os.environ['GOOGLE_CLIENT_ID']
-    GOOGLE_CLIENT_ID = os.environ['GOOGLE_CLIENT_ID']
-    GOOGLE_CLIENT_SECRET = os.environ['GOOGLE_CLIENT_SECRET']
+    GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+    GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
     
     # WebAuthn Configuration
     RP_ID = os.getenv('RP_ID', '176.119.254.185.nip.io')
