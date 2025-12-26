@@ -550,9 +550,19 @@ Return ONLY valid JSON:
             # Calculate report hash
             report_hash = hashlib.sha256(json.dumps(final_data['medical_data'], sort_keys=True).encode()).hexdigest()
             
+            # Parse extracted report date (YYYY-MM-DD), fallback to now()
+            report_date_obj = datetime.now(timezone.utc)
+            extracted_date = final_data.get('report_date')
+            if extracted_date and len(extracted_date) >= 10:
+                try:
+                    # Parse YYYY-MM-DD
+                    report_date_obj = datetime.strptime(extracted_date[:10], '%Y-%m-%d')
+                except:
+                    print(f"⚠️ Could not parse report date: {extracted_date}, using now()")
+
             new_report = Report(
                 user_id=current_user_id,
-                report_date=datetime.now(timezone.utc),
+                report_date=report_date_obj,
                 report_hash=report_hash,
                 report_name=final_data.get('report_name'),
                 report_type=final_data.get('report_type'),
