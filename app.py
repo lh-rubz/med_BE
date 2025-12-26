@@ -7,7 +7,13 @@ import os
 
 from config import Config
 from models import db
-from routes import auth_ns, user_ns, vlm_ns, reports_ns, oauth
+from models import db
+from routes.auth_routes import auth_ns
+from routes.user_routes import user_ns
+from routes.vlm_routes import vlm_ns
+from routes.report_routes import reports_ns
+from routes.auth_routes import oauth
+from routes.webauthn_routes import webauthn_ns
 from utils.medical_mappings import seed_synonyms
 
 # Create Flask app
@@ -58,6 +64,7 @@ api = Api(
 
 # Register namespaces (routes)
 api.add_namespace(auth_ns, path='/auth')
+api.add_namespace(webauthn_ns, path='/auth/webauthn')
 api.add_namespace(user_ns, path='/users')
 api.add_namespace(vlm_ns, path='/vlm')
 api.add_namespace(reports_ns, path='/reports')

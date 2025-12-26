@@ -24,6 +24,8 @@ class User(db.Model):
     reset_code = db.Column(db.String(255), nullable=True)  # Increased to support secure tokens
     reset_code_expires = db.Column(db.DateTime, nullable=True)
     google_id = db.Column(db.String(255), unique=True, nullable=True)
+    google_id = db.Column(db.String(255), unique=True, nullable=True)
+    authenticators = db.relationship('Authenticator', backref='user', lazy=True, cascade='all, delete-orphan')
     reports = db.relationship('Report', backref='user', lazy=True, cascade='all, delete-orphan')
     
     def set_password(self, password):
@@ -129,3 +131,18 @@ class MedicalSynonym(db.Model):
     synonym = db.Column(db.String(100), nullable=False, unique=True)  # e.g., "Hgb"
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class Authenticator(db.Model):
+    """Store WebAuthn/Passkey credentials"""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    credential_id = db.Column(db.LargeBinary, unique=True, nullable=False)
+    public_key = db.Column(db.LargeBinary, nullable=False)
+    sign_count = db.Column(db.Integer, default=0)
+    credential_device_type = db.Column(db.String(50), nullable=True) # e.g. 'single_device' or 'multi_device' (synced)
+    credential_backed_up = db.Column(db.Boolean, default=False)
+    transports = db.Column(db.String(255), nullable=True) # comma-separated list of transports
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    last_used_at = db.Column(db.DateTime, nullable=True)

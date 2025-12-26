@@ -70,7 +70,14 @@ class Config:
     
     # Google OAuth
     GOOGLE_CLIENT_ID = os.environ['GOOGLE_CLIENT_ID']
+    GOOGLE_CLIENT_ID = os.environ['GOOGLE_CLIENT_ID']
     GOOGLE_CLIENT_SECRET = os.environ['GOOGLE_CLIENT_SECRET']
+    
+    # WebAuthn Configuration
+    RP_ID = os.getenv('RP_ID', '176.119.254.185.nip.io')
+    RP_NAME = os.getenv('RP_NAME', 'MediScan')
+    # Origin must match exactly what the browser sees
+    RP_ORIGIN = os.getenv('RP_ORIGIN', 'http://176.119.254.185.nip.io:8051')
     
     # File upload configuration
     UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
