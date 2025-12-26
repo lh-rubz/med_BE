@@ -7,7 +7,7 @@ import os
 
 from config import Config
 from models import db
-from routes import auth_ns, user_ns, vlm_ns, reports_ns
+from routes import auth_ns, user_ns, vlm_ns, reports_ns, oauth
 from utils.medical_mappings import seed_synonyms
 
 # Create Flask app
@@ -26,6 +26,7 @@ os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
 db.init_app(app)
 jwt = JWTManager(app)
 mail = Mail(app)
+oauth.init_app(app)
 
 
 # Serve the test upload HTML page

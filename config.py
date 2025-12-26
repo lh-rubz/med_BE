@@ -14,6 +14,11 @@ except ImportError:
 # Load environment variables from .env file
 load_dotenv()
 
+# Google Configuration
+# Credentials should be set in environment variables
+# os.environ['GOOGLE_CLIENT_ID'] = '...'
+# os.environ['GOOGLE_CLIENT_SECRET'] = '...'
+
 # Configure NO_PROXY to exclude localhost from proxy (important for local VLM server)
 no_proxy = os.environ.get('NO_PROXY', '')
 no_proxy_list = [item.strip() for item in no_proxy.split(',') if item.strip()]
@@ -62,6 +67,10 @@ class Config:
     # Ollama configuration
     OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434/v1')
     OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gemma3:27b')
+    
+    # Google OAuth
+    GOOGLE_CLIENT_ID = os.environ['GOOGLE_CLIENT_ID']
+    GOOGLE_CLIENT_SECRET = os.environ['GOOGLE_CLIENT_SECRET']
     
     # File upload configuration
     UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
