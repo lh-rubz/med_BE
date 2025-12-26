@@ -15,34 +15,41 @@ def migrate_google_auth():
     """Migrate user table for Google OAuth"""
     with app.app_context():
         try:
-            # 1. Add google_id column
-            try:
-                db.engine.execute(text('ALTER TABLE "user" ADD COLUMN google_id VARCHAR(255);'))
-                print("✅ Added google_id column")
-            except Exception as e:
-                if 'already exists' in str(e):
-                    print("ℹ️ google_id column already exists")
-                else:
-                    print(f"⚠️ Error adding google_id: {e}")
-
-            # 2. Add unique constraint
-            try:
-                db.engine.execute(text('ALTER TABLE "user" ADD CONSTRAINT uq_user_google_id UNIQUE (google_id);'))
-                print("✅ Added unique constraint to google_id")
-            except Exception as e:
-                if 'already exists' in str(e):
-                    print("ℹ️ unique constraint already exists")
-                else:
-                    print(f"⚠️ Error adding constraint: {e}")
-
-            # 3. Make columns nullable
-            columns = ['password', 'last_name', 'date_of_birth', 'phone_number']
-            for col in columns:
+            with db.engine.connect() as conn:
+                # 1. Add google_id column
                 try:
-                    db.engine.execute(text(f'ALTER TABLE "user" ALTER COLUMN {col} DROP NOT NULL;'))
-                    print(f"✅ Made {col} nullable")
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN google_id VARCHAR(255);'))
+                    conn.commit()
+                    print("✅ Added google_id column")
                 except Exception as e:
-                    print(f"⚠️ Error changing {col}: {e}")
+                    conn.rollback()
+                    if 'already exists' in str(e):
+                        print("ℹ️ google_id column already exists")
+                    else:
+                        print(f"⚠️ Error adding google_id: {e}")
+
+                # 2. Add unique constraint
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD CONSTRAINT uq_user_google_id UNIQUE (google_id);'))
+                    conn.commit()
+                    print("✅ Added unique constraint to google_id")
+                except Exception as e:
+                    conn.rollback()
+                    if 'already exists' in str(e):
+                        print("ℹ️ unique constraint already exists")
+                    else:
+                        print(f"⚠️ Error adding constraint: {e}")
+
+                # 3. Make columns nullable
+                columns = ['password', 'last_name', 'date_of_birth', 'phone_number']
+                for col in columns:
+                    try:
+                        conn.execute(text(f'ALTER TABLE "user" ALTER COLUMN {col} DROP NOT NULL;'))
+                        conn.commit()
+                        print(f"✅ Made {col} nullable")
+                    except Exception as e:
+                        conn.rollback()
+                        print(f"⚠️ Error changing {col}: {e}")
 
             print("\n✅ Database schema updated for Google OAuth!")
             
