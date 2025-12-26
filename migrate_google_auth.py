@@ -17,9 +17,11 @@ def migrate_google_auth():
         try:
             # 1. Add google_id column
             try:
-                db.engine.execute(text('ALTER TABLE "user" ADD COLUMN google_id VARCHAR(255);'))
+                db.session.execute(text('ALTER TABLE "user" ADD COLUMN google_id VARCHAR(255);'))
+                db.session.commit()
                 print("✅ Added google_id column")
             except Exception as e:
+                db.session.rollback()
                 if 'already exists' in str(e):
                     print("ℹ️ google_id column already exists")
                 else:
@@ -27,9 +29,11 @@ def migrate_google_auth():
 
             # 2. Add unique constraint
             try:
-                db.engine.execute(text('ALTER TABLE "user" ADD CONSTRAINT uq_user_google_id UNIQUE (google_id);'))
+                db.session.execute(text('ALTER TABLE "user" ADD CONSTRAINT uq_user_google_id UNIQUE (google_id);'))
+                db.session.commit()
                 print("✅ Added unique constraint to google_id")
             except Exception as e:
+                db.session.rollback()
                 if 'already exists' in str(e):
                     print("ℹ️ unique constraint already exists")
                 else:
@@ -39,9 +43,11 @@ def migrate_google_auth():
             columns = ['password', 'last_name', 'date_of_birth', 'phone_number']
             for col in columns:
                 try:
-                    db.engine.execute(text(f'ALTER TABLE "user" ALTER COLUMN {col} DROP NOT NULL;'))
+                    db.session.execute(text(f'ALTER TABLE "user" ALTER COLUMN {col} DROP NOT NULL;'))
+                    db.session.commit()
                     print(f"✅ Made {col} nullable")
                 except Exception as e:
+                    db.session.rollback()
                     print(f"⚠️ Error changing {col}: {e}")
 
             print("\n✅ Database schema updated for Google OAuth!")
