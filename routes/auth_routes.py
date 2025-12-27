@@ -261,8 +261,18 @@ class GoogleCallback(Resource):
                 
             email = user_info.get('email')
             google_id = user_info.get('sub')
+            
+            # Get name fields - use 'name' as fallback if given_name/family_name not available
+            full_name = user_info.get('name', '')
             first_name = user_info.get('given_name', '')
             last_name = user_info.get('family_name', '')
+            
+            # If first_name is empty but we have full name, try to split it
+            if not first_name and full_name:
+                name_parts = full_name.split(' ', 1)
+                first_name = name_parts[0]
+                last_name = name_parts[1] if len(name_parts) > 1 else ''
+            
             picture = user_info.get('picture')
             
             # Fetch additional data from People API
@@ -377,8 +387,18 @@ class GoogleAuthPost(Resource):
             # ID token is valid. Get user info
             email = idinfo['email']
             google_id = idinfo['sub']
+            
+            # Get name fields - use 'name' as fallback if given_name/family_name not available
+            full_name = idinfo.get('name', '')
             first_name = idinfo.get('given_name', '')
             last_name = idinfo.get('family_name', '')
+            
+            # If first_name is empty but we have full name, try to split it
+            if not first_name and full_name:
+                name_parts = full_name.split(' ', 1)
+                first_name = name_parts[0]
+                last_name = name_parts[1] if len(name_parts) > 1 else ''
+            
             picture = idinfo.get('picture')
             
             # Fetch additional data from People API if access_token is provided
@@ -457,7 +477,8 @@ class FacebookAuthPost(Resource):
             
         try:
             # Verify the access token with Facebook Graph API
-            fb_url = f"https://graph.facebook.com/me?fields=id,email,first_name,last_name,picture,birthday&access_token={token}"
+            # Request the 'name' field along with first_name and last_name
+            fb_url = f"https://graph.facebook.com/me?fields=id,email,name,first_name,last_name,picture,birthday&access_token={token}"
             response = requests.get(fb_url)
             fb_data = response.json()
             
@@ -470,9 +491,18 @@ class FacebookAuthPost(Resource):
             # But usually it's there if the user allowed it.
             if not email:
                 email = f"{facebook_id}@facebook.user"
-                
+            
+            # Get name fields - use 'name' as fallback if first_name/last_name not available
+            full_name = fb_data.get('name', '')
             first_name = fb_data.get('first_name', '')
             last_name = fb_data.get('last_name', '')
+            
+            # If first_name is empty but we have full name, try to split it
+            if not first_name and full_name:
+                name_parts = full_name.split(' ', 1)
+                first_name = name_parts[0]
+                last_name = name_parts[1] if len(name_parts) > 1 else ''
+            
             picture = fb_data.get('picture', {}).get('data', {}).get('url')
             birthday_str = fb_data.get('birthday')
             
