@@ -146,6 +146,26 @@ def parse_facebook_birthday(birthday_str):
             return None
 
 
+def get_missing_fields(user):
+    """Determine which required fields are missing from a user profile"""
+    missing = []
+    
+    # Check required fields
+    if not user.first_name or user.first_name.strip() == '':
+        missing.append('first_name')
+    
+    if not user.last_name or user.last_name.strip() == '':
+        missing.append('last_name')
+    
+    if not user.date_of_birth:
+        missing.append('date_of_birth')
+    
+    if not user.phone_number or user.phone_number.strip() == '':
+        missing.append('phone_number')
+    
+    return missing
+
+
 @auth_ns.route('/register')
 class Register(Resource):
     @auth_ns.expect(register_model)
@@ -288,6 +308,7 @@ class GoogleCallback(Resource):
             # Check if user exists
             user = User.query.filter((User.email == email) | (User.google_id == google_id)).first()
             
+            is_new_user = False
             if user:
                 # Update existing user
                 if not user.google_id:
@@ -312,6 +333,7 @@ class GoogleCallback(Resource):
                 db.session.commit()
             else:
                 # Create new user
+                is_new_user = True
                 user = User(
                     email=email,
                     google_id=google_id,
@@ -326,6 +348,9 @@ class GoogleCallback(Resource):
                 db.session.add(user)
                 db.session.commit()
             
+            # Determine missing fields
+            missing_fields = get_missing_fields(user)
+            
             # Create access token
             access_token = create_access_token(identity=str(user.id))
             
@@ -336,8 +361,12 @@ class GoogleCallback(Resource):
                 'user': {
                     'email': user.email,
                     'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'profile_image': user.profile_image,
                     'google_login': True
-                }
+                },
+                'is_new_user': is_new_user,
+                'missing_fields': missing_fields
             }, 200
             
         except Exception as e:
@@ -415,6 +444,7 @@ class GoogleAuthPost(Resource):
             # Re-use the user lookup/creation logic
             user = User.query.filter((User.email == email) | (User.google_id == google_id)).first()
             
+            is_new_user = False
             if user:
                 if not user.google_id:
                     user.google_id = google_id
@@ -430,6 +460,7 @@ class GoogleAuthPost(Resource):
                     user.email_verified = True
                 db.session.commit()
             else:
+                is_new_user = True
                 user = User(
                     email=email,
                     google_id=google_id,
@@ -443,6 +474,9 @@ class GoogleAuthPost(Resource):
                 )
                 db.session.add(user)
                 db.session.commit()
+            
+            # Determine missing fields
+            missing_fields = get_missing_fields(user)
                 
             access_token = create_access_token(identity=str(user.id))
             return {
@@ -451,8 +485,12 @@ class GoogleAuthPost(Resource):
                 'user': {
                     'email': user.email,
                     'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'profile_image': user.profile_image,
                     'social_login': True
-                }
+                },
+                'is_new_user': is_new_user,
+                'missing_fields': missing_fields
             }, 200
             
         except ValueError as e:
@@ -514,6 +552,7 @@ class FacebookAuthPost(Resource):
             # Check if user exists
             user = User.query.filter((User.email == email) | (User.facebook_id == facebook_id)).first()
             
+            is_new_user = False
             if user:
                 if not user.facebook_id:
                     user.facebook_id = facebook_id
@@ -526,6 +565,7 @@ class FacebookAuthPost(Resource):
                     user.email_verified = True
                 db.session.commit()
             else:
+                is_new_user = True
                 user = User(
                     email=email,
                     facebook_id=facebook_id,
@@ -538,6 +578,9 @@ class FacebookAuthPost(Resource):
                 )
                 db.session.add(user)
                 db.session.commit()
+            
+            # Determine missing fields
+            missing_fields = get_missing_fields(user)
                 
             access_token = create_access_token(identity=str(user.id))
             return {
@@ -546,8 +589,12 @@ class FacebookAuthPost(Resource):
                 'user': {
                     'email': user.email,
                     'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'profile_image': user.profile_image,
                     'social_login': True
-                }
+                },
+                'is_new_user': is_new_user,
+                'missing_fields': missing_fields
             }, 200
             
         except Exception as e:
