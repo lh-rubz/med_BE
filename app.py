@@ -50,6 +50,14 @@ def test_google_login():
         return f.read()
 
 
+# Serve the backend OAuth test page
+@app.route('/test-google-backend')
+def test_google_backend():
+    """Serve the backend OAuth test page"""
+    with open('test_google_backend.html', 'r', encoding='utf-8') as f:
+        return f.read()
+
+
 # Initialize API with Swagger documentation
 api = Api(
     app,
