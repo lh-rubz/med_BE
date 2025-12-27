@@ -42,6 +42,14 @@ def test_upload():
     return app.send_static_file('test_upload.html')
 
 
+# Serve the Google login test HTML page
+@app.route('/test-google-login')
+def test_google_login():
+    """Serve the Google login test HTML page"""
+    with open('test_google_login.html', 'r', encoding='utf-8') as f:
+        return f.read()
+
+
 # Initialize API with Swagger documentation
 api = Api(
     app,
