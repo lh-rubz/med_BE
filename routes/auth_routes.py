@@ -32,7 +32,7 @@ oauth.register(
     client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
     server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
     client_kwargs={
-        'scope': 'openid email profile'
+        'scope': 'openid email profile https://www.googleapis.com/auth/user.birthday.read https://www.googleapis.com/auth/user.phonenumbers.read'
     }
 )
 
@@ -82,12 +82,68 @@ change_password_model = auth_ns.model('ChangePassword', {
 })
 
 google_auth_model = auth_ns.model('GoogleAuth', {
-    'id_token': fields.String(required=True, description='Google ID Token from mobile app')
+    'id_token': fields.String(required=True, description='Google ID Token from mobile app'),
+    'access_token': fields.String(required=False, description='Google Access Token (optional, for fetching additional data)')
 })
 
 facebook_auth_model = auth_ns.model('FacebookAuth', {
     'access_token': fields.String(required=True, description='Facebook Access Token from mobile app')
 })
+
+
+def fetch_google_people_data(access_token):
+    """Fetch additional user data from Google People API"""
+    try:
+        headers = {'Authorization': f'Bearer {access_token}'}
+        # Request birthday and phone numbers
+        people_url = 'https://people.googleapis.com/v1/people/me?personFields=birthdays,phoneNumbers'
+        response = requests.get(people_url, headers=headers)
+        
+        if response.status_code != 200:
+            print(f"Google People API error: {response.status_code} - {response.text}")
+            return None, None
+            
+        data = response.json()
+        
+        # Extract birthday
+        birthday = None
+        if 'birthdays' in data and data['birthdays']:
+            for bday in data['birthdays']:
+                if 'date' in bday:
+                    date_info = bday['date']
+                    if 'year' in date_info and 'month' in date_info and 'day' in date_info:
+                        try:
+                            birthday = datetime(date_info['year'], date_info['month'], date_info['day']).date()
+                            break
+                        except ValueError:
+                            continue
+        
+        # Extract phone number
+        phone_number = None
+        if 'phoneNumbers' in data and data['phoneNumbers']:
+            # Get the first phone number (usually primary)
+            phone_number = data['phoneNumbers'][0].get('value')
+        
+        return birthday, phone_number
+    except Exception as e:
+        print(f"Error fetching Google People data: {str(e)}")
+        return None, None
+
+
+def parse_facebook_birthday(birthday_str):
+    """Parse Facebook birthday string (MM/DD/YYYY format)"""
+    if not birthday_str:
+        return None
+    try:
+        # Facebook returns birthday as MM/DD/YYYY
+        return datetime.strptime(birthday_str, '%m/%d/%Y').date()
+    except ValueError:
+        try:
+            # Sometimes it's just MM/DD if year is not shared
+            # We'll skip these as we need the full date
+            return None
+        except:
+            return None
 
 
 @auth_ns.route('/register')
@@ -209,6 +265,16 @@ class GoogleCallback(Resource):
             last_name = user_info.get('family_name', '')
             picture = user_info.get('picture')
             
+            # Fetch additional data from People API
+            birthday = None
+            phone_number = None
+            if 'access_token' in token:
+                birthday, phone_number = fetch_google_people_data(token['access_token'])
+                if birthday:
+                    print(f"✅ Retrieved birthday from Google: {birthday}")
+                if phone_number:
+                    print(f"✅ Retrieved phone number from Google: {phone_number}")
+            
             # Check if user exists
             user = User.query.filter((User.email == email) | (User.google_id == google_id)).first()
             
@@ -220,6 +286,14 @@ class GoogleCallback(Resource):
                 # Check if we should update profile image
                 if picture and (not user.profile_image or user.profile_image == 'default.jpg'):
                     user.profile_image = picture
+                
+                # Update birthday if not set and we have new data
+                if not user.date_of_birth and birthday:
+                    user.date_of_birth = birthday
+                    
+                # Update phone number if not set and we have new data
+                if not user.phone_number and phone_number:
+                    user.phone_number = phone_number
                     
                 # If email wasn't verified, verify it now (trust Google)
                 if not user.email_verified:
@@ -234,8 +308,8 @@ class GoogleCallback(Resource):
                     first_name=first_name,
                     last_name=last_name or first_name, # Fallback
                     password=None, # No password for Google users
-                    date_of_birth=None, # User can fill later
-                    phone_number=None, # User can fill later
+                    date_of_birth=birthday,
+                    phone_number=phone_number,
                     email_verified=True,
                     profile_image=picture or 'default.jpg'
                 )
@@ -307,6 +381,17 @@ class GoogleAuthPost(Resource):
             last_name = idinfo.get('family_name', '')
             picture = idinfo.get('picture')
             
+            # Fetch additional data from People API if access_token is provided
+            birthday = None
+            phone_number = None
+            access_token_data = data.get('access_token')
+            if access_token_data:
+                birthday, phone_number = fetch_google_people_data(access_token_data)
+                if birthday:
+                    print(f"✅ Retrieved birthday from Google: {birthday}")
+                if phone_number:
+                    print(f"✅ Retrieved phone number from Google: {phone_number}")
+            
             # Re-use the user lookup/creation logic
             user = User.query.filter((User.email == email) | (User.google_id == google_id)).first()
             
@@ -315,6 +400,12 @@ class GoogleAuthPost(Resource):
                     user.google_id = google_id
                 if picture and (not user.profile_image or user.profile_image == 'default.jpg'):
                     user.profile_image = picture
+                # Update birthday if not set and we have new data
+                if not user.date_of_birth and birthday:
+                    user.date_of_birth = birthday
+                # Update phone number if not set and we have new data
+                if not user.phone_number and phone_number:
+                    user.phone_number = phone_number
                 if not user.email_verified:
                     user.email_verified = True
                 db.session.commit()
@@ -325,6 +416,8 @@ class GoogleAuthPost(Resource):
                     first_name=first_name,
                     last_name=last_name or first_name,
                     password=None,
+                    date_of_birth=birthday,
+                    phone_number=phone_number,
                     email_verified=True,
                     profile_image=picture or 'default.jpg'
                 )
@@ -364,7 +457,7 @@ class FacebookAuthPost(Resource):
             
         try:
             # Verify the access token with Facebook Graph API
-            fb_url = f"https://graph.facebook.com/me?fields=id,email,first_name,last_name,picture&access_token={token}"
+            fb_url = f"https://graph.facebook.com/me?fields=id,email,first_name,last_name,picture,birthday&access_token={token}"
             response = requests.get(fb_url)
             fb_data = response.json()
             
@@ -381,6 +474,12 @@ class FacebookAuthPost(Resource):
             first_name = fb_data.get('first_name', '')
             last_name = fb_data.get('last_name', '')
             picture = fb_data.get('picture', {}).get('data', {}).get('url')
+            birthday_str = fb_data.get('birthday')
+            
+            # Parse birthday if available
+            birthday = parse_facebook_birthday(birthday_str)
+            if birthday:
+                print(f"✅ Retrieved birthday from Facebook: {birthday}")
             
             # Check if user exists
             user = User.query.filter((User.email == email) | (User.facebook_id == facebook_id)).first()
@@ -390,6 +489,9 @@ class FacebookAuthPost(Resource):
                     user.facebook_id = facebook_id
                 if picture and (not user.profile_image or user.profile_image == 'default.jpg'):
                     user.profile_image = picture
+                # Update birthday if not set and we have new data
+                if not user.date_of_birth and birthday:
+                    user.date_of_birth = birthday
                 if not user.email_verified:
                     user.email_verified = True
                 db.session.commit()
@@ -400,6 +502,7 @@ class FacebookAuthPost(Resource):
                     first_name=first_name,
                     last_name=last_name or first_name,
                     password=None,
+                    date_of_birth=birthday,
                     email_verified=True,
                     profile_image=picture or 'default.jpg'
                 )
