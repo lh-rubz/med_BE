@@ -241,7 +241,7 @@ class GoogleLogin(Resource):
         # We use a hardcoded compatible URI for local dev if needed, or url_for
         # For localhost:8051, url_for should work if SERVER_NAME is set or Host header is present
         # To be safe for the user's setup:
-        redirect_uri = url_for('auth_google_callback', _external=True)
+        redirect_uri = url_for('google_callback', _external=True)
         
         # If running behind a proxy or different port mapping, might need adjustment
         # For now, rely on Flask's url_for

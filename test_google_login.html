@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google OAuth Test - MediScan</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .subtitle {
+            color: #666;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        #login-section {
+            text-align: center;
+        }
+
+        #user-data-section {
+            display: none;
+        }
+
+        .user-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 12px;
+            margin-top: 20px;
+        }
+
+        .user-avatar {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            margin: 0 auto 20px;
+            display: block;
+            border: 4px solid #667eea;
+        }
+
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .data-row:last-child {
+            border-bottom: none;
+        }
+
+        .data-label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        .data-value {
+            color: #333;
+            text-align: right;
+            word-break: break-word;
+        }
+
+        .logout-btn {
+            width: 100%;
+            padding: 12px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: background 0.3s;
+        }
+
+        .logout-btn:hover {
+            background: #c82333;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+        }
+
+        .error {
+            display: none;
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .success {
+            color: #28a745;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        .warning {
+            background: #fff3cd;
+            color: #856404;
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 15px;
+            font-size: 13px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🏥 MediScan OAuth Test</h1>
+        <p class="subtitle">Test Google Login with Enhanced Data Retrieval</p>
+
+        <!-- Login Section -->
+        <div id="login-section">
+            <div id="g_id_onload" data-client_id="YOUR_GOOGLE_CLIENT_ID" data-callback="handleCredentialResponse"
+                data-auto_prompt="false">
+            </div>
+            <div class="g_id_signin" data-type="standard" data-size="large" data-theme="outline"
+                data-text="sign_in_with" data-shape="rectangular" data-logo_alignment="left">
+            </div>
+
+            <div class="warning">
+                ⚠️ Make sure to update <code>YOUR_GOOGLE_CLIENT_ID</code> in this file and configure your backend URL
+                below.
+            </div>
+        </div>
+
+        <!-- Loading -->
+        <div class="loading" id="loading">
+            <p>🔄 Authenticating...</p>
+        </div>
+
+        <!-- Error Message -->
+        <div class="error" id="error-message"></div>
+
+        <!-- User Data Section -->
+        <div id="user-data-section">
+            <div class="user-card">
+                <img id="user-avatar" class="user-avatar" src="" alt="User Avatar">
+
+                <div class="data-row">
+                    <span class="data-label">👤 Name:</span>
+                    <span class="data-value" id="user-name">-</span>
+                </div>
+
+                <div class="data-row">
+                    <span class="data-label">📧 Email:</span>
+                    <span class="data-value" id="user-email">-</span>
+                </div>
+
+                <div class="data-row">
+                    <span class="data-label">🎂 Birthday:</span>
+                    <span class="data-value" id="user-birthday">-</span>
+                </div>
+
+                <div class="data-row">
+                    <span class="data-label">📱 Phone:</span>
+                    <span class="data-value" id="user-phone">-</span>
+                </div>
+
+                <div class="data-row">
+                    <span class="data-label">🔑 User ID:</span>
+                    <span class="data-value" id="user-id">-</span>
+                </div>
+
+                <div class="data-row">
+                    <span class="data-label">🔐 JWT Token:</span>
+                    <span class="data-value" id="jwt-token" style="font-size: 11px; font-family: monospace;">-</span>
+                </div>
+            </div>
+
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <script>
+        // ⚠️ CONFIGURATION - Update these values
+        const BACKEND_URL = 'http://localhost:8051';  // Your Flask backend URL
+        const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID';  // Your Google Client ID
+
+        // Update the data-client_id attribute
+        document.getElementById('g_id_onload').setAttribute('data-client_id', GOOGLE_CLIENT_ID);
+
+        // Handle the Google Sign-In response
+        async function handleCredentialResponse(response) {
+            console.log('🔐 Received Google credential');
+
+            // Show loading
+            document.getElementById('login-section').style.display = 'none';
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error-message').style.display = 'none';
+
+            try {
+                // Send the ID token to your backend
+                const res = await fetch(`${BACKEND_URL}/auth/google`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        id_token: response.credential,
+                        // Note: To get birthday and phone, the access_token is also needed
+                        // This simple example only uses id_token
+                        // For full data, use Google Sign-In client library to get access_token
+                    })
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    console.log('✅ Login successful:', data);
+
+                    // Store JWT token
+                    localStorage.setItem('jwt_token', data.access_token);
+
+                    // Fetch user profile data
+                    await fetchUserProfile(data.access_token);
+                } else {
+                    throw new Error(data.message || 'Login failed');
+                }
+            } catch (error) {
+                console.error('❌ Login error:', error);
+                showError(error.message);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // Fetch user profile from backend
+        async function fetchUserProfile(jwtToken) {
+            try {
+                const res = await fetch(`${BACKEND_URL}/user/profile`, {
+                    headers: {
+                        'Authorization': `Bearer ${jwtToken}`
+                    }
+                });
+
+                if (res.ok) {
+                    const userData = await res.json();
+                    console.log('👤 User data:', userData);
+                    displayUserData(userData, jwtToken);
+                } else {
+                    throw new Error('Failed to fetch user profile');
+                }
+            } catch (error) {
+                console.error('❌ Profile fetch error:', error);
+                // Show basic info even if profile fetch fails
+                displayUserData({}, jwtToken);
+            }
+        }
+
+        // Display user data
+        function displayUserData(userData, jwtToken) {
+            document.getElementById('user-data-section').style.display = 'block';
+            document.getElementById('login-section').style.display = 'none';
+
+            // Set avatar
+            const avatar = userData.profile_image || 'https://via.placeholder.com/100';
+            document.getElementById('user-avatar').src = avatar;
+
+            // Set data
+            document.getElementById('user-name').textContent =
+                `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || 'Not available';
+            document.getElementById('user-email').textContent = userData.email || 'Not available';
+            document.getElementById('user-birthday').textContent = userData.date_of_birth || 'Not provided';
+            document.getElementById('user-phone').textContent = userData.phone_number || 'Not provided';
+            document.getElementById('user-id').textContent = userData.id || 'Not available';
+            document.getElementById('jwt-token').textContent = jwtToken.substring(0, 50) + '...';
+        }
+
+        // Show error message
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = '❌ Error: ' + message;
+            errorDiv.style.display = 'block';
+            document.getElementById('login-section').style.display = 'block';
+            document.getElementById('user-data-section').style.display = 'none';
+        }
+
+        // Logout function
+        function logout() {
+            localStorage.removeItem('jwt_token');
+            document.getElementById('user-data-section').style.display = 'none';
+            document.getElementById('login-section').style.display = 'block';
+
+            // Revoke Google session
+            google.accounts.id.disableAutoSelect();
+            location.reload();
+        }
+
+        // Check if user is already logged in
+        window.onload = function () {
+            const jwtToken = localStorage.getItem('jwt_token');
+            if (jwtToken) {
+                console.log('🔄 Found existing session, fetching profile...');
+                fetchUserProfile(jwtToken);
+            }
+        }
+    </script>
+</body>
+
+</html>
