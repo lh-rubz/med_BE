@@ -120,13 +120,13 @@ def compress_image(image_data, format_hint='png'):
     elif img.mode != 'RGB':
         img = img.convert('RGB')
     
-    # Resize if image is very large (max 2000px on longest side)
-    max_dimension = 2000
+    # Resize if image is very large (1200px for balance of speed and quality)
+    max_dimension = 1200
     if max(img.size) > max_dimension:
         ratio = max_dimension / max(img.size)
         new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
         img = img.resize(new_size, Image.Resampling.LANCZOS)
-        print(f"  ↓ Resized image from {image_data.__sizeof__()} to fit {max_dimension}px")
+        print(f"  ↓ Resized image to fit {max_dimension}px")
     
     # Compress to JPEG with quality 85 (good balance)
     output = io.BytesIO()
@@ -294,25 +294,18 @@ class ChatResource(Resource):
 RULES:
 1. Extract EVERY test with its value, unit, normal range. Skip headers.
 2. Report Identification:
-   - report_name: Extract the EXACT title written on the report (e.g., "Detailed Hemogram", "Lipid Profile"). If no title, use "Medical Report".
-   - report_type: Choose the CLOSEST match from this standard list: {', '.join(REPORT_TYPES)}. If no good match, use "Other".
-3. IMPORTANT - Extract doctor names:
-   - Look for "Ref. By:", "Ref By:", "Referred By:", "Referring Doctor:", or "Dr." followed by a name
-   - Extract the FULL name (e.g., "Dr. Hiren Shah" → "Hiren Shah", "Dr. M. Patel" → "M. Patel")
-   - Include middle initials if present
-   - If multiple doctors, separate with commas
-   - CRITICAL: Do NOT leave empty - if you see ANY doctor name on the report, extract it
+   - report_name: Extract the EXACT title written on the report.
+   - report_type: Choose the CLOSEST match from this standard list: {', '.join(REPORT_TYPES)}.
+3. IMPORTANT - Full Names:
+   - Extract the FULL patient name exactly as written (e.g., "Heba Ahmed Mohamed El-Sayed" not "Heba Ahmed").
+   - Extract the FULL doctor names (e.g., "Dr. Hiren Shah" → "Hiren Shah").
 4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7")
 5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
 6. Extract report date as YYYY-MM-DD
-7. Extract patient details:
-   - patient_age: Extract age if found (e.g. "45", "45 Y", "45 Years"). If not found, use null or empty string.
-   - patient_gender: Extract gender if found (e.g. "Male", "Female", "M", "F"). Expand "M"/"F" to full words.
-8. If value marked "High" or "Low", add to notes
-9. IMPORTANT - Extract normal_range WITHOUT units:
-   - Remove units from range (e.g., "12 - 16 g/dL" → "12 - 16")
-   - Keep only the numeric range values
-   - For text ranges (e.g., "Normal: <5.7"), keep the text but remove units
+7. Extract patient details (Age, Gender).
+8. IMPORTANT - Full Normal Range:
+   - Extract the FULL normal range EXACTLY as written, including all text and gender-specific info (e.g., "Men: 13-17, Women: 12-16"). 
+   - Do NOT remove units or descriptive text from the normal range field.
 9. IMPORTANT - Extract category/section for EACH test:
    - Look for section headers like "DIFFERENTIAL COUNT", "BLOOD INDICES", "ABSOLUTE COUNT", "WBC COUNT", "PLATELET COUNT"
    - Assign each test to its category (use exact header text in UPPERCASE)
@@ -377,8 +370,10 @@ Return ONLY valid JSON:
                     all_extracted_data.extend(extracted_data['medical_data'])
                     print(f"✅ Extracted {len(extracted_data['medical_data'])} field(s) from page {idx}")
                 
-                # Capture patient info from first good page
-                if not patient_info and extracted_data.get('patient_name'):
+                # Capture patient info (prefer the most complete one)
+                new_name = extracted_data.get('patient_name', '')
+                current_name = patient_info.get('patient_name', '')
+                if len(new_name) > len(current_name):
                      patient_info = extracted_data
 
                 print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")

@@ -203,16 +203,25 @@ class MedicalValidator:
             field_value = str(field.get('field_value', '')).strip()
             
             # Create a key for deduplication
-            # Use normalized field name
-            key = re.sub(r'[^a-z0-9]', '', field_name)
+            # Use normalized field name + category to avoid merging different sections
+            category = str(field.get('category', '')).lower().strip()
+            key = f"{re.sub(r'[^a-z0-9]', '', field_name)}_{re.sub(r'[^a-z0-9]', '', category)}"
             
             if key in seen:
                 # Duplicate found - keep the one with more information
                 existing = seen[key]
                 existing_value = str(existing.get('field_value', '')).strip()
+                existing_range = str(existing.get('normal_range', '')).strip()
                 
-                # Prefer entry with more complete data
-                if len(field_value) > len(existing_value):
+                # If name and category match, but values are different, they might NOT be duplicates
+                # (e.g., same test repeated with different results). 
+                # For safety, only deduplicate if values or ranges also match significantly.
+                if field_value != existing_value and field_value and existing_value:
+                    # Likely different entries, don't deduplicate
+                    deduplicated.append(field)
+                    continue
+
+                if len(field_value) > len(existing_value) or len(str(field.get('normal_range', ''))) > len(existing_range):
                     seen[key] = field
             else:
                 seen[key] = field
