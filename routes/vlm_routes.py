@@ -175,8 +175,20 @@ class ChatResource(Resource):
         if profile_id:
             from models import Profile
             prof = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            
+            # Check shared access if not owner
             if not prof:
-                return {'message': 'Invalid profile_id or unauthorized access'}, 403
+                from models import ProfileShare
+                share = ProfileShare.query.filter_by(
+                    profile_id=profile_id, 
+                    shared_with_user_id=current_user_id
+                ).first()
+                
+                if share and share.access_level in ['upload', 'manage']:
+                    prof = Profile.query.get(profile_id)
+            
+            if not prof:
+                return {'message': 'Invalid profile_id or unauthorized access (upload permission required)'}, 403
             target_profile_id = prof.id
         else:
             # Default to 'Self' profile

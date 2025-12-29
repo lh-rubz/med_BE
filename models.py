@@ -186,3 +186,21 @@ class FamilyConnection(db.Model):
     
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, onupdate=lambda: datetime.now(timezone.utc))
+
+
+class ProfileShare(db.Model):
+    """Tracks access grants to specific profiles (e.g., Mom shares 'Son' with Dad)"""
+    id = db.Column(db.Integer, primary_key=True)
+    profile_id = db.Column(db.Integer, db.ForeignKey('profile.id'), nullable=False)
+    shared_with_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    
+    # 'view' = read-only, 'upload' = read+write, 'manage' = full control
+    access_level = db.Column(db.String(20), default='view', nullable=False) 
+    
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    
+    # Relationships
+    # Note: We use overlaps to avoid conflicts if multiple relationships point to the same table
+    profile = db.relationship('Profile', backref=db.backref('shares', lazy=True))
+    shared_with = db.relationship('User', foreign_keys=[shared_with_user_id], backref=db.backref('received_shares', lazy=True))
+

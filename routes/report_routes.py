@@ -37,8 +37,15 @@ class UserReports(Resource):
         query = Report.query.filter_by(user_id=current_user_id)
         
         if profile_id:
-            # Verify user owns this profile
+            # Verify user owns this profile or has shared access
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            
+            if not profile:
+                from models import ProfileShare
+                share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
+                if share:
+                    profile = Profile.query.get(profile_id)
+            
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
             query = query.filter_by(profile_id=profile_id)
@@ -152,8 +159,15 @@ class Timeline(Resource):
         query = Report.query.filter_by(user_id=current_user_id)
         
         if profile_id:
-            # Verify user owns this profile
+            # Verify user owns this profile or has shared access
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            
+            if not profile:
+                from models import ProfileShare
+                share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
+                if share:
+                    profile = Profile.query.get(profile_id)
+            
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
             query = query.filter_by(profile_id=profile_id)
@@ -203,8 +217,15 @@ class HealthTrends(Resource):
         profile_id = request.args.get('profile_id')
         
         if profile_id:
-            # Verify user owns this profile
+            # Verify user owns this profile or has shared access
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            
+            if not profile:
+                from models import ProfileShare
+                share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
+                if share:
+                    profile = Profile.query.get(profile_id)
+
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
         
@@ -275,8 +296,15 @@ class TimelineStats(Resource):
         query = Report.query.filter_by(user_id=current_user_id)
         
         if profile_id:
-            # Verify user owns this profile
+            # Verify user owns this profile or has shared access
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            
+            if not profile:
+                from models import ProfileShare
+                share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
+                if share:
+                    profile = Profile.query.get(profile_id)
+
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
             query = query.filter_by(profile_id=profile_id)
@@ -310,10 +338,23 @@ class UserReportDetail(Resource):
         if not user:
             return {'message': 'User not found'}, 404
         
-        report = Report.query.filter_by(id=report_id, user_id=current_user_id).first()
+        report = Report.query.get(report_id)
         
         if not report:
             return {'message': 'Report not found'}, 404
+            
+        # Check access
+        if report.user_id != current_user_id:
+            # Check if shared
+            has_access = False
+            if report.profile_id:
+                from models import ProfileShare
+                share = ProfileShare.query.filter_by(profile_id=report.profile_id, shared_with_user_id=current_user_id).first()
+                if share:
+                    has_access = True
+            
+            if not has_access:
+                return {'message': 'Report not found or unauthorized access'}, 404
         
         report_fields = ReportField.query.filter_by(report_id=report.id).order_by(ReportField.id).all()
         fields_data = []
@@ -434,10 +475,23 @@ class ReportCategorized(Resource):
         if not user:
             return {'message': 'User not found'}, 404
         
-        report = Report.query.filter_by(id=report_id, user_id=current_user_id).first()
+        report = Report.query.get(report_id)
         
         if not report:
             return {'message': 'Report not found'}, 404
+            
+        # Check access
+        if report.user_id != current_user_id:
+            # Check if shared
+            has_access = False
+            if report.profile_id:
+                from models import ProfileShare
+                share = ProfileShare.query.filter_by(profile_id=report.profile_id, shared_with_user_id=current_user_id).first()
+                if share:
+                    has_access = True
+            
+            if not has_access:
+                return {'message': 'Report not found or unauthorized access'}, 404
         
         report_fields = ReportField.query.filter_by(report_id=report.id).order_by(ReportField.id).all()
         
@@ -482,10 +536,23 @@ class ReportImages(Resource):
         if not user:
             return {'message': 'User not found'}, 404
         
-        report = Report.query.filter_by(id=report_id, user_id=current_user_id).first()
+        report = Report.query.get(report_id)
         
         if not report:
             return {'message': 'Report not found'}, 404
+            
+        # Check access
+        if report.user_id != current_user_id:
+            # Check if shared
+            has_access = False
+            if report.profile_id:
+                from models import ProfileShare
+                share = ProfileShare.query.filter_by(profile_id=report.profile_id, shared_with_user_id=current_user_id).first()
+                if share:
+                    has_access = True
+            
+            if not has_access:
+                return {'message': 'Report not found or unauthorized access'}, 404
         
         
         # Get all files for this report from database
@@ -528,10 +595,23 @@ class ReportImageByIndex(Resource):
         if not user:
             return {'message': 'User not found'}, 404
         
-        report = Report.query.filter_by(id=report_id, user_id=current_user_id).first()
+        report = Report.query.get(report_id)
         
         if not report:
             return {'message': 'Report not found'}, 404
+            
+        # Check access
+        if report.user_id != current_user_id:
+            # Check if shared
+            has_access = False
+            if report.profile_id:
+                from models import ProfileShare
+                share = ProfileShare.query.filter_by(profile_id=report.profile_id, shared_with_user_id=current_user_id).first()
+                if share:
+                    has_access = True
+            
+            if not has_access:
+                return {'message': 'Report not found or unauthorized access'}, 404
         
         
         # Get all files for this report from database
