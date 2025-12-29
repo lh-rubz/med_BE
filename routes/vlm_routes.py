@@ -120,8 +120,8 @@ def compress_image(image_data, format_hint='png'):
     elif img.mode != 'RGB':
         img = img.convert('RGB')
     
-    # Resize if image is very large (1200px for balance of speed and quality)
-    max_dimension = 1200
+    # Resize if image is very large (2000px for balance of speed and quality)
+    max_dimension = 2000
     if max(img.size) > max_dimension:
         ratio = max_dimension / max(img.size)
         new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
@@ -292,23 +292,28 @@ class ChatResource(Resource):
             prompt_text = f"""Extract ALL medical data from this image (page {idx}/{total_pages}).
 
 RULES:
-1. Extract EVERY test with its value, unit, normal range. Skip headers.
+1. Extract EVERY test with its value, unit, normal range.
+   - CRITICAL: Section headers (like "BIOCHEMISTRY", "ELECTROLYTES") are NOT tests. Do NOT extract them as items in the "medical_data" list.
+   - Instead, use these headers to fill the "category" field for all tests following that header.
+   - A row is only a test if it has a Result/Value. If a row has NO result, it is likely a header.
 2. Report Identification:
    - report_name: Extract the EXACT title written on the report.
    - report_type: Choose the CLOSEST match from this standard list: {', '.join(REPORT_TYPES)}.
 3. IMPORTANT - Full Names:
-   - Extract the FULL patient name exactly as written (e.g., "Heba Ahmed Mohamed El-Sayed" not "Heba Ahmed").
-   - Extract the FULL doctor names (e.g., "Dr. Hiren Shah" → "Hiren Shah").
+   - Extract the FULL patient name exactly as written.
+   - Extract the FULL doctor names.
+   - IF NO DOCTOR NAME IS FOUND, LEAVE "doctor_names" AS AN EMPTY STRING. Do NOT invent or guess a name.
 4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7")
 5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
 6. Extract report date as YYYY-MM-DD
 7. Extract patient details (Age, Gender).
 8. IMPORTANT - Full Normal Range:
-   - Extract the FULL normal range EXACTLY as written, including all text and gender-specific info (e.g., "Men: 13-17, Women: 12-16"). 
-   - Do NOT remove units or descriptive text from the normal range field.
+   - Extract the FULL normal range exactly as written, including all text and gender-specific info (e.g., "Men: 13-17, Women: 12-16"). 
+   - Keep descriptive text like "Men:" or "Women:" but REMOVE units (e.g., "g/dL", "mg/dL", "%") from the normal range field since units are already in field_unit.
 9. IMPORTANT - Extract category/section for EACH test:
-   - Look for section headers like "DIFFERENTIAL COUNT", "BLOOD INDICES", "ABSOLUTE COUNT", "WBC COUNT", "PLATELET COUNT"
-   - Assign each test to its category (use exact header text in UPPERCASE)
+   - Identify section headers (e.g., "DIFFERENTIAL COUNT", "BIOCHEMISTRY").
+   - Assign the EXACT header text (in UPPERCASE) to the "category" field for every test that belongs to that section.
+   - Example: For a test under "ELECTROLYTES", the category should be "ELECTROLYTES".
    - If no category header visible, use empty string
 
 Return ONLY valid JSON:

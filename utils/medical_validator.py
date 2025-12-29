@@ -204,8 +204,16 @@ class MedicalValidator:
             
             # Create a key for deduplication
             # Use normalized field name + category to avoid merging different sections
-            category = str(field.get('category', '')).lower().strip()
-            key = f"{re.sub(r'[^a-z0-9]', '', field_name)}_{re.sub(r'[^a-z0-9]', '', category)}"
+            category_text = str(field.get('category', '')).lower().strip()
+            field_name_clean = re.sub(r'[^a-z0-9]', '', field_name)
+            category_clean = re.sub(r'[^a-z0-9]', '', category_text)
+            
+            # DYNAMIC FILTER: If a field name is identical to the category name,
+            # it means the VLM extracted the section header as a test. Skip it as a field.
+            if field_name_clean == category_clean and not field_value:
+                continue
+
+            key = f"{field_name_clean}_{category_clean}"
             
             if key in seen:
                 # Duplicate found - keep the one with more information
@@ -263,6 +271,16 @@ class MedicalValidator:
         else:
             # Ensure key exists even if empty
             validated['field_value'] = ''
+        
+        # Normalize normal_range (remove unit if duplicate)
+        normal_range = str(validated.get('normal_range', ''))
+        unit = str(validated.get('field_unit', ''))
+        if unit and unit in normal_range:
+            # Remove unit and any surrounding whitespace
+            normal_range = normal_range.replace(unit, '').strip()
+            # Clean up trailing dashes/commas that might be left
+            normal_range = re.sub(r'\s*([,-])\s*$', '', normal_range)
+            validated['normal_range'] = normal_range
         
         # Recalculate is_normal deterministically
         normal_range = validated.get('normal_range', '')
