@@ -12,6 +12,8 @@ from routes.auth_routes import auth_ns
 from routes.user_routes import user_ns
 from routes.vlm_routes import vlm_ns
 from routes.report_routes import reports_ns
+from routes.profile_routes import profile_ns
+from routes.connection_routes import connection_ns
 from routes.auth_routes import oauth
 from routes.webauthn_routes import webauthn_ns
 from utils.medical_mappings import seed_synonyms
@@ -84,6 +86,8 @@ api.add_namespace(webauthn_ns, path='/auth/webauthn')
 api.add_namespace(user_ns, path='/users')
 api.add_namespace(vlm_ns, path='/vlm')
 api.add_namespace(reports_ns, path='/reports')
+api.add_namespace(profile_ns, path='/profiles')
+api.add_namespace(connection_ns, path='/connections')
 
 
 

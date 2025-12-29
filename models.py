@@ -27,6 +27,12 @@ class User(db.Model):
     facebook_id = db.Column(db.String(255), unique=True, nullable=True)
     authenticators = db.relationship('Authenticator', backref='user', lazy=True, cascade='all, delete-orphan')
     reports = db.relationship('Report', backref='user', lazy=True, cascade='all, delete-orphan')
+    profiles = db.relationship('Profile', backref='owner', lazy=True, foreign_keys='Profile.creator_id', cascade='all, delete-orphan')
+    
+    # Connections where this user is the one who requested access
+    connections_sent = db.relationship('FamilyConnection', backref='requester', lazy=True, foreign_keys='FamilyConnection.requester_id')
+    # Connections where this user is the one receiving the request
+    connections_received = db.relationship('FamilyConnection', backref='receiver', lazy=True, foreign_keys='FamilyConnection.receiver_id')
     
     def set_password(self, password):
         """Set new password"""
@@ -40,6 +46,7 @@ class User(db.Model):
 class Report(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    profile_id = db.Column(db.Integer, db.ForeignKey('profile.id'), nullable=True) # Linked to a specific family profile
     report_date = db.Column(db.DateTime, nullable=False)
     report_hash = db.Column(db.String(255), nullable=False)
     report_name = db.Column(db.String(255)) # Specific title e.g. "Detailed Hemogram"
@@ -146,3 +153,36 @@ class Authenticator(db.Model):
     transports = db.Column(db.String(255), nullable=True) # comma-separated list of transports
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     last_used_at = db.Column(db.DateTime, nullable=True)
+
+
+class Profile(db.Model):
+    """Managed profiles for family members (e.g., children, parents)"""
+    id = db.Column(db.Integer, primary_key=True)
+    creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # The account owner
+    linked_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True) # If this profile belongs to another registered user
+    
+    first_name = db.Column(db.String(50), nullable=False)
+    last_name = db.Column(db.String(50))
+    date_of_birth = db.Column(db.Date)
+    gender = db.Column(db.String(20))
+    relationship = db.Column(db.String(50), default='Self') # Relationship to creator (Self, Son, Father, etc.)
+    
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    reports = db.relationship('Report', backref='profile', lazy=True)
+
+    # Prevent circular reference issues by using explicit backref names if needed
+    linked_user = db.relationship('User', foreign_keys=[linked_user_id], backref='linked_profiles', lazy=True)
+
+
+class FamilyConnection(db.Model):
+    """Links between two existing user accounts (e.g., Mother <-> Elderly Father)"""
+    id = db.Column(db.Integer, primary_key=True)
+    requester_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    receiver_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    
+    relationship = db.Column(db.String(50), nullable=False) # Relationship of receiver to requester
+    status = db.Column(db.String(20), default='pending') # pending, accepted, rejected
+    access_level = db.Column(db.String(20), default='view') # view, manage (can upload)
+    
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, onupdate=lambda: datetime.now(timezone.utc))

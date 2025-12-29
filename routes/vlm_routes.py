@@ -168,6 +168,22 @@ class ChatResource(Resource):
             return {'error': 'No file part in the request. Please upload a file using form-data with key "file"', 'code': 'NO_FILE'}, 400
         
         files = request.files.getlist('file')
+        profile_id = request.form.get('profile_id')
+        
+        # Determine target profile
+        target_profile_id = None
+        if profile_id:
+            from models import Profile
+            prof = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            if not prof:
+                return {'message': 'Invalid profile_id or unauthorized access'}, 403
+            target_profile_id = prof.id
+        else:
+            # Default to 'Self' profile
+            from models import Profile
+            prof = Profile.query.filter_by(creator_id=current_user_id, relationship='Self').first()
+            if prof:
+                target_profile_id = prof.id
         
         if not files or len(files) == 0:
             return {'error': 'No file selected'}, 400
@@ -250,7 +266,7 @@ class ChatResource(Resource):
                     return
 
                 # Process Images Generator
-                yield from self._process_multiple_images_stream(all_images_to_process, current_user_id, user, saved_files)
+                yield from self._process_multiple_images_stream(all_images_to_process, current_user_id, user, saved_files, target_profile_id)
                 
             except Exception as e:
                 print(f"Stream Error: {e}")
@@ -260,7 +276,7 @@ class ChatResource(Resource):
 
         return Response(stream_with_context(generate_progress()), content_type='text/event-stream')
 
-    def _process_multiple_images_stream(self, images_list, current_user_id, user, saved_files):
+    def _process_multiple_images_stream(self, images_list, current_user_id, user, saved_files, profile_id=None):
         """Generator that yields progress for image processing steps"""
         total_pages = len(images_list)
         all_extracted_data = []
@@ -546,6 +562,7 @@ Return ONLY valid JSON:
 
             new_report = Report(
                 user_id=current_user_id,
+                profile_id=profile_id,
                 report_date=report_date_obj,
                 report_hash=report_hash,
                 report_name=final_data.get('report_name'),
