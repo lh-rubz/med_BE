@@ -66,7 +66,7 @@ class Config:
     
     # Ollama configuration
     OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434/v1')
-    OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gemma3:27b')
+    OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5vl:7b')
     
     # Google OAuth
     GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')

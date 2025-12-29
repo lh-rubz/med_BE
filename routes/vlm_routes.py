@@ -283,22 +283,9 @@ class ChatResource(Resource):
                 print(f"📖 PDF Page: {image_info['page_number']}/{image_info.get('total_pages', '?')}")
             print(f"{'='*80}\n")
             
-            # Step 1: OCR
-            yield f"data: {json.dumps({'percent': current_progress, 'message': f'Reading text from page {idx} of {total_pages}...'})}\n\n"
-            print(f"📝 Step 1: Extracting text with OCR...")
-            
-            ocr_text = None
-            try:
-                ocr = get_ocr_instance(languages=['ar', 'en'])
-                ocr_text = ocr.extract_text(image_info['data'])
-                print(f"✅ OCR extracted {len(ocr_text)} characters")
-                print(f"📄 OCR Text Preview:\n{ocr_text[:300]}...\n")
-            except Exception as e:
-                print(f"⚠️  OCR failed: {e}, using image-only mode")
-            
-            # Step 2: VLM
-            print(f"🤖 Step 2: Structuring data with VLM (hybrid mode)...")
-            yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Understanding medical values on page {idx}...'})}\n\n"
+            # Step 1: VLM Processing (Native Vision)
+            print(f"🤖 Step 1: Structuring data with Qwen2-VL (native vision)...")
+            yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Extracting medical values from page {idx}...'})}\n\n"
             
             # Build prompt (Reusing logic)
             # Build OPTIMIZED extraction prompt (reduced by ~40%)
@@ -359,17 +346,13 @@ Return ONLY valid JSON:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                 image_format = image_info['format']
                 
-                content = []
-                if ocr_text:
-                     enhanced_prompt = f"{prompt_text}\n\nIMPORTANT: I've also extracted the text using OCR below. Use this OCR text for ACCURATE Arabic character recognition.\n\nOCR EXTRACTED TEXT:\n{ocr_text}"
-                     content.append({'type': 'text', 'text': enhanced_prompt})
-                else:
-                     content.append({'type': 'text', 'text': prompt_text})
-                
-                content.append({
-                    'type': 'image_url',
-                    'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                })
+                content = [
+                    {'type': 'text', 'text': prompt_text},
+                    {
+                        'type': 'image_url',
+                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                    }
+                ]
                 
                 completion = ollama_client.chat.completions.create(
                     model=Config.OLLAMA_MODEL,
