@@ -46,15 +46,16 @@ class MedicalValidator:
         # Remove whitespace
         value_str = value_str.strip()
         
-        # Try to parse as decimal to validate
+        # Try to parse numeric part but preserve prefix symbols (<, >, +, -)
         try:
-            # Extract numeric part (handle cases like "13.5 g/dL")
-            numeric_match = re.search(r'[-+]?\d*\.?\d+', value_str)
-            if numeric_match:
-                numeric_str = numeric_match.group()
-                # Preserve exact decimal representation
-                Decimal(numeric_str)  # Validate it's a valid number
-                return numeric_str
+            # Extract numeric part and any preceding symbol
+            match = re.search(r'([<>+-]?)\s*([-+]?\d*\.?\d+)', value_str)
+            if match:
+                symbol = match.group(1)
+                numeric_str = match.group(2)
+                # Preserve exact decimal representation with symbol
+                Decimal(numeric_str)  # Validate numeric part
+                return f"{symbol}{numeric_str}" if symbol else numeric_str
         except (InvalidOperation, ValueError):
             pass
         

@@ -303,7 +303,8 @@ RULES:
    - Extract the FULL patient name exactly as written.
    - Extract the FULL doctor names.
    - IF NO DOCTOR NAME IS FOUND, LEAVE "doctor_names" AS AN EMPTY STRING. Do NOT invent or guess a name.
-4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7")
+4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7").
+   - CRITICAL: Keep symbols like "<", ">", "+", or "-" if they are part of the result value (e.g., "< 6.0", "> 100", "+ve").
 5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
 6. Extract report date as YYYY-MM-DD
 7. Extract patient details (Age, Gender).
