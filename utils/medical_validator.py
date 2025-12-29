@@ -229,11 +229,15 @@ class MedicalValidator:
         # Reconstruct list maintaining order
         for field in medical_data:
             field_name = str(field.get('field_name', '')).lower().strip()
-            key = re.sub(r'[^a-z0-9]', '', field_name)
+            category = str(field.get('category', '')).lower().strip()
+            key = f"{re.sub(r'[^a-z0-9]', '', field_name)}_{re.sub(r'[^a-z0-9]', '', category)}"
             
             if key in seen and seen[key] == field:
                 deduplicated.append(field)
                 del seen[key]  # Remove to avoid duplicates
+            elif field in deduplicated:
+                # Already added (for the 'continue' cases in first loop)
+                pass
         
         return deduplicated
     
