@@ -6,7 +6,7 @@ import glob
 from collections import defaultdict
 from datetime import datetime
 
-from models import db, User, Report, ReportField, AdditionalField, ReportFile
+from models import db, User, Report, ReportField, AdditionalField, ReportFile, Profile
 from config import Config
 from utils.medical_mappings import get_search_terms
 from sqlalchemy import or_
@@ -17,17 +17,33 @@ reports_ns = Namespace('reports', description='Medical reports management')
 
 @reports_ns.route('')
 class UserReports(Resource):
-    @reports_ns.doc(security='Bearer Auth')
+    @reports_ns.doc(
+        security='Bearer Auth',
+        params={'profile_id': 'Optional: Filter reports by specific profile ID'}
+    )
     @jwt_required()
     def get(self):
-        """Get all extracted reports for the current user"""
+        """Get all extracted reports for the current user (optionally filtered by profile)"""
         current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
             return {'message': 'User not found'}, 404
         
-        reports = Report.query.filter_by(user_id=current_user_id).order_by(Report.created_at.desc()).all()
+        # Check for profile_id filter
+        profile_id = request.args.get('profile_id')
+        
+        # Build query
+        query = Report.query.filter_by(user_id=current_user_id)
+        
+        if profile_id:
+            # Verify user owns this profile
+            profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            if not profile:
+                return {'message': 'Invalid profile_id or unauthorized access'}, 403
+            query = query.filter_by(profile_id=profile_id)
+        
+        reports = query.order_by(Report.created_at.desc()).all()
         
         if not reports:
             return {
@@ -64,6 +80,17 @@ class UserReports(Resource):
                     'merged_at': str(add_field.approved_at) if add_field.approved_at else None
                 })
             
+            # Get profile information
+            profile_info = None
+            if report.profile_id:
+                profile = Profile.query.get(report.profile_id)
+                if profile:
+                    profile_info = {
+                        'id': profile.id,
+                        'first_name': profile.first_name,
+                        'last_name': profile.last_name,
+                        'relationship': profile.relationship
+                    }
             
             # Get images info for this report from database
             report_files = ReportFile.query.filter_by(report_id=report.id).order_by(ReportFile.id).all()
@@ -79,6 +106,8 @@ class UserReports(Resource):
             
             reports_data.append({
                 'report_id': report.id,
+                'profile_id': report.profile_id,
+                'profile': profile_info,
                 'report_date': str(report.report_date),
                 'report_name': report.report_name,
                 'report_type': report.report_type,
@@ -107,14 +136,30 @@ class UserReports(Resource):
 
 @reports_ns.route('/timeline')
 class Timeline(Resource):
-    @reports_ns.doc(security='Bearer Auth')
+    @reports_ns.doc(
+        security='Bearer Auth',
+        params={'profile_id': 'Optional: Filter timeline by specific profile ID'}
+    )
     @jwt_required()
     def get(self):
-        """Get chronological timeline of reports with health summaries"""
+        """Get chronological timeline of reports with health summaries (optionally filtered by profile)"""
         current_user_id = int(get_jwt_identity())
         
-        # Get all reports ordered by date
-        reports = Report.query.filter_by(user_id=current_user_id).order_by(Report.report_date.desc()).all()
+        # Check for profile_id filter
+        profile_id = request.args.get('profile_id')
+        
+        # Build query
+        query = Report.query.filter_by(user_id=current_user_id)
+        
+        if profile_id:
+            # Verify user owns this profile
+            profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            if not profile:
+                return {'message': 'Invalid profile_id or unauthorized access'}, 403
+            query = query.filter_by(profile_id=profile_id)
+            
+        # Get reports ordered by date
+        reports = query.order_by(Report.report_date.desc()).all()
         
         timeline_data = []
         for report in reports:
@@ -143,12 +188,25 @@ class Timeline(Resource):
 
 @reports_ns.route('/trends')
 class HealthTrends(Resource):
-    @reports_ns.doc(security='Bearer Auth', params={'field_name': 'Comma separated test names (e.g. Hemoglobin,WBC)'})
+    @reports_ns.doc(
+        security='Bearer Auth', 
+        params={
+            'field_name': 'Comma separated test names (e.g. Hemoglobin,WBC)',
+            'profile_id': 'Optional: Filter trends by specific profile ID'
+        }
+    )
     @jwt_required()
     def get(self):
-        """Get historical values for specific health metrics"""
+        """Get historical values for specific health metrics (optionally filtered by profile)"""
         current_user_id = int(get_jwt_identity())
         field_names = request.args.get('field_name', '').split(',')
+        profile_id = request.args.get('profile_id')
+        
+        if profile_id:
+            # Verify user owns this profile
+            profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            if not profile:
+                return {'message': 'Invalid profile_id or unauthorized access'}, 403
         
         if not field_names or field_names == ['']:
             return {'message': 'Please provide field_name parameter'}, 400
@@ -165,10 +223,15 @@ class HealthTrends(Resource):
             # Build query with OR condition for all aliases
             filters = [ReportField.field_name.ilike(f"%{term}%") for term in search_terms]
             
-            fields = db.session.query(ReportField, Report.report_date).join(Report).filter(
+            query = db.session.query(ReportField, Report.report_date).join(Report).filter(
                 ReportField.user_id == current_user_id,
                 or_(*filters)
-            ).order_by(Report.report_date).all()
+            )
+            
+            if profile_id:
+                query = query.filter(Report.profile_id == profile_id)
+                
+            fields = query.order_by(Report.report_date).all()
             
             if not fields:
                 continue
@@ -199,14 +262,27 @@ class HealthTrends(Resource):
 
 @reports_ns.route('/stats')
 class TimelineStats(Resource):
-    @reports_ns.doc(security='Bearer Auth')
+    @reports_ns.doc(
+        security='Bearer Auth',
+        params={'profile_id': 'Optional: Filter stats by specific profile ID'}
+    )
     @jwt_required()
     def get(self):
-        """Get high-level statistics for the timeline header"""
+        """Get high-level statistics for the timeline header (optionally filtered by profile)"""
         current_user_id = int(get_jwt_identity())
+        profile_id = request.args.get('profile_id')
         
-        total_reports = Report.query.filter_by(user_id=current_user_id).count()
-        last_report = Report.query.filter_by(user_id=current_user_id).order_by(Report.report_date.desc()).first()
+        query = Report.query.filter_by(user_id=current_user_id)
+        
+        if profile_id:
+            # Verify user owns this profile
+            profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            if not profile:
+                return {'message': 'Invalid profile_id or unauthorized access'}, 403
+            query = query.filter_by(profile_id=profile_id)
+            
+        total_reports = query.count()
+        last_report = query.order_by(Report.report_date.desc()).first()
         
         # Calculate overall health status based on recent abnormal results
         health_status = "Good"
@@ -278,10 +354,24 @@ class UserReportDetail(Resource):
                 'url': f'/reports/{report.id}/images/{idx}'
             })
         
+        # Get profile information
+        profile_info = None
+        if report.profile_id:
+            profile = Profile.query.get(report.profile_id)
+            if profile:
+                profile_info = {
+                    'id': profile.id,
+                    'first_name': profile.first_name,
+                    'last_name': profile.last_name,
+                    'relationship': profile.relationship
+                }
+        
         return {
             'message': 'Report retrieved successfully',
             'report': {
                 'report_id': report.id,
+                'profile_id': report.profile_id,
+                'profile': profile_info,
                 'report_date': str(report.report_date),
                 'report_name': report.report_name,
                 'report_type': report.report_type,

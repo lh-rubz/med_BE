@@ -6,7 +6,7 @@ import secrets
 import os
 from authlib.integrations.flask_client import OAuth
 
-from models import db, User
+from models import db, User, Profile
 from config import send_brevo_email
 from email_templates import (
     get_verification_email,
@@ -197,6 +197,19 @@ class Register(Resource):
             new_user.set_password(data['password'])
             
             db.session.add(new_user)
+            db.session.flush() # Flush to get new_user.id
+
+            # Auto-create "Self" profile
+            self_profile = Profile(
+                creator_id=new_user.id,
+                first_name=new_user.first_name,
+                last_name=new_user.last_name,
+                date_of_birth=new_user.date_of_birth,
+                gender='Other', # Default, user can update later
+                relationship='Self'
+            )
+            db.session.add(self_profile)
+            
             db.session.commit()
 
             print(f"\n{'='*80}")
@@ -347,6 +360,18 @@ class GoogleCallback(Resource):
                     profile_image=picture or 'default.jpg'
                 )
                 db.session.add(user)
+                db.session.flush() # Flush to get ID
+                
+                # Auto-create "Self" profile for new social user
+                self_profile = Profile(
+                    creator_id=user.id,
+                    first_name=user.first_name,
+                    last_name=user.last_name,
+                    date_of_birth=user.date_of_birth,
+                    gender='Other',
+                    relationship='Self'
+                )
+                db.session.add(self_profile)
                 db.session.commit()
             
             # Determine missing fields
@@ -474,6 +499,18 @@ class GoogleAuthPost(Resource):
                     profile_image=picture or 'default.jpg'
                 )
                 db.session.add(user)
+                db.session.flush() # Flush for ID
+                
+                # Auto-create "Self" profile
+                self_profile = Profile(
+                    creator_id=user.id,
+                    first_name=user.first_name,
+                    last_name=user.last_name,
+                    date_of_birth=user.date_of_birth,
+                    gender='Other',
+                    relationship='Self'
+                )
+                db.session.add(self_profile)
                 db.session.commit()
             
             # Determine missing fields
@@ -578,6 +615,18 @@ class FacebookAuthPost(Resource):
                     profile_image=picture or 'default.jpg'
                 )
                 db.session.add(user)
+                db.session.flush() # Flush for ID
+                
+                # Auto-create "Self" profile
+                self_profile = Profile(
+                    creator_id=user.id,
+                    first_name=user.first_name,
+                    last_name=user.last_name,
+                    date_of_birth=user.date_of_birth,
+                    gender='Other',
+                    relationship='Self'
+                )
+                db.session.add(self_profile)
                 db.session.commit()
             
             # Determine missing fields
