@@ -172,6 +172,16 @@ class Register(Resource):
     def post(self):
         """Register a new user"""
         data = request.json
+        
+        # Validate required fields
+        if not data:
+            return {'message': 'Request body is required'}, 400
+        
+        required_fields = ['email', 'password', 'first_name', 'last_name', 'date_of_birth', 'phone_number']
+        missing_fields = [field for field in required_fields if not data.get(field)]
+        
+        if missing_fields:
+            return {'message': f'Missing required fields: {", ".join(missing_fields)}'}, 400
 
         if User.query.filter_by(email=data['email']).first():
             return {'message': 'Email already registered'}, 409
@@ -247,9 +257,20 @@ class Login(Resource):
     def post(self):
         """Login and get access token"""
         data = request.json
-        user = User.query.filter_by(email=data['email']).first()
+        
+        # Validate required fields
+        if not data:
+            return {'message': 'Request body is required'}, 400
+        
+        email = data.get('email')
+        password = data.get('password')
+        
+        if not email or not password:
+            return {'message': 'Email and password are required'}, 400
+        
+        user = User.query.filter_by(email=email).first()
 
-        if not user or not user.check_password(data['password']):
+        if not user or not user.check_password(password):
             return {'message': 'Invalid email or password'}, 401
 
         if not user.is_active:
