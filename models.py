@@ -204,3 +204,33 @@ class ProfileShare(db.Model):
     profile = db.relationship('Profile', backref=db.backref('shares', lazy=True))
     shared_with = db.relationship('User', foreign_keys=[shared_with_user_id], backref=db.backref('received_shares', lazy=True))
 
+
+class AccessVerification(db.Model):
+    """
+    نظام التحقق من الوصول للبيانات الحساسة
+    يطلب تأكيد إضافي (OTP أو re-authentication) قبل الوصول للبيانات الطبية
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    resource_type = db.Column(db.String(50), nullable=False)  # 'profile', 'report', 'all_reports'
+    resource_id = db.Column(db.Integer, nullable=True)  # ID of the specific resource (profile_id, report_id, etc.)
+    
+    # OTP verification
+    verification_code = db.Column(db.String(6), nullable=True)  # 6-digit OTP
+    verification_code_expires = db.Column(db.DateTime, nullable=True)
+    verification_method = db.Column(db.String(20), default='otp')  # 'otp', 'password', 'webauthn'
+    
+    # Session tracking
+    session_token = db.Column(db.String(255), unique=True, nullable=False)  # Unique token for this access session
+    verified_at = db.Column(db.DateTime, nullable=True)  # When verification was completed
+    expires_at = db.Column(db.DateTime, nullable=False)  # When this verification session expires
+    
+    # Security tracking
+    ip_address = db.Column(db.String(45), nullable=True)  # IPv4 or IPv6
+    user_agent = db.Column(db.String(255), nullable=True)
+    verified = db.Column(db.Boolean, default=False)
+    
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    
+    # Relationship
+    user = db.relationship('User', backref=db.backref('access_verifications', lazy=True))

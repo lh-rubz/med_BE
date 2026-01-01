@@ -1,6 +1,6 @@
 from flask import request, url_for, redirect, current_app
 from flask_restx import Resource, Namespace, fields
-from flask_jwt_extended import create_access_token
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from datetime import datetime, timedelta, timezone
 import secrets
 import os
@@ -985,3 +985,108 @@ class ChangePassword(Resource):
                 
         except Exception as e:
             return {'message': 'Invalid request format', 'error': str(e)}, 400
+
+
+# Access Verification Models
+request_access_verification_model = auth_ns.model('RequestAccessVerification', {
+    'resource_type': fields.String(required=True, description='نوع المورد: profile, report, all_reports'),
+    'resource_id': fields.Integer(description='ID المورد (اختياري)'),
+    'method': fields.String(default='otp', description='طريقة التحقق: otp, password')
+})
+
+verify_access_code_model = auth_ns.model('VerifyAccessCode', {
+    'resource_type': fields.String(required=True, description='نوع المورد'),
+    'resource_id': fields.Integer(description='ID المورد (اختياري)'),
+    'code': fields.String(required=True, description='كود التحقق (6 أرقام)')
+})
+
+
+@auth_ns.route('/request-access-verification')
+class RequestAccessVerification(Resource):
+    """طلب التحقق من الوصول للبيانات الحساسة"""
+    @auth_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    @auth_ns.expect(request_access_verification_model)
+    def post(self):
+        """طلب كود تحقق للوصول للبيانات الطبية الحساسة"""
+        from utils.access_verification import create_access_verification, send_verification_otp
+        
+        current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return {'message': 'المستخدم غير موجود'}, 404
+        
+        data = request.json
+        resource_type = data.get('resource_type')  # 'profile', 'report', 'all_reports'
+        resource_id = data.get('resource_id')
+        method = data.get('method', 'otp')
+        
+        if resource_type not in ['profile', 'report', 'all_reports']:
+            return {'message': 'نوع المورد غير صحيح'}, 400
+        
+        try:
+            verification = create_access_verification(
+                current_user_id,
+                resource_type,
+                resource_id,
+                method=method
+            )
+            
+            if method == 'otp':
+                send_verification_otp(user, verification)
+                return {
+                    'message': 'تم إرسال كود التحقق إلى بريدك الإلكتروني',
+                    'verification_id': verification.id,
+                    'method': 'otp',
+                    'expires_in_minutes': 10
+                }, 200
+            else:
+                return {
+                    'message': 'طريقة التحقق غير مدعومة حالياً',
+                    'supported_methods': ['otp']
+                }, 400
+                
+        except Exception as e:
+            return {'message': 'فشل في إنشاء طلب التحقق', 'error': str(e)}, 500
+
+
+@auth_ns.route('/verify-access-code')
+class VerifyAccessCode(Resource):
+    """التحقق من كود الوصول والحصول على session token"""
+    @auth_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    @auth_ns.expect(verify_access_code_model)
+    def post(self):
+        """التحقق من كود OTP والحصول على session token للوصول"""
+        from utils.access_verification import verify_access_code
+        
+        current_user_id = int(get_jwt_identity())
+        data = request.json
+        
+        resource_type = data.get('resource_type')
+        resource_id = data.get('resource_id')
+        code = data.get('code')
+        
+        if not resource_type or not code:
+            return {'message': 'نوع المورد وكود التحقق مطلوبان'}, 400
+        
+        if not code.isdigit() or len(code) != 6:
+            return {'message': 'كود التحقق يجب أن يكون 6 أرقام'}, 400
+        
+        success, session_token, message = verify_access_code(
+            current_user_id,
+            code,
+            resource_type,
+            resource_id
+        )
+        
+        if success:
+            return {
+                'message': message,
+                'session_token': session_token,
+                'expires_in_minutes': 30,
+                'instructions': 'استخدم هذا الـ session token في header X-Access-Session-Token للوصول للبيانات'
+            }, 200
+        else:
+            return {'message': message}, 400

@@ -69,12 +69,19 @@ class ProfileList(Resource):
 
 @profile_ns.route('/<int:id>')
 class ProfileDetail(Resource):
-    @profile_ns.doc(security='Bearer Auth')
+    @profile_ns.doc(
+        security='Bearer Auth',
+        params={'X-Access-Session-Token': 'Session token from access verification (optional)'}
+    )
     @jwt_required()
     @profile_ns.marshal_with(profile_model)
     def get(self, id):
-        """Get a specific profile's details"""
+        """Get a specific profile's details (requires access verification for sensitive data)"""
+        from utils.access_verification import verify_session_token, check_access_permission, create_access_verification, send_verification_otp
+        from models import User
+        
         current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
         
         # Check if the user owns the profile
         profile = Profile.query.filter_by(id=id, creator_id=current_user_id).first()
@@ -88,6 +95,45 @@ class ProfileDetail(Resource):
 
         if not profile:
             return {'message': 'Profile not found or you do not have access'}, 404
+        
+        # التحقق من الوصول للبيانات الحساسة
+        session_token = request.headers.get('X-Access-Session-Token')
+        
+        if session_token:
+            has_access, verification = verify_session_token(
+                current_user_id,
+                session_token,
+                'profile',
+                id
+            )
+            if has_access:
+                return profile
+        
+        # لا يوجد session token صالح - التحقق من الحاجة للتحقق
+        has_access, needs_verification, _ = check_access_permission(
+            current_user_id,
+            'profile',
+            id,
+            require_verification=True
+        )
+        
+        if needs_verification:
+            # إنشاء طلب تحقق جديد
+            verification = create_access_verification(
+                current_user_id,
+                'profile',
+                id,
+                method='otp'
+            )
+            send_verification_otp(user, verification)
+            
+            return {
+                'message': 'يتطلب التحقق من الوصول للبيانات الحساسة',
+                'requires_verification': True,
+                'verification_id': verification.id,
+                'instructions': 'استخدم /auth/verify-access-code مع كود التحقق المرسل إلى بريدك'
+            }, 403
+        
         return profile
 
     @profile_ns.doc(security='Bearer Auth')
@@ -262,23 +308,69 @@ class SharedProfiles(Resource):
 
 @profile_ns.route('/<int:id>/reports')
 class ProfileReports(Resource):
-    @profile_ns.doc(security='Bearer Auth')
+    @profile_ns.doc(
+        security='Bearer Auth',
+        params={'X-Access-Session-Token': 'Session token from access verification (required for sensitive data)'}
+    )
     @jwt_required()
     def get(self, id):
-        """Get all reports for a specific profile (owned or shared)"""
+        """Get all reports for a specific profile (owned or shared) - requires access verification"""
+        from utils.access_verification import verify_session_token, check_access_permission, create_access_verification, send_verification_otp
+        from models import User, ProfileShare
+        
         current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
         
         # 1. Check Ownership
         profile = Profile.query.filter_by(id=id, creator_id=current_user_id).first()
         
         # 2. Check Shared Access if not owner
         if not profile:
-            from models import ProfileShare
             share = ProfileShare.query.filter_by(profile_id=id, shared_with_user_id=current_user_id).first()
             if share:
                 profile = Profile.query.get(id)
             else:
                 return {'message': 'Profile not found or unauthorized access'}, 404
+        
+        # التحقق من الوصول للبيانات الحساسة (التقارير الطبية)
+        session_token = request.headers.get('X-Access-Session-Token')
+        
+        if session_token:
+            has_access, verification = verify_session_token(
+                current_user_id,
+                session_token,
+                'profile',
+                id
+            )
+            if not has_access:
+                return {
+                    'message': 'Session token غير صالح أو منتهي الصلاحية',
+                    'requires_verification': True
+                }, 403
+        else:
+            # لا يوجد session token - التحقق من الحاجة للتحقق
+            has_access, needs_verification, _ = check_access_permission(
+                current_user_id,
+                'profile',
+                id,
+                require_verification=True
+            )
+            
+            if needs_verification:
+                verification = create_access_verification(
+                    current_user_id,
+                    'profile',
+                    id,
+                    method='otp'
+                )
+                send_verification_otp(user, verification)
+                
+                return {
+                    'message': 'يتطلب التحقق من الوصول للبيانات الطبية الحساسة',
+                    'requires_verification': True,
+                    'verification_id': verification.id,
+                    'instructions': 'استخدم /auth/verify-access-code مع كود التحقق المرسل إلى بريدك'
+                }, 403
         
         # Get all reports linked to this profile
         reports = Report.query.filter_by(

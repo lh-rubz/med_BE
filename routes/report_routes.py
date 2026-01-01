@@ -19,11 +19,17 @@ reports_ns = Namespace('reports', description='Medical reports management')
 class UserReports(Resource):
     @reports_ns.doc(
         security='Bearer Auth',
-        params={'profile_id': 'Optional: Filter reports by specific profile ID'}
+        params={
+            'profile_id': 'Optional: Filter reports by specific profile ID',
+            'X-Access-Session-Token': 'Session token from access verification (required for sensitive data)'
+        }
     )
     @jwt_required()
     def get(self):
-        """Get all extracted reports for the current user (optionally filtered by profile)"""
+        """Get all extracted reports for the current user (optionally filtered by profile) - requires access verification for sensitive data"""
+        from utils.access_verification import verify_session_token, check_access_permission, create_access_verification, send_verification_otp
+        from models import ProfileShare
+        
         current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
@@ -33,21 +39,65 @@ class UserReports(Resource):
         # Check for profile_id filter
         profile_id = request.args.get('profile_id')
         
-        # Build query
-        query = Report.query.filter_by(user_id=current_user_id)
-        
+        # إذا كان هناك profile_id، يلزم التحقق من الوصول
         if profile_id:
+            profile_id = int(profile_id)
+            
             # Verify user owns this profile or has shared access
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
             
             if not profile:
-                from models import ProfileShare
                 share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
                 if share:
                     profile = Profile.query.get(profile_id)
             
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
+            
+            # التحقق من الوصول للبيانات الحساسة
+            session_token = request.headers.get('X-Access-Session-Token')
+            
+            if session_token:
+                has_access, verification = verify_session_token(
+                    current_user_id,
+                    session_token,
+                    'profile',
+                    profile_id
+                )
+                if not has_access:
+                    return {
+                        'message': 'Session token غير صالح أو منتهي الصلاحية',
+                        'requires_verification': True
+                    }, 403
+            else:
+                # لا يوجد session token - التحقق من الحاجة للتحقق
+                has_access, needs_verification, _ = check_access_permission(
+                    current_user_id,
+                    'profile',
+                    profile_id,
+                    require_verification=True
+                )
+                
+                if needs_verification:
+                    verification = create_access_verification(
+                        current_user_id,
+                        'profile',
+                        profile_id,
+                        method='otp'
+                    )
+                    send_verification_otp(user, verification)
+                    
+                    return {
+                        'message': 'يتطلب التحقق من الوصول للبيانات الطبية الحساسة',
+                        'requires_verification': True,
+                        'verification_id': verification.id,
+                        'instructions': 'استخدم /auth/verify-access-code مع كود التحقق المرسل إلى بريدك'
+                    }, 403
+        
+        # Build query
+        query = Report.query.filter_by(user_id=current_user_id)
+        
+        if profile_id:
             query = query.filter_by(profile_id=profile_id)
         
         reports = query.order_by(Report.created_at.desc()).all()
