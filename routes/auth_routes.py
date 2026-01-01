@@ -1015,7 +1015,7 @@ class RequestAccessVerification(Resource):
         user = User.query.get(current_user_id)
         
         if not user:
-            return {'message': 'المستخدم غير موجود'}, 404
+            return {'message': 'User not found'}, 404
         
         data = request.json
         resource_type = data.get('resource_type')  # 'profile', 'report', 'all_reports'
@@ -1023,10 +1023,10 @@ class RequestAccessVerification(Resource):
         method = data.get('method', 'otp')
         
         if resource_type not in ['profile', 'report', 'all_reports']:
-            return {'message': 'نوع المورد غير صحيح'}, 400
+            return {'message': 'Invalid resource type'}, 400
         
         try:
-            verification = create_access_verification(
+            verification, is_new = create_access_verification(
                 current_user_id,
                 resource_type,
                 resource_id,
@@ -1034,21 +1034,23 @@ class RequestAccessVerification(Resource):
             )
             
             if method == 'otp':
-                send_verification_otp(user, verification)
+                # Only send email if it's a new verification request
+                if is_new:
+                    send_verification_otp(user, verification)
                 return {
-                    'message': 'تم إرسال كود التحقق إلى بريدك الإلكتروني',
+                    'message': 'Verification code sent to your email',
                     'verification_id': verification.id,
                     'method': 'otp',
                     'expires_in_minutes': 10
                 }, 200
             else:
                 return {
-                    'message': 'طريقة التحقق غير مدعومة حالياً',
+                    'message': 'Verification method not supported',
                     'supported_methods': ['otp']
                 }, 400
                 
         except Exception as e:
-            return {'message': 'فشل في إنشاء طلب التحقق', 'error': str(e)}, 500
+            return {'message': 'Failed to create verification request', 'error': str(e)}, 500
 
 
 @auth_ns.route('/verify-access-code')
@@ -1069,10 +1071,10 @@ class VerifyAccessCode(Resource):
         code = data.get('code')
         
         if not resource_type or not code:
-            return {'message': 'نوع المورد وكود التحقق مطلوبان'}, 400
+            return {'message': 'Resource type and verification code are required'}, 400
         
         if not code.isdigit() or len(code) != 6:
-            return {'message': 'كود التحقق يجب أن يكون 6 أرقام'}, 400
+            return {'message': 'Verification code must be 6 digits'}, 400
         
         success, session_token, message = verify_access_code(
             current_user_id,
@@ -1086,7 +1088,7 @@ class VerifyAccessCode(Resource):
                 'message': message,
                 'session_token': session_token,
                 'expires_in_minutes': 30,
-                'instructions': 'استخدم هذا الـ session token في header X-Access-Session-Token للوصول للبيانات'
+                'instructions': 'Use this session token in the X-Access-Session-Token header to access data'
             }, 200
         else:
             return {'message': message}, 400

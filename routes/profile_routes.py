@@ -118,20 +118,22 @@ class ProfileDetail(Resource):
         )
         
         if needs_verification:
-            # إنشاء طلب تحقق جديد
-            verification = create_access_verification(
+            # Create verification request (only sends email if new)
+            verification, is_new = create_access_verification(
                 current_user_id,
                 'profile',
                 id,
                 method='otp'
             )
-            send_verification_otp(user, verification)
+            # Only send email if it's a new verification request
+            if is_new:
+                send_verification_otp(user, verification)
             
             return {
-                'message': 'يتطلب التحقق من الوصول للبيانات الحساسة',
+                'message': 'Access verification required for sensitive data',
                 'requires_verification': True,
                 'verification_id': verification.id,
-                'instructions': 'استخدم /auth/verify-access-code مع كود التحقق المرسل إلى بريدك'
+                'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
             }, 403
         
         return profile
@@ -357,20 +359,22 @@ class ProfileReports(Resource):
             )
             
             if needs_verification:
-                verification = create_access_verification(
+                verification, is_new = create_access_verification(
                     current_user_id,
                     'profile',
                     id,
                     method='otp'
                 )
-                send_verification_otp(user, verification)
+                # Only send email if it's a new verification request
+                if is_new:
+                    send_verification_otp(user, verification)
                 
                 return {
-                    'message': 'يتطلب التحقق من الوصول للبيانات الطبية الحساسة',
+                    'message': 'Access verification required for sensitive medical data',
                     'requires_verification': True,
-                    'verification_id': verification.id,
-                    'instructions': 'استخدم /auth/verify-access-code مع كود التحقق المرسل إلى بريدك'
-                }, 403
+                        'verification_id': verification.id,
+                        'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
+                    }, 403
         
         # Get all reports linked to this profile
         reports = Report.query.filter_by(

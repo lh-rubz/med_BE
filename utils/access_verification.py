@@ -22,24 +22,44 @@ def generate_session_token():
 
 def create_access_verification(user_id, resource_type, resource_id=None, method='otp'):
     """
-    إنشاء طلب تحقق جديد للوصول للبيانات الحساسة
+    Create a new access verification request for sensitive data
     
     Args:
-        user_id: ID المستخدم
-        resource_type: نوع المورد ('profile', 'report', 'all_reports')
-        resource_id: ID المورد المحدد (اختياري)
-        method: طريقة التحقق ('otp', 'password', 'webauthn')
+        user_id: User ID
+        resource_type: Resource type ('profile', 'report', 'all_reports')
+        resource_id: Specific resource ID (optional)
+        method: Verification method ('otp', 'password', 'webauthn')
     
     Returns:
         AccessVerification object
     """
-    # حذف أي طلبات تحقق سابقة غير مكتملة لهذا المستخدم والمورد
+    # Check if there's an active (non-expired) verification request
+    existing = AccessVerification.query.filter_by(
+        user_id=user_id,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        verified=False
+    ).order_by(AccessVerification.created_at.desc()).first()
+    
+    # If exists and not expired, return it instead of creating a new one
+    if existing and existing.verification_code_expires:
+        code_expires = existing.verification_code_expires
+        if code_expires.tzinfo is None:
+            code_expires = code_expires.replace(tzinfo=timezone.utc)
+        
+        if datetime.now(timezone.utc) < code_expires:
+            # Active verification exists, return it (don't send new email)
+            # Return a tuple: (verification, is_new)
+            return existing, False
+    
+    # Delete any expired or old verification requests
     AccessVerification.query.filter_by(
         user_id=user_id,
         resource_type=resource_type,
         resource_id=resource_id,
         verified=False
-    ).delete()
+    ).delete(synchronize_session=False)
+    db.session.commit()
     
     verification = AccessVerification(
         user_id=user_id,
@@ -47,54 +67,55 @@ def create_access_verification(user_id, resource_type, resource_id=None, method=
         resource_id=resource_id,
         verification_method=method,
         session_token=generate_session_token(),
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),  # 30 دقيقة صلاحية
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),  # 30 minutes validity
         ip_address=request.remote_addr if request else None,
         user_agent=request.headers.get('User-Agent') if request else None
     )
     
     if method == 'otp':
         verification.verification_code = generate_otp()
-        verification.verification_code_expires = datetime.now(timezone.utc) + timedelta(minutes=10)  # OTP صالح لمدة 10 دقائق
+        verification.verification_code_expires = datetime.now(timezone.utc) + timedelta(minutes=10)  # OTP valid for 10 minutes
     
     db.session.add(verification)
     db.session.commit()
     
-    return verification
+    # Return tuple: (verification, is_new=True)
+    return verification, True
 
 
 def send_verification_otp(user, verification):
     """
-    إرسال OTP للمستخدم عبر البريد الإلكتروني
+    Send OTP to user via email
     
-    TODO: يمكن إضافة SMS في المستقبل
+    TODO: Can add SMS in the future
     """
     try:
         from flask import current_app
         from flask_mail import Message
         from config import send_brevo_email
         
-        # استخدام Brevo API لإرسال البريد
+        # Use Brevo API to send email
         html_content = f"""
-        <div dir="rtl" style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2>كود التحقق للوصول للبيانات الطبية</h2>
-            <p>مرحباً {user.first_name},</p>
-            <p>لقد طلبت الوصول للبيانات الطبية الحساسة. استخدم الكود التالي للتحقق:</p>
+        <div style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2>Medical Data Access Verification Code</h2>
+            <p>Hello {user.first_name},</p>
+            <p>You have requested access to sensitive medical data. Use the following code to verify:</p>
             <div style="background-color: #f0f0f0; padding: 15px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
                 {verification.verification_code}
             </div>
-            <p style="color: #666;">هذا الكود صالح لمدة 10 دقائق فقط.</p>
-            <p style="color: #666;">إذا لم تطلب هذا الكود، يرجى تجاهل هذه الرسالة.</p>
+            <p style="color: #666;">This code is valid for 10 minutes only.</p>
+            <p style="color: #666;">If you did not request this code, please ignore this message.</p>
         </div>
         """
         
         send_brevo_email(
             recipient_email=user.email,
-            subject='كود التحقق - MediScan',
+            subject='Verification Code - MediScan',
             html_content=html_content
         )
     except Exception as e:
         print(f"⚠️  Failed to send verification OTP email: {str(e)}")
-        # لا نرفع exception لأن النظام يجب أن يستمر حتى لو فشل إرسال البريد
+        # Don't raise exception so system continues even if email fails
 
 
 def verify_access_code(user_id, code, resource_type, resource_id=None):
@@ -112,10 +133,10 @@ def verify_access_code(user_id, code, resource_type, resource_id=None):
     ).order_by(AccessVerification.created_at.desc()).first()
     
     if not verification:
-        return False, None, "لم يتم العثور على طلب تحقق نشط"
+        return False, None, "No active verification request found"
     
-    # التحقق من انتهاء الصلاحية
-    # التأكد من أن verification_code_expires هو timezone-aware
+    # Check expiration
+    # Ensure verification_code_expires is timezone-aware
     code_expires = verification.verification_code_expires
     if code_expires and code_expires.tzinfo is None:
         code_expires = code_expires.replace(tzinfo=timezone.utc)
@@ -123,11 +144,11 @@ def verify_access_code(user_id, code, resource_type, resource_id=None):
     if datetime.now(timezone.utc) > code_expires:
         db.session.delete(verification)
         db.session.commit()
-        return False, None, "انتهت صلاحية كود التحقق. يرجى طلب كود جديد"
+        return False, None, "Verification code has expired. Please request a new code"
     
-    # التحقق من الكود
+    # Verify code
     if verification.verification_code != code:
-        return False, None, "كود التحقق غير صحيح"
+        return False, None, "Invalid verification code"
     
     # التحقق من IP (اختياري - يمكن تعطيله إذا كان المستخدم يستخدم VPN)
     # if verification.ip_address and verification.ip_address != request.remote_addr:
