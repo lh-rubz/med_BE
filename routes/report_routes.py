@@ -170,6 +170,7 @@ class UserReports(Resource):
                 'report_date': str(report.report_date),
                 'report_name': report.report_name,
                 'report_type': report.report_type,
+                'report_category': report.report_category or 'Lab Results', # Default if null
                 'doctor_names': report.doctor_names,
                 'patient_age': report.patient_age,
                 'patient_gender': report.patient_gender,
@@ -468,6 +469,7 @@ class UserReportDetail(Resource):
                 'report_date': str(report.report_date),
                 'report_name': report.report_name,
                 'report_type': report.report_type,
+                'report_category': report.report_category or 'Lab Results',
                 'patient_name': report.patient_name,
                 'doctor_names': report.doctor_names,
                 'patient_age': report.patient_age,

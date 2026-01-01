@@ -51,6 +51,7 @@ class Report(db.Model):
     report_hash = db.Column(db.String(255), nullable=False)
     report_name = db.Column(db.String(255)) # Specific title e.g. "Detailed Hemogram"
     report_type = db.Column(db.String(100)) # Standard category e.g. "Complete Blood Count (CBC)"
+    report_category = db.Column(db.String(50), default='Lab Results') # High-level category: Lab Results, Imaging, Prescriptions, etc.
     patient_name = db.Column(db.String(255)) # Extracted patient name
     patient_age = db.Column(db.String(50))    # e.g. "45 years", "2 months"
     patient_gender = db.Column(db.String(20)) # e.g. "Male", "Female"

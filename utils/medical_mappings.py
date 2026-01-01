@@ -124,3 +124,47 @@ def add_new_alias(synonym, standard_name):
         print(f"Failed to add alias: {e}")
         db.session.rollback()
     return False
+
+
+def categorize_report_type(report_type_str):
+    """
+    Categorize a report type into one of the standard categories:
+    - Lab Results
+    - Prescriptions
+    - Imaging
+    - Cardiology
+    - Neurology
+    - Orthopedic
+    - Other
+    """
+    if not report_type_str:
+        return 'Lab Results' # Default
+        
+    text = report_type_str.lower()
+    
+    # 1. Imaging (Radiology)
+    if any(x in text for x in ['x-ray', 'xray', 'mri', 'ct scan', 'ultrasound', 'sonography', 'radiology', 'imaging', 'mammogram', 'pet scan']):
+        return 'Imaging'
+        
+    # 2. Prescriptions
+    if any(x in text for x in ['prescription', 'rx', 'medication', 'pharmacy', 'drug list']):
+        return 'Prescriptions'
+        
+    # 3. Cardiology
+    if any(x in text for x in ['ecg', 'ekg', 'echo', 'cardio', 'heart', 'holter', 'stress test', 'troponin']):
+        return 'Cardiology'
+        
+    # 4. Neurology
+    if any(x in text for x in ['eeg', 'neuro', 'brain', 'nerve', 'emg']):
+        return 'Neurology'
+        
+    # 5. Orthopedic
+    if any(x in text for x in ['bone', 'fracture', 'ortho', 'joint', 'spine', 'dexa']):
+        return 'Orthopedic'
+        
+    # 6. Lab Results (Pathology/Blood work) - Catch all for blood tests
+    if any(x in text for x in ['blood', 'urine', 'stool', 'pathology', 'lab', 'hematology', 'biochemistry', 'microbiology', 'culture', 'panel', 'profile', 'test', 'analysis', 'cbc', 'liver', 'kidney', 'thyroid', 'lipid']):
+        return 'Lab Results'
+        
+    # Default fallback
+    return 'Lab Results'

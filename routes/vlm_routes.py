@@ -572,6 +572,10 @@ Return ONLY valid JSON:
                 except:
                     print(f"⚠️ Could not parse report date: {extracted_date}, using now()")
 
+            # Categorize report
+            from utils.medical_mappings import categorize_report_type
+            report_category = categorize_report_type(final_data.get('report_type'))
+
             new_report = Report(
                 user_id=current_user_id,
                 profile_id=profile_id,
@@ -579,6 +583,7 @@ Return ONLY valid JSON:
                 report_hash=report_hash,
                 report_name=final_data.get('report_name'),
                 report_type=final_data.get('report_type'),
+                report_category=report_category,
                 patient_name=final_data.get('patient_name'),
                 patient_age=final_data.get('patient_age'),
                 patient_gender=final_data.get('patient_gender'),
