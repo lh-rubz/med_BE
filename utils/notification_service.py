@@ -4,7 +4,8 @@ from flask import current_app
 import os
 from config import send_brevo_email, Config
 from email_templates import get_profile_shared_email, get_report_uploaded_email
-from models import UserDevice, User
+from models import UserDevice, User, Notification, db
+from datetime import datetime, timezone
 
 # Initialize Firebase Admin SDK
 def initialize_firebase():
@@ -69,6 +70,25 @@ def send_push_notification(user_id, title, body, data=None):
         print(f"❌ Error sending push notification: {str(e)}")
         return False
 
+def save_notification(user_id, title, message, notification_type, data=None):
+    """
+    Save notification to database for history
+    """
+    try:
+        notification = Notification(
+            user_id=user_id,
+            title=title,
+            message=message,
+            notification_type=notification_type,
+            data=data
+        )
+        db.session.add(notification)
+        db.session.commit()
+        return True
+    except Exception as e:
+        print(f"❌ Failed to save notification to DB: {str(e)}")
+        return False
+
 def notify_profile_share(sharer_name, profile_name, recipient_id, profile_id):
     """
     Notify user when a profile is shared with them
@@ -85,6 +105,10 @@ def notify_profile_share(sharer_name, profile_name, recipient_id, profile_id):
         "profile_id": str(profile_id),
         "click_action": "FLUTTER_NOTIFICATION_CLICK"
     }
+    
+    # Save to DB first
+    save_notification(recipient_id, title, body, "profile_share", {"profile_id": profile_id})
+    
     send_push_notification(recipient_id, title, body, data)
 
     # 2. Send Email
@@ -110,6 +134,10 @@ def notify_report_upload(uploader_name, profile_name, report_name, recipient_ids
             "report_id": str(report_id),
             "click_action": "FLUTTER_NOTIFICATION_CLICK"
         }
+        
+        # Save to DB
+        save_notification(recipient_id, title, body, "report_upload", {"profile_id": profile_id, "report_id": report_id})
+        
         send_push_notification(recipient_id, title, body, data)
 
         # 2. Send Email (Only if recipient is elderly > 60 years old, or explicitly requested)

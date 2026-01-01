@@ -236,6 +236,22 @@ class AccessVerification(db.Model):
     user = db.relationship('User', backref=db.backref('access_verifications', lazy=True))
 
 
+class Notification(db.Model):
+    """
+    Stores in-app notification history for users.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    title = db.Column(db.String(255), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    notification_type = db.Column(db.String(50), nullable=False) # report_upload, profile_share
+    is_read = db.Column(db.Boolean, default=False)
+    data = db.Column(db.JSON, nullable=True) # Store extra data like profile_id, report_id
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = db.relationship('User', backref=db.backref('notifications', lazy=True, cascade='all, delete-orphan'))
+
+
 class UserDevice(db.Model):
     """
     Stores FCM tokens for user devices to send push notifications.

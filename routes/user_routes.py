@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from flask_restx import Resource, Namespace, fields
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
-from models import db, User, Report, ReportField, AdditionalField, ReportFile, UserDevice
+from models import db, User, Report, ReportField, AdditionalField, ReportFile, UserDevice, Notification
 from config import send_brevo_email, Config
 from email_templates import get_test_email
 import os
@@ -384,3 +384,42 @@ class TestEmail(Resource):
                 'message': 'Failed to send email',
                 'error': str(e)
             }, 500
+
+
+notification_model = user_ns.model('Notification', {
+    'id': fields.Integer(description='Notification ID'),
+    'title': fields.String(description='Notification Title'),
+    'message': fields.String(description='Notification Message'),
+    'type': fields.String(attribute='notification_type', description='Notification Type'),
+    'is_read': fields.Boolean(description='Is Read Status'),
+    'created_at': fields.String(description='Creation Date'),
+    'data': fields.Raw(description='Additional Data')
+})
+
+@user_ns.route('/notifications')
+class NotificationList(Resource):
+    @user_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    @user_ns.marshal_list_with(notification_model)
+    def get(self):
+        """Fetch a list of all historical notifications for the authenticated user"""
+        current_user_id = int(get_jwt_identity())
+        notifications = Notification.query.filter_by(user_id=current_user_id).order_by(Notification.created_at.desc()).all()
+        return notifications
+
+@user_ns.route('/notifications/<int:id>/read')
+class NotificationRead(Resource):
+    @user_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    def post(self, id):
+        """Mark a specific notification as read"""
+        current_user_id = int(get_jwt_identity())
+        notification = Notification.query.filter_by(id=id, user_id=current_user_id).first()
+        
+        if not notification:
+            return {'message': 'Notification not found'}, 404
+            
+        notification.is_read = True
+        db.session.commit()
+        
+        return {'message': 'Notification marked as read'}, 200
