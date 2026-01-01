@@ -234,3 +234,17 @@ class AccessVerification(db.Model):
     
     # Relationship
     user = db.relationship('User', backref=db.backref('access_verifications', lazy=True))
+
+
+class UserDevice(db.Model):
+    """
+    Stores FCM tokens for user devices to send push notifications.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    fcm_token = db.Column(db.String(512), nullable=False) # Firebase Cloud Messaging Token
+    device_type = db.Column(db.String(50), nullable=True) # android, ios, web
+    last_active = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = db.relationship('User', backref=db.backref('devices', lazy=True, cascade='all, delete-orphan'))

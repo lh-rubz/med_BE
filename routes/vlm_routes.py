@@ -634,6 +634,36 @@ Return ONLY valid JSON:
             
             db.session.commit()
             
+            # Send Notifications
+            try:
+                from utils.notification_service import notify_report_upload
+                from models import ProfileShare, Profile
+                
+                # Get profile details
+                profile = Profile.query.get(profile_id)
+                if profile:
+                    recipients = set()
+                    
+                    # Add owner if not current user
+                    if profile.creator_id != current_user_id:
+                        recipients.add(profile.creator_id)
+                        
+                    # Add shared users
+                    shares = ProfileShare.query.filter_by(profile_id=profile_id).all()
+                    for share in shares:
+                        if share.shared_with_user_id != current_user_id:
+                            recipients.add(share.shared_with_user_id)
+                    
+                    if recipients:
+                        uploader = User.query.get(current_user_id)
+                        uploader_name = f"{uploader.first_name} {uploader.last_name or ''}".strip()
+                        profile_name = f"{profile.first_name} {profile.last_name or ''}".strip()
+                        report_name = new_report.report_name or "Medical Report"
+                        
+                        notify_report_upload(uploader_name, profile_name, report_name, list(recipients), profile_id, new_report.id)
+            except Exception as e:
+                print(f"Notification failed: {e}")
+            
             # Final Success Payload - Keep it small efficiently
             success_payload = {
                 'percent': 100, 

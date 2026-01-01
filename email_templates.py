@@ -385,3 +385,120 @@ def get_test_email(body):
     </body>
     </html>
     """
+
+
+def get_profile_shared_email(sharer_name, profile_name, recipient_name):
+    """Email notification when a profile is shared"""
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            @media only screen and (max-width: 600px) {{
+                .content {{ padding: 24px 20px !important; }}
+                .header {{ padding: 24px 20px !important; }}
+                .footer {{ padding: 20px !important; }}
+                h1 {{ font-size: 24px !important; }}
+                h2 {{ font-size: 20px !important; }}
+            }}
+        </style>
+    </head>
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f9fafb; padding: 20px 0;">
+            <tr>
+                <td align="center">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #ffffff; max-width: 600px;">
+                        <tr>
+                            <td class="header" style="background-color: #60a5fa; padding: 32px 40px; text-align: center;">
+                                <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 600; letter-spacing: -0.5px;">MediScan</h1>
+                                <p style="margin: 8px 0 0 0; color: #ffffff; font-size: 14px; opacity: 0.9;">Where Health Meets Technology</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="content" style="padding: 40px;">
+                                <h2 style="margin: 0 0 16px 0; color: #111827; font-size: 24px; font-weight: 600;">Hello, {{recipient_name}}!</h2>
+                                <p style="margin: 0 0 24px 0; color: #4b5563; font-size: 16px; line-height: 1.6;">
+                                    <strong>{{sharer_name}}</strong> has shared a medical profile with you: <strong>{{profile_name}}</strong>.
+                                </p>
+                                <p style="margin: 0 0 24px 0; color: #4b5563; font-size: 16px; line-height: 1.6;">
+                                    You can now view the medical records and reports associated with this profile in your MediScan app.
+                                </p>
+                                <div style="text-align: center; margin: 32px 0;">
+                                    <a href="#" style="background-color: #60a5fa; color: #ffffff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; display: inline-block;">View Profile</a>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="footer" style="background-color: #f9fafb; padding: 24px 40px; text-align: center; border-top: 1px solid #e5e7eb;">
+                                <p style="margin: 0 0 4px 0; color: #6b7280; font-size: 14px;">MediScan Team</p>
+                                <p style="margin: 0; color: #9ca3af; font-size: 12px;">&copy; 2025 MediScan. All rights reserved.</p>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+
+
+def get_report_uploaded_email(uploader_name, profile_name, report_name, recipient_name):
+    """Email notification when a new report is uploaded"""
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            @media only screen and (max-width: 600px) {{
+                .content {{ padding: 24px 20px !important; }}
+                .header {{ padding: 24px 20px !important; }}
+                .footer {{ padding: 20px !important; }}
+                h1 {{ font-size: 24px !important; }}
+                h2 {{ font-size: 20px !important; }}
+            }}
+        </style>
+    </head>
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f9fafb; padding: 20px 0;">
+            <tr>
+                <td align="center">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #ffffff; max-width: 600px;">
+                        <tr>
+                            <td class="header" style="background-color: #60a5fa; padding: 32px 40px; text-align: center;">
+                                <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 600; letter-spacing: -0.5px;">MediScan</h1>
+                                <p style="margin: 8px 0 0 0; color: #ffffff; font-size: 14px; opacity: 0.9;">Where Health Meets Technology</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="content" style="padding: 40px;">
+                                <h2 style="margin: 0 0 16px 0; color: #111827; font-size: 24px; font-weight: 600;">Hello, {{recipient_name}}!</h2>
+                                <p style="margin: 0 0 24px 0; color: #4b5563; font-size: 16px; line-height: 1.6;">
+                                    A new medical report has been added to the profile <strong>{{profile_name}}</strong>.
+                                </p>
+                                <p style="margin: 0 0 24px 0; color: #4b5563; font-size: 16px; line-height: 1.6;">
+                                    <strong>Report:</strong> {{report_name}}<br>
+                                    <strong>Uploaded by:</strong> {{uploader_name}}
+                                </p>
+                                <div style="text-align: center; margin: 32px 0;">
+                                    <a href="#" style="background-color: #60a5fa; color: #ffffff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; display: inline-block;">View Report</a>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="footer" style="background-color: #f9fafb; padding: 24px 40px; text-align: center; border-top: 1px solid #e5e7eb;">
+                                <p style="margin: 0 0 4px 0; color: #6b7280; font-size: 14px;">MediScan Team</p>
+                                <p style="margin: 0; color: #9ca3af; font-size: 12px;">&copy; 2025 MediScan. All rights reserved.</p>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """

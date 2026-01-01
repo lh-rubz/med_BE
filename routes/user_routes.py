@@ -1,10 +1,10 @@
 from flask import request
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from flask_restx import Resource, Namespace, fields
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
-from models import db, User, Report, ReportField, AdditionalField, ReportFile
+from models import db, User, Report, ReportField, AdditionalField, ReportFile, UserDevice
 from config import send_brevo_email, Config
 from email_templates import get_test_email
 import os
@@ -32,6 +32,49 @@ test_email_model = user_ns.model('TestEmail', {
     'body': fields.String(required=True, description='Email body/message'),
     'admin_password': fields.String(required=True, description='Admin password (testingAdmin)')
 })
+
+token_model = user_ns.model('RegisterToken', {
+    'fcm_token': fields.String(required=True, description='Firebase Cloud Messaging Token'),
+    'device_type': fields.String(description='Device type (android, ios, web)')
+})
+
+
+@user_ns.route('/register-token')
+class RegisterToken(Resource):
+    @user_ns.doc(security='Bearer Auth')
+    @user_ns.expect(token_model)
+    @jwt_required()
+    def post(self):
+        """Register FCM token for push notifications"""
+        current_user_id = int(get_jwt_identity())
+        data = request.get_json()
+        
+        fcm_token = data.get('fcm_token')
+        device_type = data.get('device_type', 'unknown')
+        
+        if not fcm_token:
+            return {'message': 'Token is required'}, 400
+            
+        # Check if token already exists
+        existing_device = UserDevice.query.filter_by(fcm_token=fcm_token).first()
+        
+        if existing_device:
+            # Update user_id if changed (e.g. logout/login with different user)
+            existing_device.user_id = current_user_id
+            existing_device.last_active = datetime.now(timezone.utc)
+            existing_device.device_type = device_type
+        else:
+            # Create new device
+            new_device = UserDevice(
+                user_id=current_user_id,
+                fcm_token=fcm_token,
+                device_type=device_type
+            )
+            db.session.add(new_device)
+            
+        db.session.commit()
+        
+        return {'message': 'Token registered successfully'}, 200
 
 
 

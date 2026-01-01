@@ -231,6 +231,17 @@ class ProfileShare(Resource):
             msg = "Access granted"
             
         db.session.commit()
+
+        # Send Notification
+        try:
+            from utils.notification_service import notify_profile_share
+            sharer = User.query.get(current_user_id)
+            sharer_name = f"{sharer.first_name} {sharer.last_name or ''}".strip()
+            profile_name = f"{profile.first_name} {profile.last_name or ''}".strip()
+            notify_profile_share(sharer_name, profile_name, target_user.id, profile.id)
+        except Exception as e:
+            print(f"Notification failed: {e}")
+
         return {'message': msg}
 
 

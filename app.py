@@ -17,6 +17,7 @@ from routes.connection_routes import connection_ns
 from routes.auth_routes import oauth
 from routes.webauthn_routes import webauthn_ns
 from utils.medical_mappings import seed_synonyms
+from utils.notification_service import initialize_firebase
 
 # Create Flask app
 app = Flask(__name__)
@@ -152,6 +153,9 @@ def init_db():
 if __name__ == '__main__':
     # Print environment variables
     print_env_vars()
+
+    # Initialize Firebase
+    initialize_firebase()
 
     # Initialize the database
     init_db()
