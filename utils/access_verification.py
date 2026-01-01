@@ -115,7 +115,12 @@ def verify_access_code(user_id, code, resource_type, resource_id=None):
         return False, None, "لم يتم العثور على طلب تحقق نشط"
     
     # التحقق من انتهاء الصلاحية
-    if datetime.now(timezone.utc) > verification.verification_code_expires:
+    # التأكد من أن verification_code_expires هو timezone-aware
+    code_expires = verification.verification_code_expires
+    if code_expires and code_expires.tzinfo is None:
+        code_expires = code_expires.replace(tzinfo=timezone.utc)
+    
+    if datetime.now(timezone.utc) > code_expires:
         db.session.delete(verification)
         db.session.commit()
         return False, None, "انتهت صلاحية كود التحقق. يرجى طلب كود جديد"
@@ -155,7 +160,12 @@ def verify_session_token(user_id, session_token, resource_type, resource_id=None
         return False, None
     
     # التحقق من انتهاء الصلاحية
-    if datetime.now(timezone.utc) > verification.expires_at:
+    # التأكد من أن expires_at هو timezone-aware
+    expires = verification.expires_at
+    if expires and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    
+    if datetime.now(timezone.utc) > expires:
         db.session.delete(verification)
         db.session.commit()
         return False, None
@@ -182,8 +192,14 @@ def check_access_permission(user_id, resource_type, resource_id=None, require_ve
         verified=True
     ).order_by(AccessVerification.verified_at.desc()).first()
     
-    if verification and datetime.now(timezone.utc) <= verification.expires_at:
-        return True, False, verification.session_token
+    if verification:
+        # التأكد من أن expires_at هو timezone-aware
+        expires = verification.expires_at
+        if expires and expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        
+        if datetime.now(timezone.utc) <= expires:
+            return True, False, verification.session_token
     
     # لا يوجد تحقق نشط - يحتاج لتحقق جديد
     return False, True, None
@@ -192,10 +208,27 @@ def check_access_permission(user_id, resource_type, resource_id=None, require_ve
 def cleanup_expired_verifications():
     """حذف طلبات التحقق المنتهية الصلاحية"""
     now = datetime.now(timezone.utc)
-    expired = AccessVerification.query.filter(
-        (AccessVerification.expires_at < now) | 
-        ((AccessVerification.verified == False) & (AccessVerification.verification_code_expires < now))
-    ).all()
+    # جلب جميع السجلات ثم فلترتها يدوياً لتجنب مشاكل timezone
+    all_verifications = AccessVerification.query.all()
+    expired = []
+    
+    for v in all_verifications:
+        # التحقق من expires_at
+        if v.expires_at:
+            expires = v.expires_at
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            if expires < now:
+                expired.append(v)
+                continue
+        
+        # التحقق من verification_code_expires للطلبات غير المكتملة
+        if not v.verified and v.verification_code_expires:
+            code_expires = v.verification_code_expires
+            if code_expires.tzinfo is None:
+                code_expires = code_expires.replace(tzinfo=timezone.utc)
+            if code_expires < now:
+                expired.append(v)
     
     for v in expired:
         db.session.delete(v)
