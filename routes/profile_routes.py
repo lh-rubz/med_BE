@@ -203,22 +203,33 @@ class ProfileDetail(Resource):
     @profile_ns.doc(security='Bearer Auth')
     @jwt_required()
     def delete(self, id):
-        """Delete a managed profile (and unlink its reports)"""
+        """Delete a managed profile or remove a shared profile"""
         current_user_id = int(get_jwt_identity())
+        
+        # 1. Try to find as Owned Profile
         profile = Profile.query.filter_by(id=id, creator_id=current_user_id).first()
         
-        if not profile:
-            return {'message': 'Profile not found'}, 404
-            
-        if profile.relationship == 'Self':
-            return {'message': 'Cannot delete your own primary profile'}, 400
+        if profile:
+            if profile.relationship == 'Self':
+                return {'message': 'Cannot delete your own primary profile'}, 400
 
-        # Unlink reports before deleting
-        Report.query.filter_by(profile_id=profile.id).update({Report.profile_id: None})
+            # Unlink reports before deleting
+            Report.query.filter_by(profile_id=profile.id).update({Report.profile_id: None})
+            
+            db.session.delete(profile)
+            db.session.commit()
+            return {'message': 'Profile deleted successfully'}
+            
+        # 2. Try to find as Shared Profile (Remove Access)
+        from models import ProfileShare as ProfileShareModel
+        share = ProfileShareModel.query.filter_by(profile_id=id, shared_with_user_id=current_user_id).first()
         
-        db.session.delete(profile)
-        db.session.commit()
-        return {'message': 'Profile deleted successfully'}
+        if share:
+            db.session.delete(share)
+            db.session.commit()
+            return {'message': 'Shared profile removed from your list'}
+            
+        return {'message': 'Profile not found or you do not have permission'}, 404
 
 
 @profile_ns.route('/<int:id>/share')
