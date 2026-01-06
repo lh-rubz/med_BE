@@ -36,27 +36,7 @@ class ProfileList(Resource):
         # Combine and remove duplicates
         all_profiles = {profile.id: profile for profile in owned_profiles + shared_profiles}.values()
         
-        results = []
-        for p in all_profiles:
-            # Create a dictionary representation to safely modify contextual fields without affecting DB object
-            p_dict = {
-                'id': p.id,
-                'first_name': p.first_name,
-                'last_name': p.last_name,
-                'date_of_birth': p.date_of_birth, # Marshal handles date objects
-                'gender': p.gender,
-                'relationship': p.relationship,
-                'created_at': p.created_at
-            }
-            
-            # Contextual relationship label
-            if p.creator_id != current_user_id:
-                if p.relationship == 'Self':
-                    p_dict['relationship'] = 'Owner'
-        
-            results.append(p_dict)
-        
-        return results
+        return list(all_profiles)
 
     @profile_ns.doc(security='Bearer Auth')
     @jwt_required()
