@@ -96,10 +96,25 @@ class UserReports(Resource):
                         'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
                     }, 403
         
-        # Build query
-        query = Report.query.filter_by(user_id=current_user_id)
-        
+        # Determine report owner
+        report_owner_id = current_user_id
+        should_filter_by_profile_id = True
+
         if profile_id:
+            # Profile object is already fetched in the validation block above
+            if profile.linked_user_id:
+                # Linked Profile: Use the linked user's ID as owner
+                report_owner_id = profile.linked_user_id
+                # Don't filter by this profile_id (it's a local proxy ID, not existing in remote user's DB)
+                should_filter_by_profile_id = False
+            elif profile.creator_id != current_user_id:
+                # Shared Profile: Use the creator's ID as owner
+                report_owner_id = profile.creator_id
+        
+        # Build query
+        query = Report.query.filter_by(user_id=report_owner_id)
+        
+        if profile_id and should_filter_by_profile_id:
             query = query.filter_by(profile_id=profile_id)
         
         reports = query.order_by(Report.created_at.desc()).all()
