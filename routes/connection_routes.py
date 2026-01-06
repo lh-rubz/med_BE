@@ -19,7 +19,8 @@ connection_model = connection_ns.model('Connection', {
 request_model = connection_ns.model('ConnectionRequest', {
     'receiver_email': fields.String(required=True, description='Email of the person you want access to'),
     'relationship': fields.String(required=True, description='Your relationship to them (e.g., Son, Caretaker)'),
-    'access_level': fields.String(default='view', description='view or manage')
+    'access_level': fields.String(default='view', description='view or manage'),
+    'profile_id': fields.Integer(description='Optional: ID of specific profile to share')
 })
 
 @connection_ns.route('/request')
@@ -53,6 +54,7 @@ class ConnectionRequest(Resource):
             receiver_id=receiver.id,
             relationship=data['relationship'],
             access_level=data.get('access_level', 'view'),
+            profile_id=data.get('profile_id'),
             status='pending'
         )
         

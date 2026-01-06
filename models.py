@@ -178,6 +178,11 @@ class Profile(db.Model):
     # Prevent circular reference issues by using explicit backref names if needed
     linked_user = db.relationship('User', foreign_keys=[linked_user_id], backref='linked_profiles', lazy=True)
 
+    # Add cascade delete to shares
+    # defined in ProfileShare.profile backref, but can be explicit here if needed.
+    # The backref in ProfileShare is: db.relationship('Profile', backref=db.backref('shares', lazy=True))
+    # We should update that instead to include cascade.
+
 
 class FamilyConnection(db.Model):
     """Links between two existing user accounts (e.g., Mother <-> Elderly Father)"""
@@ -188,6 +193,9 @@ class FamilyConnection(db.Model):
     relationship = db.Column(db.String(50), nullable=False) # Relationship of receiver to requester
     status = db.Column(db.String(20), default='pending') # pending, accepted, rejected
     access_level = db.Column(db.String(20), default='view') # view, manage (can upload)
+    
+    # NEW: Optional link to a specific profile being shared
+    profile_id = db.Column(db.Integer, db.ForeignKey('profile.id'), nullable=True)
     
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, onupdate=lambda: datetime.now(timezone.utc))
@@ -206,7 +214,7 @@ class ProfileShare(db.Model):
     
     # Relationships
     # Note: We use overlaps to avoid conflicts if multiple relationships point to the same table
-    profile = db.relationship('Profile', backref=db.backref('shares', lazy=True))
+    profile = db.relationship('Profile', backref=db.backref('shares', lazy=True, cascade='all, delete-orphan'))
     shared_with = db.relationship('User', foreign_keys=[shared_with_user_id], backref=db.backref('received_shares', lazy=True))
 
 
