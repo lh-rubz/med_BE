@@ -32,29 +32,59 @@ class ConnectionRequest(Resource):
         """Send a connection request to another user"""
         current_user_id = int(get_jwt_identity())
         data = request.json
+        print(f"DEBUG: Connection request received from {current_user_id} with data: {data}")
         
         receiver = User.query.filter_by(email=data['receiver_email']).first()
         if not receiver:
+            print(f"DEBUG: Receiver email {data['receiver_email']} not found")
             return {'message': 'User with this email not found'}, 404
             
         if receiver.id == current_user_id:
             return {'message': 'Cannot connect to yourself'}, 400
 
+        # Validate profile_id if provided
+        profile_id = data.get('profile_id')
+        if profile_id:
+            profile = Profile.query.get(profile_id)
+            if not profile:
+                 return {'message': f'Profile with ID {profile_id} not found'}, 404
+            # Optionally check ownership?
+            if profile.creator_id != current_user_id:
+                print(f"DEBUG: User {current_user_id} does not own profile {profile_id}")
+                # return {'message': 'You can only share profiles you own'}, 403 # Optional enforcement
+
         # Check for existing connection
-        existing = FamilyConnection.query.filter_by(
+        # If profile_id is provided, check if we already have a connection for this specific profile
+        # If not provided, check if we have a generic connection
+        query = FamilyConnection.query.filter_by(
             requester_id=current_user_id, 
             receiver_id=receiver.id
-        ).first()
+        )
         
-        if existing:
-            return {'message': f'Connection already exists with status: {existing.status}'}, 400
+        if profile_id:
+            # Check if this specific profile is already shared/requested
+            existing = query.filter_by(profile_id=profile_id).first()
+            if existing:
+                msg = f'Connection request for this profile already exists with status: {existing.status}'
+                print(f"DEBUG: {msg}")
+                return {'message': msg}, 400
+        else:
+            # Check if a general connection already exists
+            # Note: This might overlap if we want to allow general + specific connections. 
+            # For now, let's just check for exact match of "no profile" or "any connection"? 
+            # Let's keep strict check to avoid spam.
+            existing = query.first()
+            if existing and not existing.profile_id:
+                 msg = f'General connection already exists with status: {existing.status}'
+                 print(f"DEBUG: {msg}")
+                 return {'message': msg}, 400
 
         new_conn = FamilyConnection(
             requester_id=current_user_id,
             receiver_id=receiver.id,
             relationship=data['relationship'],
             access_level=data.get('access_level', 'view'),
-            profile_id=data.get('profile_id'),
+            profile_id=profile_id,
             status='pending'
         )
         
