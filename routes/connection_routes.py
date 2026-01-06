@@ -1,8 +1,9 @@
 from flask import request
 from flask_restx import Resource, Namespace, fields
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from models import db, User, FamilyConnection, Profile
+from models import db, User, FamilyConnection, Profile, Notification, ProfileShare
 from datetime import datetime
+import json
 
 connection_ns = Namespace('connections', description='Family Connection operations')
 
@@ -89,6 +90,24 @@ class ConnectionRequest(Resource):
         )
         
         db.session.add(new_conn)
+
+        # Notify Receiver
+        try:
+            requester = User.query.get(current_user_id)
+            requester_name = f"{requester.first_name} {requester.last_name or ''}".strip()
+            msg = f"{requester_name} sent you a connection request."
+            
+            notification = Notification(
+                user_id=receiver.id,
+                title='New Connection Request',
+                message=msg,
+                notification_type='connection_request',
+                data=json.dumps({'connection_id': new_conn.id, 'requester_id': requester.id})
+            )
+            db.session.add(notification)
+        except Exception as e:
+            print(f"Error sending notification: {e}")
+
         db.session.commit()
         
         # In a real app, send email notification here
@@ -113,16 +132,35 @@ class ConnectionRespond(Resource):
             
         if action == 'accept':
             conn.status = 'accepted'
-            # Automatically create a Profile entry for the linked user in the requester's account
-            # This makes it easy to filter reports by "Father"
-            new_profile = Profile(
-                creator_id=conn.requester_id,
-                linked_user_id=conn.receiver_id,
-                first_name=conn.receiver.first_name,
-                last_name=conn.receiver.last_name,
-                relationship=conn.relationship
-            )
-            db.session.add(new_profile)
+            
+            # Scenario 1: Specific Profile Share
+            if conn.profile_id:
+                # Create ProfileShare record so it shows up in shared_profiles list
+                existing_share = ProfileShare.query.filter_by(
+                    profile_id=conn.profile_id,
+                    shared_with_user_id=conn.receiver_id
+                ).first()
+                
+                if not existing_share:
+                    new_share = ProfileShare(
+                        profile_id=conn.profile_id,
+                        shared_with_user_id=conn.receiver_id,
+                        access_level=conn.access_level
+                    )
+                    db.session.add(new_share)
+                    
+            # Scenario 2: Generic User Link (Old "Family Member" logic)
+            else:
+                # Automatically create a Profile entry for the linked user in the requester's account
+                # This makes it easy to filter reports by "Father"
+                new_profile = Profile(
+                    creator_id=conn.requester_id,
+                    linked_user_id=conn.receiver_id,
+                    first_name=conn.receiver.first_name,
+                    last_name=conn.receiver.last_name,
+                    relationship=conn.relationship
+                )
+                db.session.add(new_profile)
         else:
             conn.status = 'rejected'
             
