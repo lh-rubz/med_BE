@@ -36,7 +36,30 @@ class ProfileList(Resource):
         # Combine and remove duplicates
         all_profiles = {profile.id: profile for profile in owned_profiles + shared_profiles}.values()
         
-        return list(all_profiles)
+        # Contextualize Relationship Labels
+        results = []
+        for p in all_profiles:
+            # We must convert to dict to modify the relationship field for the response
+            # without modifying the database object
+            p_dict = {
+                'id': p.id,
+                'first_name': p.first_name,
+                'last_name': p.last_name,
+                'date_of_birth': p.date_of_birth,
+                'gender': p.gender,
+                'relationship': p.relationship,
+                'created_at': p.created_at
+            }
+            
+            # If the profile is shared (not owned by current user) AND is marked as 'Self' (meaning it is the owner's profile)
+            # We change the label to 'Account Owner' to avoid confusion in the UI
+            if p.creator_id != current_user_id:
+                if p.relationship == 'Self':
+                    p_dict['relationship'] = 'Account Owner'
+            
+            results.append(p_dict)
+            
+        return results
 
     @profile_ns.doc(security='Bearer Auth')
     @jwt_required()
