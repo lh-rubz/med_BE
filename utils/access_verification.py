@@ -202,8 +202,16 @@ def check_access_permission(user_id, resource_type, resource_id=None, require_ve
     Returns:
         tuple: (has_access: bool, needs_verification: bool, session_token: str or None)
     """
+    # For Shared Profiles (where user is not owner), we might want to relax verification 
+    # OR ensure that the AccessVerification logic supports it.
+    # Currently AccessVerification is linked to user_id (the requester). 
+    # So if User B requests Profile A, verification is stored for User B. This is correct.
+    
     if not require_verification:
         return True, False, None
+    
+    # DEBUG
+    # print(f"DEBUG VERIFY: Checking permission for User {user_id} on {resource_type} {resource_id}")
     
     # البحث عن تحقق نشط
     verification = AccessVerification.query.filter_by(

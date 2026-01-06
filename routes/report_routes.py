@@ -46,13 +46,26 @@ class UserReports(Resource):
             # Verify user owns this profile or has shared access
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
             
+            # DEBUG LOG
+            print(f"DEBUG REPORT ACCESS: User={current_user_id} requesting Profile={profile_id}")
+            
             if not profile:
+                print(f"DEBUG: Profile not owned by user. Checking shares...")
                 share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
                 if share:
                     profile = Profile.query.get(profile_id)
+                    print(f"DEBUG: Found share access (Level: {share.access_level})")
+                else:
+                    print(f"DEBUG: No share found for user {current_user_id} on profile {profile_id}")
             
             if not profile:
+                print("DEBUG: Access Denied - Profile not found or not authorized")
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
+            
+            # SKIP VERIFICATION FOR SHARED PROFILES (Temporary Fix/Optimization)
+            # If the profile is shared, we might skip strict OTP verification for now OR ensure it works correctly
+            # Current logic requires OTP for ALL profile access, even shared ones.
+            # If 'owner_id' check in verification logic fails (e.g. strict ownership), it will fail.
             
             # التحقق من الوصول للبيانات الحساسة
             session_token = request.headers.get('X-Access-Session-Token')
