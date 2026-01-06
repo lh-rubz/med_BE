@@ -33,10 +33,30 @@ class ProfileList(Resource):
         shared_entries = ProfileShareModel.query.filter_by(shared_with_user_id=current_user_id).all()
         shared_profiles = [entry.profile for entry in shared_entries]
         
-        # Combine and remove duplicates (if a profile is both owned and shared, though unlikely by design)
+        # Combine and remove duplicates
         all_profiles = {profile.id: profile for profile in owned_profiles + shared_profiles}.values()
         
-        return list(all_profiles)
+        results = []
+        for p in all_profiles:
+            # Create a dictionary representation to safely modify contextual fields without affecting DB object
+            p_dict = {
+                'id': p.id,
+                'first_name': p.first_name,
+                'last_name': p.last_name,
+                'date_of_birth': p.date_of_birth, # Marshal handles date objects
+                'gender': p.gender,
+                'relationship': p.relationship,
+                'created_at': p.created_at
+            }
+            
+            # Contextual relationship label
+            if p.creator_id != current_user_id:
+                if p.relationship == 'Self':
+                    p_dict['relationship'] = 'Owner'
+        
+            results.append(p_dict)
+        
+        return results
 
     @profile_ns.doc(security='Bearer Auth')
     @jwt_required()
@@ -45,6 +65,12 @@ class ProfileList(Resource):
         """Create a new managed profile"""
         current_user_id = int(get_jwt_identity())
         data = request.json
+        
+        # Check for duplicate "Self" profile
+        if data.get('relationship') == 'Self':
+            existing_self = Profile.query.filter_by(creator_id=current_user_id, relationship='Self').first()
+            if existing_self:
+                return {'message': 'You already have a "Self" profile. Only one is allowed.'}, 400
         
         dob = None
         if data.get('date_of_birth'):
@@ -149,6 +175,17 @@ class ProfileDetail(Resource):
             return {'message': 'Profile not found or you are not the owner'}, 404
             
         data = request.json
+        
+        # Check for duplicate "Self" profile on update
+        if data.get('relationship') == 'Self':
+            existing_self = Profile.query.filter(
+                Profile.creator_id == current_user_id,
+                Profile.relationship == 'Self',
+                Profile.id != id
+            ).first()
+            if existing_self:
+                return {'message': 'You already have a "Self" profile. Only one is allowed.'}, 400
+
         if 'first_name' in data: profile.first_name = data['first_name']
         if 'last_name' in data: profile.last_name = data['last_name']
         if 'gender' in data: profile.gender = data['gender']

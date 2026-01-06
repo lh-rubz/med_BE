@@ -162,6 +162,10 @@ class Profile(db.Model):
     creator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # The account owner
     linked_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True) # If this profile belongs to another registered user
     
+    __table_args__ = (
+        db.Index('idx_unique_self_profile', 'creator_id', 'relationship', unique=True, postgresql_where=db.text("relationship = 'Self'")),
+    )
+    
     first_name = db.Column(db.String(50), nullable=False)
     last_name = db.Column(db.String(50))
     date_of_birth = db.Column(db.Date)
