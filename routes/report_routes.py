@@ -102,13 +102,23 @@ class UserReports(Resource):
 
         if profile_id:
             # Profile object is already fetched in the validation block above
-            if profile.linked_user_id:
+            # Check for ProfileShare explicitly as requested
+            share = ProfileShare.query.filter_by(
+                profile_id=profile_id,
+                shared_with_user_id=current_user_id
+            ).first()
+
+            if share:
+                # If shared via ProfileShare, owner is the profile creator
+                report_owner_id = profile.creator_id
+                # Only check ProfileShare if we found it
+            elif profile.linked_user_id:
                 # Linked Profile: Use the linked user's ID as owner
                 report_owner_id = profile.linked_user_id
                 # Don't filter by this profile_id (it's a local proxy ID, not existing in remote user's DB)
                 should_filter_by_profile_id = False
             elif profile.creator_id != current_user_id:
-                # Shared Profile: Use the creator's ID as owner
+                # Shared Profile fallback (in case checked via ownership logic directly)
                 report_owner_id = profile.creator_id
         
         # Build query

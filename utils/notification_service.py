@@ -111,10 +111,10 @@ def notify_profile_share(sharer_name, profile_name, recipient_id, profile_id):
     
     send_push_notification(recipient_id, title, body, data)
 
-    # 2. Send Email
-    subject = f"{sharer_name} shared a profile with you on MediScan"
-    html_content = get_profile_shared_email(sharer_name, profile_name, recipient.first_name)
-    send_brevo_email(recipient.email, subject, html_content)
+    # 2. Send Email - Disabled per user request (Notification only)
+    # subject = f"{sharer_name} shared a profile with you on MediScan"
+    # html_content = get_profile_shared_email(sharer_name, profile_name, recipient.first_name)
+    # send_brevo_email(recipient.email, subject, html_content)
 
 def notify_report_upload(uploader_name, profile_name, report_name, recipient_ids, profile_id, report_id):
     """
