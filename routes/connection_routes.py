@@ -196,11 +196,25 @@ class ConnectionList(Resource):
         
         return {
             'sent_requests': [
-                {'id': c.id, 'to': c.receiver.email, 'status': c.status, 'relationship': c.relationship}
+                {
+                    'id': c.id,
+                    'to': c.receiver.email,
+                    'status': c.status,
+                    'relationship': c.relationship,
+                    'access_level': c.access_level or 'view',
+                    'profile_id': c.profile_id
+                }
                 for c in sent
             ],
             'received_requests': [
-                {'id': c.id, 'from': c.requester.email, 'status': c.status, 'relationship': c.relationship}
+                {
+                    'id': c.id,
+                    'from': c.requester.email,
+                    'status': c.status,
+                    'relationship': c.relationship,
+                    'access_level': c.access_level or 'view',
+                    'profile_id': c.profile_id
+                }
                 for c in received
             ]
         }
