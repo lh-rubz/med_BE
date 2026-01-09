@@ -19,8 +19,8 @@ connection_model = connection_ns.model('Connection', {
 
 request_model = connection_ns.model('ConnectionRequest', {
     'receiver_email': fields.String(required=True, description='Email of the person you want access to'),
-    'relationship': fields.String(required=True, description='Your relationship to them (e.g., Son, Caretaker)'),
-    'access_level': fields.String(default='view', description='view or manage'),
+    'relationship': fields.String(required=True, description='Your relationship to them (e.g., Son, Caretaker, Doctor)'),
+    'access_level': fields.String(default='view', description='Access level: view (Read Only), upload (Read & Upload), manage (Full Access)'),
     'profile_id': fields.Integer(description='Optional: ID of specific profile to share')
 })
 
@@ -30,7 +30,14 @@ class ConnectionRequest(Resource):
     @jwt_required()
     @connection_ns.expect(request_model)
     def post(self):
-        """Send a connection request to another user"""
+        """
+        Send a connection request to another user
+        
+        Access Levels:
+        - 'view': Read Only (Viewer) - Can view reports and profiles
+        - 'upload': Read & Upload (Contributor) - Can view and upload reports
+        - 'manage': Full Access (Manager) - Can view, upload, edit, delete, and share
+        """
         current_user_id = int(get_jwt_identity())
         data = request.json
         print(f"DEBUG: Connection request received from {current_user_id} with data: {data}")
@@ -42,6 +49,15 @@ class ConnectionRequest(Resource):
             
         if receiver.id == current_user_id:
             return {'message': 'Cannot connect to yourself'}, 400
+
+        # Validate access_level
+        access_level = data.get('access_level', 'view')
+        valid_access_levels = ['view', 'upload', 'manage']
+        if access_level not in valid_access_levels:
+            return {
+                'message': f'Invalid access_level. Must be one of: {", ".join(valid_access_levels)}',
+                'valid_levels': valid_access_levels
+            }, 400
 
         # Validate profile_id if provided
         profile_id = data.get('profile_id')
@@ -84,7 +100,7 @@ class ConnectionRequest(Resource):
             requester_id=current_user_id,
             receiver_id=receiver.id,
             relationship=data['relationship'],
-            access_level=data.get('access_level', 'view'),
+            access_level=access_level,
             profile_id=profile_id,
             status='pending'
         )

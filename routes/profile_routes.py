@@ -256,7 +256,7 @@ class ProfileShare(Resource):
     @jwt_required()
     @profile_ns.expect(profile_ns.model('ProfileShareRequest', {
         'email': fields.String(required=True, description="Email of user to share with"),
-        'access_level': fields.String(default='view', description="view, upload, or manage")
+        'access_level': fields.String(default='view', description="Access level: view (Read Only), upload (Read & Upload), manage (Full Access)")
     }))
     def post(self, id):
         """Grant access to a profile to another user"""
@@ -276,6 +276,15 @@ class ProfileShare(Resource):
         if target_user.id == current_user_id:
             return {'message': 'Cannot share with yourself'}, 400
 
+        # Validate access_level
+        access_level = data.get('access_level', 'view')
+        valid_access_levels = ['view', 'upload', 'manage']
+        if access_level not in valid_access_levels:
+            return {
+                'message': f'Invalid access_level. Must be one of: {", ".join(valid_access_levels)}',
+                'valid_levels': valid_access_levels
+            }, 400
+
         # 3. Create or Update Share
         from models import ProfileShare as ProfileShareModel
         
@@ -285,13 +294,13 @@ class ProfileShare(Resource):
         ).first()
         
         if existing_share:
-            existing_share.access_level = data.get('access_level', 'view')
+            existing_share.access_level = access_level
             msg = "Access updated"
         else:
             new_share = ProfileShareModel(
                 profile_id=id,
                 shared_with_user_id=target_user.id,
-                access_level=data.get('access_level', 'view')
+                access_level=access_level
             )
             db.session.add(new_share)
             msg = "Access granted"
