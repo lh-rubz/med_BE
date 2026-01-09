@@ -13,7 +13,8 @@ from email_templates import (
     get_resend_verification_email,
     get_password_reset_email,
     get_password_reset_email_with_link,
-    get_password_changed_email
+    get_password_changed_email,
+    get_2fa_otp_email
 )
 from utils.password_validator import validate_password_strength
 from google.oauth2 import id_token
@@ -48,7 +49,8 @@ register_model = auth_ns.model('Registration', {
 
 login_model = auth_ns.model('Login', {
     'email': fields.String(required=True, description='User email address'),
-    'password': fields.String(required=True, description='User password')
+    'password': fields.String(required=True, description='User password'),
+    'code': fields.String(description='6-digit OTP code (required if 2FA is enabled)')
 })
 
 verify_email_model = auth_ns.model('VerifyEmail', {
@@ -255,7 +257,12 @@ class Register(Resource):
 class Login(Resource):
     @auth_ns.expect(login_model)
     def post(self):
-        """Login and get access token"""
+        """
+        Login and get access token
+        
+        If 2FA is enabled, the first request (without code) will return 202 Accepted
+        and send OTP to email. Second request with code will return access token.
+        """
         data = request.json
         
         # Validate required fields
@@ -264,6 +271,7 @@ class Login(Resource):
         
         email = data.get('email')
         password = data.get('password')
+        code = data.get('code')
         
         if not email or not password:
             return {'message': 'Email and password are required'}, 400
@@ -282,9 +290,83 @@ class Login(Resource):
                 'email_verified': False
             }, 403
 
+        # Check if 2FA is enabled
+        if user.two_factor_enabled:
+            # If code is not provided, send OTP and return 202
+            if not code:
+                try:
+                    # Generate 6-digit OTP code
+                    otp_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+                    
+                    # Store OTP code and expiration (10 minutes)
+                    user.two_factor_code = otp_code
+                    user.two_factor_code_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+                    db.session.commit()
+                    
+                    print(f"\n{'='*80}")
+                    print(f"🔐 2FA LOGIN OTP for {user.email}: {otp_code}")
+                    print(f"Code expires at: {user.two_factor_code_expires}")
+                    print(f"{'='*80}\n")
+                    
+                    # Send OTP via email
+                    try:
+                        html_content = get_2fa_otp_email(user.first_name, otp_code)
+                        success = send_brevo_email(
+                            recipient_email=user.email,
+                            subject='Login Verification Code - MediScan',
+                            html_content=html_content
+                        )
+                        
+                        if success:
+                            print(f"✅ 2FA login OTP email sent successfully to {user.email}")
+                        else:
+                            print(f"❌ Failed to send 2FA login OTP email to {user.email}")
+                    except Exception as email_error:
+                        print(f"❌ Failed to send 2FA login OTP email: {str(email_error)}")
+                    
+                    return {
+                        'message': 'Two-factor authentication required. Please check your email for the verification code.',
+                        'requires_2fa': True,
+                        'expires_in_minutes': 10
+                    }, 202  # Accepted - requires 2FA code
+                except Exception as e:
+                    db.session.rollback()
+                    print(f"❌ Error generating 2FA: {str(e)}")
+                    return {'message': 'Failed to generate 2FA code', 'error': str(e)}, 500
+            
+            # Code provided - verify it
+            if not code.isdigit() or len(code) != 6:
+                return {'message': 'Invalid code format. Code must be 6 digits.'}, 400
+            
+            if not user.two_factor_code:
+                return {'message': 'No verification code found. Please request a new code by logging in again.'}, 400
+            
+            # Check expiration
+            expires = user.two_factor_code_expires
+            if expires and expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            
+            if not expires or expires < datetime.now(timezone.utc):
+                user.two_factor_code = None
+                user.two_factor_code_expires = None
+                db.session.commit()
+                return {'message': 'Verification code has expired. Please log in again to receive a new code.'}, 400
+            
+            if user.two_factor_code != code:
+                return {'message': 'Invalid verification code'}, 401
+            
+            # Code is valid - clear it and proceed with login
+            user.two_factor_code = None
+            user.two_factor_code_expires = None
+            db.session.commit()
+
+        # Generate access token
         access_token = create_access_token(identity=str(user.id))
-        access_token = create_access_token(identity=str(user.id))
-        return {'access_token': access_token, 'email_verified': True}, 200
+        return {
+            'access_token': access_token,
+            'email_verified': True,
+            'two_factor_enabled': user.two_factor_enabled
+        }, 200
 
 
 @auth_ns.route('/google')
@@ -1000,6 +1082,17 @@ verify_access_code_model = auth_ns.model('VerifyAccessCode', {
     'code': fields.String(required=True, description='كود التحقق (6 أرقام)')
 })
 
+# 2FA Models
+verify_2fa_code_model = auth_ns.model('Verify2FACode', {
+    'code': fields.String(required=True, description='6-digit OTP code from email')
+})
+
+login_with_2fa_model = auth_ns.model('LoginWith2FA', {
+    'email': fields.String(required=True, description='User email address'),
+    'password': fields.String(required=True, description='User password'),
+    'code': fields.String(description='6-digit OTP code (required if 2FA is enabled)')
+})
+
 
 @auth_ns.route('/request-access-verification')
 class RequestAccessVerification(Resource):
@@ -1092,3 +1185,146 @@ class VerifyAccessCode(Resource):
             }, 200
         else:
             return {'message': message}, 400
+
+
+# Two-Factor Authentication (2FA) Endpoints
+@auth_ns.route('/2fa/enable')
+class Enable2FA(Resource):
+    """تفعيل المصادقة الثنائية (2FA)"""
+    @auth_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    def post(self):
+        """Generate and send 2FA OTP code to user's email"""
+        current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+        
+        if not user.email_verified:
+            return {'message': 'Please verify your email before enabling 2FA'}, 400
+        
+        try:
+            # Generate 6-digit OTP code
+            otp_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+            
+            # Store OTP code and expiration (10 minutes)
+            user.two_factor_code = otp_code
+            user.two_factor_code_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+            db.session.commit()
+            
+            print(f"\n{'='*80}")
+            print(f"🔐 2FA OTP CODE for {user.email}: {otp_code}")
+            print(f"Code expires at: {user.two_factor_code_expires}")
+            print(f"{'='*80}\n")
+            
+            # Send OTP via email
+            try:
+                html_content = get_2fa_otp_email(user.first_name, otp_code)
+                success = send_brevo_email(
+                    recipient_email=user.email,
+                    subject='Two-Factor Authentication Code - MediScan',
+                    html_content=html_content
+                )
+                
+                if success:
+                    print(f"✅ 2FA OTP email sent successfully to {user.email}")
+                else:
+                    print(f"❌ Failed to send 2FA OTP email to {user.email}")
+            except Exception as email_error:
+                print(f"❌ Failed to send 2FA OTP email: {str(email_error)}")
+            
+            return {
+                'message': '2FA verification code sent to your email',
+                'expires_in_minutes': 10
+            }, 200
+        except Exception as e:
+            db.session.rollback()
+            return {'message': 'Failed to generate 2FA code', 'error': str(e)}, 500
+
+
+@auth_ns.route('/2fa/verify')
+class Verify2FA(Resource):
+    """التحقق من كود 2FA وتفعيل المصادقة الثنائية"""
+    @auth_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    @auth_ns.expect(verify_2fa_code_model)
+    def post(self):
+        """Verify 2FA OTP code and enable 2FA for the user"""
+        current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+        
+        data = request.json
+        code = data.get('code')
+        
+        if not code:
+            return {'message': 'Verification code is required'}, 400
+        
+        if not code.isdigit() or len(code) != 6:
+            return {'message': 'Invalid code format. Code must be 6 digits.'}, 400
+        
+        if not user.two_factor_code:
+            return {'message': 'No verification code found. Please request a new code.'}, 400
+        
+        # Check expiration
+        expires = user.two_factor_code_expires
+        if expires and expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        
+        if not expires or expires < datetime.now(timezone.utc):
+            user.two_factor_code = None
+            user.two_factor_code_expires = None
+            db.session.commit()
+            return {'message': 'Verification code has expired. Please request a new one.'}, 400
+        
+        if user.two_factor_code != code:
+            return {'message': 'Invalid verification code'}, 400
+        
+        try:
+            # Enable 2FA and clear the code
+            user.two_factor_enabled = True
+            user.two_factor_code = None
+            user.two_factor_code_expires = None
+            db.session.commit()
+            
+            return {
+                'message': 'Two-factor authentication enabled successfully',
+                'two_factor_enabled': True
+            }, 200
+        except Exception as e:
+            db.session.rollback()
+            return {'message': 'Failed to enable 2FA', 'error': str(e)}, 500
+
+
+@auth_ns.route('/2fa/disable')
+class Disable2FA(Resource):
+    """إيقاف المصادقة الثنائية (2FA)"""
+    @auth_ns.doc(security='Bearer Auth')
+    @jwt_required()
+    def post(self):
+        """Disable 2FA for the user"""
+        current_user_id = int(get_jwt_identity())
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return {'message': 'User not found'}, 404
+        
+        if not user.two_factor_enabled:
+            return {'message': '2FA is not enabled for this account'}, 400
+        
+        try:
+            user.two_factor_enabled = False
+            user.two_factor_code = None
+            user.two_factor_code_expires = None
+            db.session.commit()
+            
+            return {
+                'message': 'Two-factor authentication disabled successfully',
+                'two_factor_enabled': False
+            }, 200
+        except Exception as e:
+            db.session.rollback()
+            return {'message': 'Failed to disable 2FA', 'error': str(e)}, 500

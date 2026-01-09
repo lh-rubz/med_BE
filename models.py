@@ -25,6 +25,10 @@ class User(db.Model):
     reset_code_expires = db.Column(db.DateTime, nullable=True)
     google_id = db.Column(db.String(255), unique=True, nullable=True)
     facebook_id = db.Column(db.String(255), unique=True, nullable=True)
+    # Two-Factor Authentication (2FA)
+    two_factor_enabled = db.Column(db.Boolean, default=False)
+    two_factor_code = db.Column(db.String(6), nullable=True)  # OTP code for 2FA
+    two_factor_code_expires = db.Column(db.DateTime, nullable=True)  # OTP expiration time
     authenticators = db.relationship('Authenticator', backref='user', lazy=True, cascade='all, delete-orphan')
     reports = db.relationship('Report', backref='user', lazy=True, cascade='all, delete-orphan')
     profiles = db.relationship('Profile', backref='owner', lazy=True, foreign_keys='Profile.creator_id', cascade='all, delete-orphan')
