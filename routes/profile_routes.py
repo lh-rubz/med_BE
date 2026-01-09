@@ -116,8 +116,9 @@ class ProfileDetail(Resource):
         profile = Profile.query.filter_by(id=id, creator_id=current_user_id).first()
         
         # If not owned, check if it's shared with the user
+        from models import ProfileShare as ProfileShareModel
+        shared_entry = None
         if not profile:
-            from models import ProfileShare as ProfileShareModel
             shared_entry = ProfileShareModel.query.filter_by(profile_id=id, shared_with_user_id=current_user_id).first()
             if shared_entry:
                 profile = shared_entry.profile
@@ -126,7 +127,19 @@ class ProfileDetail(Resource):
             return {'message': 'Profile not found or you do not have access'}, 404
         
         # التحقق من الوصول للبيانات الحساسة
+        # تخطي التحقق تماماً إذا كان Profile مشترك عبر ProfileShare (عند قبول طلب اتصال)
+        # أو تم إنشاؤه عبر connection request (له linked_user_id)
         session_token = request.headers.get('X-Access-Session-Token')
+        
+        # التحقق من وجود ProfileShare (يعني تم قبول طلب اتصال - لا حاجة للتحقق)
+        is_shared_via_connection = shared_entry is not None
+        
+        # التحقق من أن Profile تم إنشاؤه عبر connection request (له linked_user_id)
+        is_created_via_connection = getattr(profile, 'linked_user_id', None) is not None
+        
+        if is_shared_via_connection or is_created_via_connection:
+            # Profile مشترك أو تم إنشاؤه عبر connection - لا حاجة للتحقق
+            return profile
         
         if session_token:
             has_access, verification = verify_session_token(
@@ -139,31 +152,33 @@ class ProfileDetail(Resource):
                 return profile
         
         # لا يوجد session token صالح - التحقق من الحاجة للتحقق
-        has_access, needs_verification, _ = check_access_permission(
-            current_user_id,
-            'profile',
-            id,
-            require_verification=True
-        )
-        
-        if needs_verification:
-            # Create verification request (only sends email if new)
-            verification, is_new = create_access_verification(
+        # فقط إذا كان Profile مملوك للمستخدم وتم إنشاؤه يدوياً (ليس له linked_user_id)
+        if profile.creator_id == current_user_id and not is_created_via_connection:
+            has_access, needs_verification, _ = check_access_permission(
                 current_user_id,
                 'profile',
                 id,
-                method='otp'
+                require_verification=True
             )
-            # Only send email if it's a new verification request
-            if is_new:
-                send_verification_otp(user, verification)
             
-            return {
-                'message': 'Access verification required for sensitive data',
-                'requires_verification': True,
-                'verification_id': verification.id,
-                'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
-            }, 403
+            if needs_verification:
+                # Create verification request (only sends email if new)
+                verification, is_new = create_access_verification(
+                    current_user_id,
+                    'profile',
+                    id,
+                    method='otp'
+                )
+                # Only send email if it's a new verification request
+                if is_new:
+                    send_verification_otp(user, verification)
+                
+                return {
+                    'message': 'Access verification required for sensitive data',
+                    'requires_verification': True,
+                    'verification_id': verification.id,
+                    'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
+                }, 403
         
         return profile
 
@@ -389,6 +404,7 @@ class ProfileReports(Resource):
         profile = Profile.query.filter_by(id=id, creator_id=current_user_id).first()
         
         # 2. Check Shared Access if not owner
+        share = None
         if not profile:
             share = ProfileShare.query.filter_by(profile_id=id, shared_with_user_id=current_user_id).first()
             if share:
@@ -397,9 +413,20 @@ class ProfileReports(Resource):
                 return {'message': 'Profile not found or unauthorized access'}, 404
         
         # التحقق من الوصول للبيانات الحساسة (التقارير الطبية)
+        # تخطي التحقق تماماً إذا كان Profile مشترك عبر ProfileShare (عند قبول طلب اتصال)
+        # أو تم إنشاؤه عبر connection request (له linked_user_id)
         session_token = request.headers.get('X-Access-Session-Token')
         
-        if session_token:
+        # التحقق من وجود ProfileShare (يعني تم قبول طلب اتصال - لا حاجة للتحقق)
+        is_shared_via_connection = share is not None
+        
+        # التحقق من أن Profile تم إنشاؤه عبر connection request (له linked_user_id)
+        is_created_via_connection = getattr(profile, 'linked_user_id', None) is not None
+        
+        if is_shared_via_connection or is_created_via_connection:
+            # Profile مشترك أو تم إنشاؤه عبر connection - لا حاجة للتحقق
+            pass
+        elif session_token:
             has_access, verification = verify_session_token(
                 current_user_id,
                 session_token,
@@ -413,27 +440,29 @@ class ProfileReports(Resource):
                 }, 403
         else:
             # لا يوجد session token - التحقق من الحاجة للتحقق
-            has_access, needs_verification, _ = check_access_permission(
-                current_user_id,
-                'profile',
-                id,
-                require_verification=True
-            )
-            
-            if needs_verification:
-                verification, is_new = create_access_verification(
+            # فقط إذا كان Profile مملوك للمستخدم وتم إنشاؤه يدوياً (ليس له linked_user_id)
+            if profile.creator_id == current_user_id and not is_created_via_connection:
+                has_access, needs_verification, _ = check_access_permission(
                     current_user_id,
                     'profile',
                     id,
-                    method='otp'
+                    require_verification=True
                 )
-                # Only send email if it's a new verification request
-                if is_new:
-                    send_verification_otp(user, verification)
                 
-                return {
-                    'message': 'Access verification required for sensitive medical data',
-                    'requires_verification': True,
+                if needs_verification:
+                    verification, is_new = create_access_verification(
+                        current_user_id,
+                        'profile',
+                        id,
+                        method='otp'
+                    )
+                    # Only send email if it's a new verification request
+                    if is_new:
+                        send_verification_otp(user, verification)
+                    
+                    return {
+                        'message': 'Access verification required for sensitive medical data',
+                        'requires_verification': True,
                         'verification_id': verification.id,
                         'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
                     }, 403

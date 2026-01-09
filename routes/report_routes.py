@@ -62,23 +62,26 @@ class UserReports(Resource):
                 print("DEBUG: Access Denied - Profile not found or not authorized")
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
             
-            # SKIP VERIFICATION FOR SHARED PROFILES
-            # If the user has explicitly shared this profile (ProfileShare exists), 
-            # we consider this 'consent' and do not require OTP verification every time.
-            is_shared_access = False
-            if profile.creator_id != current_user_id:
-                 # Check if it was accessed via ProfileShare (either specifically or broadly)
-                 # We already verified ProfileShare existence above for non-owners.
-                 # If it IS a shared profile, we can skip strict OTP check if desired.
-                 # Let's SKIP it to solve the immediate blocking issue.
-                 is_shared_access = True
-
             # التحقق من الوصول للبيانات الحساسة
+            # تخطي التحقق تماماً إذا كان Profile مشترك عبر ProfileShare (عند قبول طلب اتصال)
+            # التحقق فقط عند إنشاء Profile جديد يدوياً (ليس له linked_user_id)
             session_token = request.headers.get('X-Access-Session-Token')
             
-            if is_shared_access:
-                 # Bypass verification for shared profiles
-                 pass
+            # التحقق من وجود ProfileShare (يعني تم قبول طلب اتصال - لا حاجة للتحقق)
+            share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
+            is_shared_via_connection = share is not None
+            
+            # التحقق من أن Profile تم إنشاؤه عبر connection request (له linked_user_id)
+            # Profiles التي تم إنشاؤها عبر connection request لها linked_user_id
+            is_created_via_connection = getattr(profile, 'linked_user_id', None) is not None
+            
+            # تخطي التحقق إذا:
+            # 1. Profile مشترك عبر ProfileShare (قبول طلب اتصال مع profile_id)
+            # 2. أو Profile تم إنشاؤه عبر connection request (له linked_user_id)
+            # التحقق فقط إذا كان Profile مملوك للمستخدم وتم إنشاؤه يدوياً (ليس له linked_user_id ولا ProfileShare)
+            if is_shared_via_connection or is_created_via_connection:
+                # Profile مشترك أو تم إنشاؤه عبر connection - لا حاجة للتحقق
+                pass
             elif session_token:
                 has_access, verification = verify_session_token(
                     current_user_id,
@@ -93,30 +96,34 @@ class UserReports(Resource):
                     }, 403
             else:
                 # لا يوجد session token - التحقق من الحاجة للتحقق
-                has_access, needs_verification, _ = check_access_permission(
-                    current_user_id,
-                    'profile',
-                    profile_id,
-                    require_verification=True
-                )
-                
-                if needs_verification:
-                    verification, is_new = create_access_verification(
+                # فقط إذا كان Profile مملوك للمستخدم وتم إنشاؤه يدوياً (ليس عبر connection)
+                if profile.creator_id == current_user_id and not is_created_via_connection:
+                    # Profile مملوك للمستخدم وتم إنشاؤه يدوياً - يحتاج للتحقق عند أول وصول
+                    has_access, needs_verification, _ = check_access_permission(
                         current_user_id,
                         'profile',
                         profile_id,
-                        method='otp'
+                        require_verification=True
                     )
-                    # Only send email if it's a new verification request
-                    if is_new:
-                        send_verification_otp(user, verification)
                     
-                    return {
-                        'message': 'Access verification required for sensitive medical data',
-                        'requires_verification': True,
-                        'verification_id': verification.id,
-                        'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
-                    }, 403
+                    if needs_verification:
+                        verification, is_new = create_access_verification(
+                            current_user_id,
+                            'profile',
+                            profile_id,
+                            method='otp'
+                        )
+                        # Only send email if it's a new verification request
+                        if is_new:
+                            send_verification_otp(user, verification)
+                        
+                        return {
+                            'message': 'Access verification required for sensitive medical data',
+                            'requires_verification': True,
+                            'verification_id': verification.id,
+                            'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
+                        }, 403
+                # إذا كان Profile مشترك أو تم إنشاؤه عبر connection، لا حاجة للتحقق
         
         # Determine report owner
         report_owner_id = current_user_id
