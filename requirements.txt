@@ -35,3 +35,4 @@ PyMuPDF
 google-auth
 authlib
 firebase-admin
+webauthn

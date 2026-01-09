@@ -120,7 +120,6 @@ class UserReports(Resource):
         
         # Determine report owner
         report_owner_id = current_user_id
-        should_filter_by_profile_id = True
 
         if profile_id:
             # Profile object is already fetched in the validation block above
@@ -133,12 +132,6 @@ class UserReports(Resource):
             if share:
                 # If shared via ProfileShare, owner is the profile creator
                 report_owner_id = profile.creator_id
-                # Only check ProfileShare if we found it
-            elif profile.linked_user_id:
-                # Linked Profile: Use the linked user's ID as owner
-                report_owner_id = profile.linked_user_id
-                # Don't filter by this profile_id (it's a local proxy ID, not existing in remote user's DB)
-                should_filter_by_profile_id = False
             elif profile.creator_id != current_user_id:
                 # Shared Profile fallback (in case checked via ownership logic directly)
                 report_owner_id = profile.creator_id
@@ -146,7 +139,7 @@ class UserReports(Resource):
         # Build query
         query = Report.query.filter_by(user_id=report_owner_id)
         
-        if profile_id and should_filter_by_profile_id:
+        if profile_id:
             query = query.filter_by(profile_id=profile_id)
         
         reports = query.order_by(Report.created_at.desc()).all()
@@ -213,6 +206,7 @@ class UserReports(Resource):
             reports_data.append({
                 'report_id': report.id,
                 'profile_id': report.profile_id,
+                'patient_name': report.patient_name,
                 'profile': profile_info,
                 'report_date': str(report.report_date),
                 'report_name': report.report_name,
