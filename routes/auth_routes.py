@@ -300,7 +300,8 @@ class Login(Resource):
                     
                     # Store OTP code and expiration (10 minutes)
                     user.two_factor_code = otp_code
-                    user.two_factor_code_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+                    # Use naive UTC to avoid SQLAlchemy timezone conversion issues
+                    user.two_factor_code_expires = (datetime.now(timezone.utc) + timedelta(minutes=10)).replace(tzinfo=None)
                     db.session.commit()
                     
                     print(f"\n{'='*80}")
@@ -330,8 +331,7 @@ class Login(Resource):
                         'expires_in_minutes': 10
                     }, 202  # Accepted - requires 2FA code
                 except Exception as e:
-                    db.session.rollback()
-                    print(f"❌ Error generating 2FA: {str(e)}")
+                    print(f"❌ Failed to generate/send 2FA login OTP: {str(e)}")
                     return {'message': 'Failed to generate 2FA code', 'error': str(e)}, 500
             
             # Code provided - verify it
@@ -1204,13 +1204,30 @@ class Enable2FA(Resource):
         if not user.email_verified:
             return {'message': 'Please verify your email before enabling 2FA'}, 400
         
+        # Rate Limiting: Check if a code was recently sent (e.g., within last 1 minute)
+        if user.two_factor_code_expires:
+            expires = user.two_factor_code_expires
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            
+            # If the code expires in more than 9 minutes from now, it was sent less than 1 minute ago
+            # (assuming 10 minute validity window)
+            limit_time = datetime.now(timezone.utc) + timedelta(minutes=9)
+            
+            if expires > limit_time:
+                return {
+                    'message': 'Please wait a moment before requesting a new code.',
+                    'retry_after_seconds': int((expires - limit_time).total_seconds())
+                }, 429
+        
         try:
             # Generate 6-digit OTP code
             otp_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
             
             # Store OTP code and expiration (10 minutes)
+            # Use naive UTC to avoid SQLAlchemy timezone conversion issues
             user.two_factor_code = otp_code
-            user.two_factor_code_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+            user.two_factor_code_expires = (datetime.now(timezone.utc) + timedelta(minutes=10)).replace(tzinfo=None)
             db.session.commit()
             
             print(f"\n{'='*80}")
