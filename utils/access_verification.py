@@ -67,7 +67,7 @@ def create_access_verification(user_id, resource_type, resource_id=None, method=
         resource_id=resource_id,
         verification_method=method,
         session_token=generate_session_token(),
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),  # 30 minutes validity
+        expires_at=datetime.now(timezone.utc) + timedelta(days=30),  # 30 days validity (Extended per user request)
         ip_address=request.remote_addr if request else None,
         user_agent=request.headers.get('User-Agent') if request else None
     )

@@ -137,6 +137,11 @@ class ProfileDetail(Resource):
         # التحقق من أن Profile تم إنشاؤه عبر connection request (له linked_user_id)
         is_created_via_connection = getattr(profile, 'linked_user_id', None) is not None
         
+        # Disable verification for ALL profiles (User request: seamless access for Shared/Family profiles)
+        # The user wants seamless access without OTP. Authorization is handled by Ownership/Share check above.
+        pass
+
+        """
         if is_shared_via_connection or is_created_via_connection:
             # Profile مشترك أو تم إنشاؤه عبر connection - لا حاجة للتحقق
             return profile
@@ -179,6 +184,7 @@ class ProfileDetail(Resource):
                     'verification_id': verification.id,
                     'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
                 }, 403
+        """
         
         return profile
 
@@ -432,6 +438,11 @@ class ProfileReports(Resource):
         # التحقق من أن Profile تم إنشاؤه عبر connection request (له linked_user_id)
         is_created_via_connection = getattr(profile, 'linked_user_id', None) is not None
         
+        # Disable verification for ALL profiles (User request: seamless access for Shared/Family profiles)
+        # The user wants seamless access without OTP. Authorization is handled by Ownership/Share check above.
+        pass
+        
+        """
         if is_shared_via_connection or is_created_via_connection:
             # Profile مشترك أو تم إنشاؤه عبر connection - لا حاجة للتحقق
             pass
@@ -475,6 +486,7 @@ class ProfileReports(Resource):
                         'verification_id': verification.id,
                         'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
                     }, 403
+        """
         
         # Get all reports linked to this profile
         reports = Report.query.filter_by(

@@ -78,7 +78,12 @@ class UserReports(Resource):
             # تخطي التحقق إذا:
             # 1. Profile مشترك عبر ProfileShare (قبول طلب اتصال مع profile_id)
             # 2. أو Profile تم إنشاؤه عبر connection request (له linked_user_id)
-            # التحقق فقط إذا كان Profile مملوك للمستخدم وتم إنشاؤه يدوياً (ليس له linked_user_id ولا ProfileShare)
+            # 3. User request: Disable verification for ALL profiles to improve UX for Shared/Family profiles
+            #    (The user wants seamless access without OTP. Authorization is handled by Ownership/Share check above)
+            pass
+            
+            # Legacy Verification Logic (Disabled for seamless UX)
+            """
             if is_shared_via_connection or is_created_via_connection:
                 # Profile مشترك أو تم إنشاؤه عبر connection - لا حاجة للتحقق
                 pass
@@ -123,6 +128,7 @@ class UserReports(Resource):
                             'verification_id': verification.id,
                             'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
                         }, 403
+            """
                 # إذا كان Profile مشترك أو تم إنشاؤه عبر connection، لا حاجة للتحقق
         
         # Determine report owner
