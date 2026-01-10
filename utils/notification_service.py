@@ -35,13 +35,32 @@ def send_push_notification(user_id, title, body, data=None):
 
         tokens = [device.fcm_token for device in devices]
         
-        # Create message
+        # Create message with platform-specific config for Heads-up notifications
         message = messaging.MulticastMessage(
             notification=messaging.Notification(
                 title=title,
                 body=body,
             ),
             data=data or {},
+            # Android Config for High Priority Heads-up Notification
+            android=messaging.AndroidConfig(
+                priority='high',
+                notification=messaging.AndroidNotification(
+                    channel_id='high_importance_channel',
+                    priority='high',
+                    default_sound=True,
+                    default_vibrate_timings=True
+                )
+            ),
+            # APNs Config for iOS
+            apns=messaging.APNSConfig(
+                payload=messaging.APNSPayload(
+                    aps=messaging.Aps(
+                        sound='default',
+                        content_available=True
+                    )
+                )
+            ),
             tokens=tokens,
         )
 

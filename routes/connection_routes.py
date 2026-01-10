@@ -111,21 +111,44 @@ class ConnectionRequest(Resource):
         try:
             requester = User.query.get(current_user_id)
             requester_name = f"{requester.first_name} {requester.last_name or ''}".strip()
+            title = 'New Connection Request'
             msg = f"{requester_name} sent you a connection request."
+            
+            notification_data = {
+                'connection_id': new_conn.id, 
+                'requester_id': requester.id
+            }
             
             notification = Notification(
                 user_id=receiver.id,
-                title='New Connection Request',
+                title=title,
                 message=msg,
                 notification_type='connection_request',
-                data=json.dumps({'connection_id': new_conn.id, 'requester_id': requester.id})
+                data=json.dumps(notification_data)
             )
             db.session.add(notification)
+            
+            # Send Push Notification (Heads-up)
+            from utils.notification_service import send_push_notification
+            
+            # Add click_action for Flutter to handle navigation
+            push_data = notification_data.copy()
+            push_data['type'] = 'connection_request'
+            push_data['click_action'] = 'FLUTTER_NOTIFICATION_CLICK'
+            
+            # Commit first to ensure notification ID is generated (optional, but good practice)
+            db.session.commit()
+            
+            send_push_notification(receiver.id, title, msg, push_data)
+            
         except Exception as e:
             print(f"Error sending notification: {e}")
+            # Ensure we commit transaction if notification fails but connection succeeded
+            try:
+                db.session.commit()
+            except:
+                pass
 
-        db.session.commit()
-        
         # In a real app, send email notification here
         return {'message': 'Connection request sent', 'id': new_conn.id}, 201
 
