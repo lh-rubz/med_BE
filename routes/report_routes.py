@@ -263,8 +263,6 @@ class Timeline(Resource):
         profile_id = request.args.get('profile_id')
         
         # Build query
-        query = Report.query.filter_by(user_id=current_user_id)
-        
         if profile_id:
             # Verify user owns this profile or has shared access
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
@@ -277,7 +275,12 @@ class Timeline(Resource):
             
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
-            query = query.filter_by(profile_id=profile_id)
+            
+            # For shared profiles, we just filter by profile_id (reports belong to creator, not current_user)
+            query = Report.query.filter_by(profile_id=profile_id)
+        else:
+            # Default: Show all reports for the current user
+            query = Report.query.filter_by(user_id=current_user_id)
             
         # Get reports ordered by date
         reports = query.order_by(Report.report_date.desc()).all()
@@ -351,13 +354,18 @@ class HealthTrends(Resource):
             # Build query with OR condition for all aliases
             filters = [ReportField.field_name.ilike(f"%{term}%") for term in search_terms]
             
-            query = db.session.query(ReportField, Report.report_date).join(Report).filter(
-                ReportField.user_id == current_user_id,
-                or_(*filters)
-            )
-            
             if profile_id:
-                query = query.filter(Report.profile_id == profile_id)
+                # Use profile_id filter for shared/specific profiles
+                query = db.session.query(ReportField, Report.report_date).join(Report).filter(
+                    Report.profile_id == profile_id,
+                    or_(*filters)
+                )
+            else:
+                # Default: Filter by current user
+                query = db.session.query(ReportField, Report.report_date).join(Report).filter(
+                    ReportField.user_id == current_user_id,
+                    or_(*filters)
+                )
                 
             fields = query.order_by(Report.report_date).all()
             
@@ -398,9 +406,9 @@ class TimelineStats(Resource):
     def get(self):
         """Get high-level statistics for the timeline header (optionally filtered by profile)"""
         current_user_id = int(get_jwt_identity())
-        profile_id = request.args.get('profile_id')
         
-        query = Report.query.filter_by(user_id=current_user_id)
+        # Check for profile_id filter
+        profile_id = request.args.get('profile_id')
         
         if profile_id:
             # Verify user owns this profile or has shared access
@@ -414,7 +422,10 @@ class TimelineStats(Resource):
 
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
-            query = query.filter_by(profile_id=profile_id)
+            
+            query = Report.query.filter_by(profile_id=profile_id)
+        else:
+            query = Report.query.filter_by(user_id=current_user_id)
             
         total_reports = query.count()
         last_report = query.order_by(Report.report_date.desc()).first()
