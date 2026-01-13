@@ -170,11 +170,16 @@ class ChatResource(Resource):
         files = request.files.getlist('file')
         profile_id = request.form.get('profile_id')
         
+        print(f"DEBUG UPLOAD: User {current_user_id} attempting upload. Profile ID: {profile_id}")
+
         # Determine target profile
         target_profile_id = None
         if profile_id:
             from models import Profile
             prof = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            
+            if prof:
+                print(f"DEBUG UPLOAD: User is OWNER of profile {profile_id}")
             
             # Check shared access if not owner
             if not prof:
@@ -185,12 +190,15 @@ class ChatResource(Resource):
                 ).first()
                 
                 if share:
+                    print(f"DEBUG UPLOAD: User has SHARED access. Level: {share.access_level}")
                     if share.access_level in ['upload', 'manage']:
                         prof = Profile.query.get(profile_id)
                     else:
+                        print(f"DEBUG UPLOAD: Access DENIED. View-only user tried to upload.")
                         return {'error': 'Permission Denied: You only have view access to this profile. Uploading is not allowed.', 'code': 'ACCESS_DENIED'}, 403
             
             if not prof:
+                print(f"DEBUG UPLOAD: Profile not found or no access.")
                 return {'error': 'Invalid profile_id or unauthorized access (upload permission required)', 'code': 'UNAUTHORIZED'}, 403
             target_profile_id = prof.id
         else:
@@ -202,6 +210,29 @@ class ChatResource(Resource):
         
         if not files or len(files) == 0:
             return {'error': 'No file selected'}, 400
+
+        # Pre-check for duplicates to return 409 Conflict immediately
+        # This prevents returning a 200 OK stream that immediately fails
+        for file in files:
+            if file.filename == '': continue
+            
+            # Read and hash to check for duplicates
+            # Note: We must seek(0) after reading to ensure the file can be read again later
+            try:
+                file_content = file.read()
+                file_hash = hashlib.sha256(file_content).hexdigest()
+                file.seek(0) # CRITICAL: Reset cursor
+                
+                existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
+                if existing_file:
+                    return {
+                        'error': f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})',
+                        'code': 'DUPLICATE_FILE',
+                        'report_id': existing_file.report_id
+                    }, 409
+            except Exception as e:
+                print(f"Pre-check error: {e}")
+                file.seek(0) # Ensure reset even on error
 
         # Create user-specific folder
         user_folder = ensure_upload_folder(f"user_{current_user_id}")
