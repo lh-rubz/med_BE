@@ -12,6 +12,7 @@ import os
 import fitz  # PyMuPDF
 from PIL import Image
 import io
+import re
 
 from models import db, User, Report, ReportField, ReportFile, MedicalSynonym
 from config import ollama_client, Config
@@ -337,19 +338,28 @@ RULES:
    - report_type: Choose the CLOSEST match from this standard list: {', '.join(REPORT_TYPES)}.
 3. IMPORTANT - Full Names:
    - Extract the FULL patient name exactly as written.
+   - CRITICAL: EXCLUDE labels such as "Name:", "Patient Name:", "Patient:" from the value.
+   - STOP extracting the name when you encounter another label (like "Age:", "ID:", "Date:", "Ref Dr:").
+   - Example: If text says "Patient Name: John Doe Age: 45", extract ONLY "John Doe" for patient_name.
    - Extract the FULL doctor names.
    - IF NO DOCTOR NAME IS FOUND, LEAVE "doctor_names" AS AN EMPTY STRING. Do NOT invent or guess a name.
-   - SUPPORT ARABIC NAMES if present (e.g., "اسم المريض: ...").
+   - SUPPORT ARABIC NAMES if present.
+     - Look for "اسم المريض" (Patient Name) and extract the text next to it (usually to the left or below).
+     - Example: "اسم المريض: احمد" -> patient_name: "احمد"
 4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7").
    - CRITICAL: Keep symbols like "<", ">", "+", or "-" if they are part of the result value (e.g., "< 6.0", "> 100", "+ve").
    - HANDLING FLAGS: If a value has an asterisk (*), "L", "H", or "!" next to it, EXTRACT ONLY THE NUMBER in "field_value". Put the flag/indicator in "notes" or set "is_normal": false.
    - Example: "* 230" -> field_value: "230", is_normal: false.
 5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
-6. Extract report date as YYYY-MM-DD
+6. Extract report date as YYYY-MM-DD. Look for "Date", "Report Date", or "تاريخ".
 7. Extract patient details (Age, Gender, Date of Birth).
-   - Support ARABIC terms for Gender (e.g., "ذكر" for Male, "أنثى" for Female).
+   - Support ARABIC terms for Gender:
+     - "ذكر" = Male
+     - "أنثى" or "انثى" = Female
+     - Look for "الجنس" (Gender) label.
    - Support ARABIC terms for Age (e.g., "سنة" or "عام" for Years).
-   - If Age is NOT explicitly written but Date of Birth (DOB) is found, CALCULATE the age based on the Report Date (or today if Report Date is missing).
+   - If Age is NOT explicitly written but Date of Birth (DOB) is found (look for "DOB" or "تاريخ الميلاد"), CALCULATE the age based on the Report Date.
+   - Example: DOB 1975, Report 2025 -> Age 50.
 8. IMPORTANT - Full Normal Range:
    - Extract the FULL normal range exactly as written, including all text and gender-specific info (e.g., "Men: 13-17, Women: 12-16"). 
    - Keep descriptive text like "Men:" or "Women:" but REMOVE units (e.g., "g/dL", "mg/dL", "%") from the normal range field since units are already in field_unit.
@@ -456,9 +466,20 @@ Return ONLY valid JSON:
         yield f"data: {json.dumps({'percent': 75, 'message': 'Double-checking the results...'})}\n\n"
         print(f"🔍 Validating aggregated data ({len(all_extracted_data)} total items)...")
         
+        # Clean Patient Name
+        raw_name = patient_info.get('patient_name', '')
+        cleaned_name = raw_name
+        if cleaned_name:
+            # Remove labels like "Patient Name:", "Name:", "Mr." at start
+            # Added more patterns to catch "Name : John Doe" or "Patient: John Doe"
+            cleaned_name = re.sub(r'^(Name|Patient Name|Patient|Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s*[:\-\.]?\s*', '', cleaned_name, flags=re.IGNORECASE)
+            # Remove trailing noise like "Age:...", "Sex:...", "ID:...", "Date:..."
+            cleaned_name = re.sub(r'\s+(Age|Sex|Gender|ID|Date|Ref|Dr)\s*[:\-\.].*$', '', cleaned_name, flags=re.IGNORECASE)
+            cleaned_name = cleaned_name.strip()
+
         # Combine data
         final_data = {
-            'patient_name': patient_info.get('patient_name', ''),
+            'patient_name': cleaned_name,
             'patient_age': patient_info.get('patient_age', ''),
             'patient_gender': patient_info.get('patient_gender', ''),
             'report_date': patient_info.get('report_date', ''),
