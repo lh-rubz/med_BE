@@ -353,54 +353,115 @@ class ChatResource(Resource):
             # Build OPTIMIZED extraction prompt (reduced by ~40%)
             prompt_text = f"""Extract ALL medical data from this image (page {idx}/{total_pages}). 
  
- RULES: 
- 1. Extract EVERY test with its value, unit, normal range. 
-    - CRITICAL: Section headers (like "BIOCHEMISTRY", "ELECTROLYTES") are NOT tests. Do NOT extract them as items in the "medical_data" list. 
-    - Instead, use these headers to fill the "category" field for all tests following that header. 
-    - A row is only a test if it has a Result/Value. If a row has NO result, it is likely a header. 
- 2. Report Identification: 
-    - report_name: Extract the EXACT title written on the report. 
-    - report_type: Choose the CLOSEST match from this standard list: {', '.join(REPORT_TYPES)}. 
- 3. IMPORTANT - Full Names: 
-    - Extract the FULL patient name exactly as written. 
-    - Extract the FULL doctor names. 
-    - IF NO DOCTOR NAME IS FOUND, LEAVE "doctor_names" AS AN EMPTY STRING. Do NOT invent or guess a name. 
- 4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7"). 
-    - CRITICAL: Keep symbols like "<", ">", "+", or "-" if they are part of the result value (e.g., "< 6.0", "> 100", "+ve"). 
- 5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value 
- 6. Extract report date as YYYY-MM-DD 
- 7. Extract patient details (Age, Gender). 
- 8. IMPORTANT - Full Normal Range: 
-    - Extract the FULL normal range exactly as written, including all text and gender-specific info (e.g., "Men: 13-17, Women: 12-16"). 
-    - Keep descriptive text like "Men:" or "Women:" but REMOVE units (e.g., "g/dL", "mg/dL", "%") from the normal range field since units are already in field_unit. 
- 9. IMPORTANT - Extract category/section for EACH test: 
-    - Identify section headers (e.g., "DIFFERENTIAL COUNT", "BIOCHEMISTRY"). 
-    - Assign the EXACT header text (in UPPERCASE) to the "category" field for every test that belongs to that section. 
-    - Example: For a test under "ELECTROLYTES", the category should be "ELECTROLYTES". 
-    - If no category header visible, use empty string 
+ CRITICAL RULES: 
+ 
+ 1. STRICT HORIZONTAL ALIGNMENT - MOST IMPORTANT: 
+    - For EACH test, read values ONLY from the EXACT SAME HORIZONTAL LINE 
+    - DO NOT take values from rows above or below 
+    - Imagine a horizontal ruler across each row - all data must be on that line 
+    - VALIDATION: After extracting, verify values make medical sense: 
+      * RBC should be 4-6 (NOT 40) 
+      * WBC should be 4-11 (NOT 40-50) 
+      * Platelets should be 150-450 (NOT 0.1-0.3) 
+      * Hemoglobin should be 12-17 (NOT 40) 
+      * Hematocrit should be 36-50% (NOT 5 or 31) 
+      * All percentages should be 0-100 
+    - If a value fails these checks, you took it from the WRONG ROW 
+ 
+ 2. PRESERVE EXACT TABLE ORDER: 
+    - Extract tests in the EXACT order they appear in the table from top to bottom 
+    - medical_data list MUST match the vertical order in the image 
+    - DO NOT reorder or reorganize tests 
+ 
+ 3. EXTRACT ALL NON-EMPTY TESTS: 
+    - Extract EVERY row that has a test name AND a result value 
+    - Skip rows that are: 
+      * Section headers only (e.g., "BIOCHEMISTRY", "HEMATOLOGY") 
+      * Completely blank/empty 
+      * Contain only labels without values 
+    - If a test has a value, extract it regardless of whether it's normal or abnormal 
+ 
+ 4. PATIENT INFORMATION (REQUIRED): 
+    - patient_name: Extract FULL name. 
+      * Look for "Patient Name:", "Name:", "اسم المريض:" 
+      * EXCLUDE label words like "Patient", "Name", "اسم", "المريض", "المرضى" from the actual name 
+      * If Arabic: "اسم المريض: أحمد محمد" → extract "أحمد محمد" (NOT "المريض" or "المرضى") 
+    - patient_age: 
+      * Look for "Age:", "العمر:" 
+      * If you find DOB/Date of Birth (e.g., "01/05/1975"), CALCULATE age: report_year - birth_year 
+      * Return as NUMBER only: "50" (NOT "01/05/1975") 
+    - patient_gender: 
+      * Look for "Gender:", "Sex:", "الجنس:" 
+      * Accept: "Male", "Female", "M", "F", "ذكر" (Male), "أنثى" (Female) 
+      * Normalize to: "Male", "Female", "ذكر", or "أنثى" 
+    - doctor_names: Extract FULL name or leave empty "" if not found 
+      * Look for "Dr.", "Doctor:", "Ref Dr:", "الطبيب:" 
+ 
+ 5. REPORT IDENTIFICATION: 
+    - report_name: Extract EXACT title from report header 
+    - report_type: Choose CLOSEST match from: {', '.join(REPORT_TYPES)} 
+    - report_date: Extract as YYYY-MM-DD format 
+ 
+ 6. TEST EXTRACTION DETAILS: 
+    - field_name: Exact test name from report 
+      * Add % symbol if it's a percentage: "Neutrophils %" not "Neutrophils" when unit is % 
+    - field_value: Numeric value or qualitative result ("Normal", "Negative", "Positive") 
+      * Keep symbols: "<", ">", "+", "-" if part of result (e.g., "< 5.0") 
+      * Preserve exact decimals: "15.75" not "15.7" 
+    - field_unit: Unit of measurement (mg/dL, %, g/dL, etc.) 
+      * Use standard units: "10^9/L" for cell counts, "%" for percentages 
+    - normal_range: Extract FULL range with gender info if present 
+      * Keep: "Men: 13-17, Women: 12-16" 
+      * Remove units from range (already in field_unit) 
+    - is_normal: 
+      * true if value is within normal range 
+      * false if value is below minimum OR above maximum 
+      * Logic: is_normal = (min_range <= value <= max_range) 
+    - category: Section header for this test (e.g., "HEMATOLOGY", "BIOCHEMISTRY", "LIPID PROFILE") 
+      * Use UPPERCASE 
+      * Empty string if no header visible 
+    - notes: 
+      * "Marked as High on report" - only if you see H, ↑, or High flag ON THIS EXACT ROW 
+      * "Marked as Low on report" - only if you see L, ↓, or Low flag ON THIS EXACT ROW 
+      * Empty "" if no flag visible 
+ 
+ 7. DUPLICATE PREVENTION: 
+    - Extract each unique test ONLY ONCE 
+    - If same test appears on multiple pages, extract only from first occurrence 
+    - Exception: If test name is identical but units differ (e.g., "Neutrophils" in 10^9/L vs "Neutrophils %" in %), extract both 
+ 
+ 8. QUALITY CHECKS BEFORE RETURNING: 
+    ✓ Patient name is NOT empty (unless truly missing) 
+    ✓ Patient age is a NUMBER or empty (NOT a date like "01/05/1975") 
+    ✓ All test values are on correct horizontal rows 
+    ✓ No medically impossible values (RBC=40, Platelets=0.1) 
+    ✓ Tests are in same order as image 
+    ✓ is_normal logic is correct (value outside range = false) 
+    ✓ Notes only added when flags actually visible on that row 
+    ✓ No duplicate tests (unless truly different tests) 
  
  Return ONLY valid JSON: 
  {{ 
-     "patient_name": "...", 
-     "patient_age": "...", 
-     "patient_gender": "...", 
-     "report_date": "YYYY-MM-DD", 
-     "report_name": "...", 
-     "report_type": "...", 
-     "doctor_names": "...", 
-     "total_fields_in_image": <count>, 
+     "patient_name": "Full Name Here", 
+     "patient_age": "50", 
+     "patient_gender": "Male or ذكر", 
+     "report_date": "2025-12-31", 
+     "report_name": "Complete Blood Count", 
+     "report_type": "CBC", 
+     "doctor_names": "Dr. Name or empty string", 
+     "total_fields_in_image": <count of extracted tests>, 
      "medical_data": [ 
          {{ 
-             "field_name": "Test Name", 
-             "field_value": "123.45 OR 'Normal'", 
-             "field_unit": "g/dL or empty", 
-             "normal_range": "13.5-17.5 or empty", 
+             "field_name": "White Blood Cells (WBC)", 
+             "field_value": "7.1", 
+             "field_unit": "10^9/L", 
+             "normal_range": "4.0-11.0", 
              "is_normal": true, 
              "field_type": "measurement", 
-             "category": "DIFFERENTIAL COUNT or empty", 
-             "notes": "Marked as Low on report OR empty" 
+             "category": "HEMATOLOGY", 
+             "notes": "" 
          }} 
-     ]
+     ] 
  }}"""
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
