@@ -184,11 +184,14 @@ class ChatResource(Resource):
                     shared_with_user_id=current_user_id
                 ).first()
                 
-                if share and share.access_level in ['upload', 'manage']:
-                    prof = Profile.query.get(profile_id)
+                if share:
+                    if share.access_level in ['upload', 'manage']:
+                        prof = Profile.query.get(profile_id)
+                    else:
+                        return {'error': 'Permission Denied: You only have view access to this profile. Uploading is not allowed.', 'code': 'ACCESS_DENIED'}, 403
             
             if not prof:
-                return {'message': 'Invalid profile_id or unauthorized access (upload permission required)'}, 403
+                return {'error': 'Invalid profile_id or unauthorized access (upload permission required)', 'code': 'UNAUTHORIZED'}, 403
             target_profile_id = prof.id
         else:
             # Default to 'Self' profile
