@@ -16,7 +16,6 @@ import io
 from models import db, User, Report, ReportField, ReportFile, MedicalSynonym
 from config import ollama_client, Config
 from utils.medical_validator import validate_medical_data, MedicalValidator
-from utils.ocr_extractor import get_ocr_instance
 from utils.medical_mappings import add_new_alias
 from ollama import Client
 
