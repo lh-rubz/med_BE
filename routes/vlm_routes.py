@@ -360,10 +360,14 @@ CRITICAL CHECK:
 
 RULES:
 1. Extract EVERY test with its value, unit, normal range.
-   - CRITICAL: Read the table STRICTLY ROW-BY-ROW. Do not mix values between different rows.
+   - CRITICAL: Read the table STRICTLY ROW-BY-ROW from Top to Bottom.
    - HORIZONTAL ALIGNMENT IS KEY: The value MUST be on the exact same imaginary horizontal line as the test name.
    - NEAREST NEIGHBOR: If a row seems to have multiple numbers, pick the one closest to the "Result" column.
-   - NO DUPLICATION: Do not reuse a value from one row for another test. For example, if "Platelets" is 257, do NOT assign 257 to "MCH" unless MCH is actually 257.
+   - ALLOW DUPLICATES: If the exact same test name appears twice (e.g. "Monocytes" count and "Monocytes" percentage), EXTRACT BOTH.
+   - CHECK FOR SUFFIXES: Look closely if the text actually says "Monocytes %" or just "Monocytes". Extract EXACTLY what is written.
+   - UNIT DISTINCTION: Even if the names are identical, the UNIT is often different (e.g. "%" vs "K/uL"). Ensure the unit is extracted correctly for that specific row.
+   - PRESERVE ORDER: The "medical_data" list MUST match the exact vertical order of tests in the image.
+   - NO DUPLICATION OF VALUES: Do not reuse a value from one row for another test. For example, if "Platelets" is 257, do NOT assign 257 to "MCH" unless MCH is actually 257.
    - If a test has NO value on its line, leave field_value as empty string or "N/A". DO NOT look up or down for a number.
    - Section headers (like "BIOCHEMISTRY", "ELECTROLYTES") are NOT tests. Do NOT extract them as items in the "medical_data" list.
    - Instead, use these headers to fill the "category" field for all tests following that header.
@@ -376,15 +380,22 @@ RULES:
    - STOP extracting the name when you encounter another label (like "Age:", "ID:", "Date:", "Ref Dr:").
    - Example: If text says "Patient Name: John Doe Age: 45", extract ONLY "John Doe" for patient_name.
    - Extract the FULL doctor names.
+   - Look for labels like "Dr", "Doctor", "الطبيب", "المعالج".
+   - Example: "الطبيب: جهاد العملة" -> doctor_names: "جهاد العملة"
    - IF NO DOCTOR NAME IS FOUND, LEAVE "doctor_names" AS AN EMPTY STRING. Do NOT invent or guess a name.
    - SUPPORT ARABIC NAMES if present.
-     - Look for "اسم المريض" (Patient Name) and extract the text next to it (usually to the left or below).
+     - Look for "اسم المريض" (Patient Name) and extract the text next to it.
+     - Look for "الطبيب" (Doctor) and extract the name next to it.
      - Example: "اسم المريض: احمد" -> patient_name: "احمد"
 4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7").
-   - CRITICAL: Keep symbols like "<", ">", "+", or "-" if they are part of the result value (e.g., "< 6.0", "> 100", "+ve").
-   - HANDLING FLAGS: If a value has an asterisk (*), "L", "H", or "!" next to it, EXTRACT ONLY THE NUMBER in "field_value". Put the flag/indicator in "notes" or set "is_normal": false.
-   - Example: "* 230" -> field_value: "230", is_normal: false.
-5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
+   - CRITICAL: Keep symbols like "<", ">", "+", or "-" if they are part of the result value.
+   - HANDLING FLAGS: If a value has an asterisk (*), "L", "H", or "!" next to it, EXTRACT ONLY THE NUMBER in "field_value". Put the flag/indicator in "notes".
+   - EMPTY VALUES: If a test has a "*" but NO number, treat the value as empty/null. DO NOT take the number from the row above or below.
+5. RTL / ARABIC TABLE HANDLING:
+   - Check headers: If "الفحص" (Test) is on the RIGHT and "النتيجة" (Result) is to the LEFT, this is a Right-to-Left table.
+   - Action: Find the Test Name on the right, then look to its LEFT for the Value.
+   - Ensure the Value is on the EXACT SAME horizontal line.
+6. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
 6. Extract report date as YYYY-MM-DD. Look for "Date", "Report Date", or "تاريخ".
 7. Extract patient details (Age, Gender, Date of Birth).
    - Support ARABIC terms for Gender:
