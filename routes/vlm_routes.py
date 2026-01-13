@@ -94,8 +94,8 @@ def pdf_to_images(pdf_path):
     
     for page_num in range(len(pdf_document)):
         page = pdf_document[page_num]
-        # Render page to an image with 1.5x zoom (balanced quality/size)
-        pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+        # Render page to an image with 2.5x zoom (High quality ~180 DPI for better OCR)
+        pix = page.get_pixmap(matrix=fitz.Matrix(2.5, 2.5))
         img_data = pix.tobytes("png")
         
         # Compress the image to reduce size
@@ -120,17 +120,17 @@ def compress_image(image_data, format_hint='png'):
     elif img.mode != 'RGB':
         img = img.convert('RGB')
     
-    # Resize if image is very large (2000px for balance of speed and quality)
-    max_dimension = 2000
+    # Resize if image is very large (3000px limit allows for ~250DPI on A4, better for OCR)
+    max_dimension = 3000
     if max(img.size) > max_dimension:
         ratio = max_dimension / max(img.size)
         new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
         img = img.resize(new_size, Image.Resampling.LANCZOS)
         print(f"  ↓ Resized image to fit {max_dimension}px")
     
-    # Compress to JPEG with quality 85 (good balance)
+    # Compress to JPEG with quality 90 (High quality for text readability)
     output = io.BytesIO()
-    img.save(output, format='JPEG', quality=85, optimize=True)
+    img.save(output, format='JPEG', quality=90, optimize=True)
     compressed_data = output.getvalue()
     
     original_size = len(image_data) / 1024  # KB
