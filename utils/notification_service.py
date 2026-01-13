@@ -65,7 +65,7 @@ def send_push_notification(user_id, title, body, data=None):
         )
 
         # Send message
-        response = messaging.send_multicast(message)
+        response = messaging.send_each_for_multicast(message)
         print(f"✅ Sent push notification to {response.success_count} devices for user {user_id}")
         
         # Handle invalid tokens (cleanup)
