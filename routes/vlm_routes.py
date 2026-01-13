@@ -316,13 +316,22 @@ class ChatResource(Resource):
             
             # Build prompt (Reusing logic)
             # Build OPTIMIZED extraction prompt (reduced by ~40%)
-            prompt_text = f"""Extract ALL medical data from this image (page {idx}/{total_pages}).
+            prompt_text = f"""Analyze this image (page {idx}/{total_pages}) and determine if it is a medical report.
+
+CRITICAL CHECK:
+- If this image is CLEARLY NOT a medical document (e.g., selfie, landscape, car, receipt, blank page, animal), return ONLY:
+  {{ "is_medical_report": false, "reason": "Not a medical report" }}
+- If it IS a medical report, extract data using these rules:
 
 RULES:
 1. Extract EVERY test with its value, unit, normal range.
-   - CRITICAL: Section headers (like "BIOCHEMISTRY", "ELECTROLYTES") are NOT tests. Do NOT extract them as items in the "medical_data" list.
+   - CRITICAL: Read the table STRICTLY ROW-BY-ROW. Do not mix values between different rows.
+   - HORIZONTAL ALIGNMENT IS KEY: The value MUST be on the exact same imaginary horizontal line as the test name.
+   - NEAREST NEIGHBOR: If a row seems to have multiple numbers, pick the one closest to the "Result" column.
+   - NO DUPLICATION: Do not reuse a value from one row for another test. For example, if "Platelets" is 257, do NOT assign 257 to "MCH" unless MCH is actually 257.
+   - If a test has NO value on its line, leave field_value as empty string or "N/A". DO NOT look up or down for a number.
+   - Section headers (like "BIOCHEMISTRY", "ELECTROLYTES") are NOT tests. Do NOT extract them as items in the "medical_data" list.
    - Instead, use these headers to fill the "category" field for all tests following that header.
-   - A row is only a test if it has a Result/Value. If a row has NO result, it is likely a header.
 2. Report Identification:
    - report_name: Extract the EXACT title written on the report.
    - report_type: Choose the CLOSEST match from this standard list: {', '.join(REPORT_TYPES)}.
@@ -333,6 +342,8 @@ RULES:
    - SUPPORT ARABIC NAMES if present (e.g., "اسم المريض: ...").
 4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7").
    - CRITICAL: Keep symbols like "<", ">", "+", or "-" if they are part of the result value (e.g., "< 6.0", "> 100", "+ve").
+   - HANDLING FLAGS: If a value has an asterisk (*), "L", "H", or "!" next to it, EXTRACT ONLY THE NUMBER in "field_value". Put the flag/indicator in "notes" or set "is_normal": false.
+   - Example: "* 230" -> field_value: "230", is_normal: false.
 5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
 6. Extract report date as YYYY-MM-DD
 7. Extract patient details (Age, Gender, Date of Birth).
@@ -387,7 +398,8 @@ Return ONLY valid JSON:
                 completion = ollama_client.chat.completions.create(
                     model=Config.OLLAMA_MODEL,
                     messages=[{'role': 'user', 'content': content}],
-                    temperature=0.1
+                    temperature=0.1,
+                    response_format={"type": "json_object"}
                 )
                 response_text = completion.choices[0].message.content.strip()
                 print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
@@ -396,12 +408,28 @@ Return ONLY valid JSON:
                 extracted_data = {}
                 try:
                     import re
-                    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                    if json_match:
-                        extracted_data = json.loads(json_match.group())
-                        print(f"✅ JSON extracted after regex for Image {idx}")
-                except:
-                    pass
+                    # Try to find the largest outer JSON object
+                    start_idx = response_text.find('{')
+                    end_idx = response_text.rfind('}')
+                    
+                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                        json_str = response_text[start_idx:end_idx+1]
+                        extracted_data = json.loads(json_str)
+                        print(f"✅ JSON extracted for Image {idx}")
+                    else:
+                        print(f"⚠️ No JSON brackets found in response for Image {idx}")
+                        print(f"RAW: {response_text[:200]}...")
+                except Exception as json_err:
+                    print(f"⚠️ JSON Parsing Failed for Image {idx}: {json_err}")
+                    print(f"RAW RESPONSE: {response_text}")
+                
+                # Check for Non-Medical Report Flag
+                if extracted_data.get('is_medical_report') is False:
+                     error_msg = extracted_data.get('reason', 'The uploaded file does not appear to be a valid medical report.')
+                     print(f"⛔ Rejected as non-medical: {error_msg}")
+                     # yield f"data: {json.dumps({'error': error_msg, 'code': 'INVALID_DOCUMENT_TYPE'})}\n\n"
+                     # SKIP this page instead of aborting the whole process
+                     continue
                 
                 if extracted_data.get('medical_data'):
                     all_extracted_data.extend(extracted_data['medical_data'])
@@ -417,6 +445,12 @@ Return ONLY valid JSON:
                      
             except Exception as e:
                 print(f"❌ VLM Error on page {idx}: {e}")
+
+        # Check if we have ANY data after processing all pages
+        if not all_extracted_data:
+             error_msg = 'No valid medical data found in any of the uploaded images.'
+             yield f"data: {json.dumps({'error': error_msg, 'code': 'NO_DATA_FOUND'})}\n\n"
+             return
 
         # Step 3: Validation
         yield f"data: {json.dumps({'percent': 75, 'message': 'Double-checking the results...'})}\n\n"
