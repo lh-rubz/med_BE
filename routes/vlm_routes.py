@@ -386,6 +386,7 @@ RULES:
    - SUPPORT ARABIC NAMES if present.
      - Look for "اسم المريض" (Patient Name) and extract the text next to it.
      - CRITICAL: EXCLUDE the words "اسم" and "المريض" and "المرضى" from the extracted name.
+     - ACCURACY: Pay extra attention to Arabic letters. Do not confuse similar shapes (e.g. 'ح' vs 'ج'). Copy the text exactly as it appears in the image.
      - Look for "الطبيب" (Doctor) and extract the name next to it.
      - Example: "اسم المريض: احمد" -> patient_name: "احمد"
 4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7").
@@ -401,9 +402,15 @@ RULES:
    - COLUMN 4 (Left of Range): Unit.
    - ANCHORING: Lock onto the Test Name first, then look strictly to its LEFT for the corresponding value on the SAME LINE.
    - DO NOT MIX ROWS: "0.23" belongs to "Platelet Crit". Do not assign it to "Monocytes" which is further down.
-6. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
-6. Extract report date as YYYY-MM-DD. Look for "Date", "Report Date", or "تاريخ".
-7. Extract patient details (Age, Gender, Date of Birth).
+   - IMPORTANT: Verify row alignment. Do not let values "drift" up or down.
+6. COMPLETENESS CHECK (CRITICAL):
+   - You MUST extract EVERY SINGLE ROW in the table.
+   - Do not stop until you have reached the bottom of the list.
+   - If there are 20 tests visible, the "medical_data" list MUST have 20 items.
+   - Do not summarize. Do not skip "Normal" rows.
+7. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
+8. Extract report date as YYYY-MM-DD. Look for "Date", "Report Date", or "تاريخ".
+9. Extract patient details (Age, Gender, Date of Birth).
    - Support ARABIC terms for Gender:
      - "ذكر" = Male
      - "أنثى" or "انثى" = Female
@@ -411,20 +418,22 @@ RULES:
    - Support ARABIC terms for Age (e.g., "سنة" or "عام" for Years).
    - If Age is NOT explicitly written but Date of Birth (DOB) is found (look for "DOB" or "تاريخ الميلاد"), CALCULATE the age based on the Report Date.
    - Example: DOB 1975, Report 2025 -> Age 50.
-8. IMPORTANT - Full Normal Range:
+10. IMPORTANT - Full Normal Range:
    - Extract the FULL normal range exactly as written, including all text and gender-specific info (e.g., "Men: 13-17, Women: 12-16"). 
    - Keep descriptive text like "Men:" or "Women:" but REMOVE units (e.g., "g/dL", "mg/dL", "%") from the normal range field since units are already in field_unit.
-9. IMPORTANT - Extract category/section for EACH test:
+11. IMPORTANT - Extract category/section for EACH test:
    - Identify section headers (e.g., "DIFFERENTIAL COUNT", "BIOCHEMISTRY").
    - Assign the EXACT header text (in UPPERCASE) to the "category" field for every test that belongs to that section.
    - Example: For a test under "ELECTROLYTES", the category should be "ELECTROLYTES".
    - If no category header visible, use empty string
+12. FINAL VALIDATION:
+   - Count the number of tests you found.
+   - Verify that you haven't missed the bottom half of the table.
 
 Return ONLY valid JSON:
 {{
     "patient_name": "...",
     "patient_age": "...",
-    "patient_gender": "...",
     "patient_gender": "...",
     "report_date": "YYYY-MM-DD",
     "report_name": "...",
