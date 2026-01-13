@@ -386,21 +386,23 @@ RULES:
    - SUPPORT ARABIC NAMES if present.
      - Look for "اسم المريض" (Patient Name) and extract the text next to it.
      - CRITICAL: EXCLUDE the words "اسم" and "المريض" and "المرضى" from the extracted name.
-     - ACCURACY: Pay extra attention to Arabic letters. Do not confuse similar shapes (e.g. 'ح' vs 'ج'). Copy the text exactly as it appears in the image.
+     - ACCURACY: Copy the text exactly as it appears in the image.
      - Look for "الطبيب" (Doctor) and extract the name next to it.
-     - Example: "اسم المريض: احمد" -> patient_name: "احمد"
+     - Do NOT use the example "Ahmed" if it's not in the image.
 4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7").
    - CRITICAL: Keep symbols like "<", ">", "+", or "-" if they are part of the result value.
    - HANDLING FLAGS: If a value has an asterisk (*), "L", "H", or "!" next to it, EXTRACT ONLY THE NUMBER in "field_value". Put the flag/indicator in "notes".
    - EMPTY VALUES: If a test has a "*" but NO number, treat the value as empty/null. DO NOT take the number from the row above or below.
 5. RTL / ARABIC TABLE HANDLING (CRITICAL):
-   - DETECT LAYOUT: If headers like "الفحص" (Test) are on the RIGHT and "النتيجة" (Result) are to the LEFT:
+   - IGNORE HEADERS: Do NOT extract the table header row (containing "Test Name", "Result", "Unit", "Range") as a data row.
+   - DETECT LAYOUT: If the Test Names are on the RIGHT side of the page:
    - READ DIRECTION: Read the columns from RIGHT to LEFT.
-   - COLUMN 1 (Far Right): Test Name (e.g. "Platelet Crit").
-   - COLUMN 2 (Immediate Left of Name): Result Value (e.g. "0.23").
-   - COLUMN 3 (Left of Result): Normal Range.
-   - COLUMN 4 (Left of Range): Unit.
-   - ANCHORING: Lock onto the Test Name first, then look strictly to its LEFT for the corresponding value on the SAME LINE.
+   - COLUMN MAPPING:
+     - The text on the FAR RIGHT is the **Test Name** (e.g. "Platelet Crit").
+     - The number immediately to its LEFT is the **Result Value** (e.g. "0.23").
+     - The text immediately to the LEFT of the Result is the **Normal Range**.
+     - The text immediately to the LEFT of the Range is the **Unit**.
+   - ANCHORING: Lock onto the Test Name first. The value MUST be on the same horizontal line.
    - DO NOT MIX ROWS: "0.23" belongs to "Platelet Crit". Do not assign it to "Monocytes" which is further down.
    - IMPORTANT: Verify row alignment. Do not let values "drift" up or down.
 6. COMPLETENESS CHECK (CRITICAL):
