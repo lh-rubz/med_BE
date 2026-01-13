@@ -358,79 +358,129 @@ CRITICAL CHECK:
   {{ "is_medical_report": false, "reason": "Not a medical report" }}
 - If it IS a medical report, extract data using these rules:
 
-RULES:
-1. Extract EVERY test with its value, unit, normal range.
-   - CRITICAL: Read the table STRICTLY ROW-BY-ROW from Top to Bottom.
-   - HORIZONTAL ALIGNMENT IS KEY: The value MUST be on the exact same imaginary horizontal line as the test name.
-   - NEAREST NEIGHBOR: If a row seems to have multiple numbers, pick the one closest to the "Result" column.
-   - ALLOW DUPLICATES: If the exact same test name appears twice (e.g. "Monocytes" count and "Monocytes" percentage), EXTRACT BOTH.
-   - CHECK FOR SUFFIXES: Look closely if the text actually says "Monocytes %" or just "Monocytes". Extract EXACTLY what is written.
-   - UNIT DISTINCTION: Even if the names are identical, the UNIT is often different (e.g. "%" vs "K/uL"). Ensure the unit is extracted correctly for that specific row.
-   - PRESERVE ORDER: The "medical_data" list MUST match the exact vertical order of tests in the image.
-   - NO DUPLICATION OF VALUES: Do not reuse a value from one row for another test. For example, if "Platelets" is 257, do NOT assign 257 to "MCH" unless MCH is actually 257.
-   - If a test has NO value on its line, leave field_value as empty string or "N/A". DO NOT look up or down for a number.
-   - Section headers (like "BIOCHEMISTRY", "ELECTROLYTES") are NOT tests. Do NOT extract them as items in the "medical_data" list.
-   - Instead, use these headers to fill the "category" field for all tests following that header.
-2. Report Identification:
-   - report_name: Extract the EXACT title written on the report.
-   - report_type: Choose the CLOSEST match from this standard list: {', '.join(REPORT_TYPES)}.
-3. IMPORTANT - Full Names:
+You are analyzing a medical laboratory report. Your previous extraction had CRITICAL ERRORS. Fix them by following these EXACT rules:
+
+## CRITICAL FIXES NEEDED:
+
+### Issue #1: "Test Name" in field_name
+**WRONG:** {{"field_name": "Test Name", "field_value": "Creatinine, serum"}}
+**CORRECT:** {{"field_name": "Creatinine, serum", "field_value": "0.85"}}
+
+- The TEST NAME goes in "field_name"
+- The NUMERIC RESULT or qualitative result (like "Negative") goes in "field_value"
+- NEVER put "Test Name" as the field_name value
+
+### Issue #2: Row Alignment Errors
+**CRITICAL TABLE READING RULES:**
+
+1. **Identify Table Structure First:**
+   - Find the column headers: "Test Name", "Result", "Unit", "Normal Range"
+   - Determine if it's LTR (Left-to-Right) or RTL (Right-to-Left)
+
+2. **For Each Row:**
+   - Lock onto the test name FIRST
+   - Move HORIZONTALLY on the SAME LINE to find:
+     - Result value (number or text)
+     - Unit (mg/dL, %, g/dL, etc.)
+     - Normal range
+   
+3. **Common Mistakes to AVOID:**
+   - ❌ Taking a value from the row above or below
+   - ❌ Mixing values between "Monocytes %" and "Monocytes" (absolute count)
+   - ❌ Assigning the same value to multiple tests
+   - ❌ Reading diagonally instead of horizontally
+
+### Issue #3: Units Must Match the Test Type
+
+**Common test patterns:**
+- **CBC components:**
+  - WBC, RBC, Platelets → usually "10^9/L" or "K/uL" or "cells/L"
+  - Hemoglobin → "g/dL"
+  - Hematocrit → "%"
+  - MCV → "fL"
+  - MCH → "pg"
+  - MCHC → "g/dL" or "%"
+  
+- **Differential counts:**
+  - Neutrophils %, Lymphocytes %, Monocytes % → "%"
+  - Neutrophils (absolute), Lymphocytes (absolute) → "10^9/L" or "K/uL"
+
+- **Chemistry:**
+  - Glucose, Creatinine, Urea, Cholesterol → "mg/dL" or "mmol/L"
+  - ALT, AST → "U/L" or "IU/L"
+
+**VERIFY:** If the unit seems wrong for the test type, recheck the column alignment.
+
+### Issue #4: is_normal Flag Logic
+```python
+# Your logic should be:
+value = float(field_value)
+range_parts = normal_range.split('-')
+min_val = float(range_parts[0])
+max_val = float(range_parts[1])
+
+is_normal = min_val <= value <= max_val
+```
+
+**Current errors:**
+- Monocytes % 14.4 with range 3-7 → Should be HIGH (is_normal: false), but you marked it as Low
+- Always check: value BELOW range = Low, value ABOVE range = High
+
+### Issue #5: Handling Flags and Markers
+
+If you see asterisks (*), L, H, or arrows (↑↓):
+- Extract ONLY the number in "field_value"
+- Put "Marked as High on report" or "Marked as Low on report" in "notes"
+- Set is_normal based on actual comparison, not just the flag
+
+---
+
+## Step-by-Step Extraction Process:
+
+**STEP 1:** Look at the image and count total rows in the table (excluding header)
+
+**STEP 2:** For EACH row, read strictly left-to-right or right-to-left:
+Row 1: [Test Name] | [Value] | [Unit] | [Range]
+↓              ↓         ↓        ↓
+field_name    field_value  field_unit  normal_range
+
+**STEP 3:** Double-check alignment by asking:
+- "Is this value directly next to this test name on the same horizontal line?"
+- "Does this unit make sense for this test type?"
+- "Have I already used this value for another test?"
+
+**STEP 4:** Validate completeness:
+- Count extracted tests vs. visible rows
+- Verify no "Test Name" appears in field_name
+- Verify all field_value entries are numbers or qualitative terms (never test names)
+
+---
+
+## INSTRUCTIONS FOR PATIENT & REPORT INFO:
+
+1. **Patient Name (CRITICAL):**
    - Extract the FULL patient name exactly as written.
-   - CRITICAL: EXCLUDE labels such as "Name:", "Patient Name:", "Patient:" from the value.
-   - STOP extracting the name when you encounter another label (like "Age:", "ID:", "Date:", "Ref Dr:").
-   - Example: If text says "Patient Name: John Doe Age: 45", extract ONLY "John Doe" for patient_name.
-   - Extract the FULL doctor names.
-   - Look for labels like "Dr", "Doctor", "الطبيب", "المعالج".
-   - Example: "الطبيب: جهاد العملة" -> doctor_names: "جهاد العملة"
-   - IF NO DOCTOR NAME IS FOUND, LEAVE "doctor_names" AS AN EMPTY STRING. Do NOT invent or guess a name.
    - SUPPORT ARABIC NAMES if present.
-     - Look for "اسم المريض" (Patient Name) and extract the text next to it.
-     - CRITICAL: EXCLUDE the words "اسم" and "المريض" and "المرضى" from the extracted name.
-     - ACCURACY: Copy the text exactly as it appears in the image.
-     - Look for "الطبيب" (Doctor) and extract the name next to it.
-     - Do NOT use the example "Ahmed" if it's not in the image.
-4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7").
-   - CRITICAL: Keep symbols like "<", ">", "+", or "-" if they are part of the result value.
-   - HANDLING FLAGS: If a value has an asterisk (*), "L", "H", or "!" next to it, EXTRACT ONLY THE NUMBER in "field_value". Put the flag/indicator in "notes".
-   - EMPTY VALUES: If a test has a "*" but NO number, treat the value as empty/null. DO NOT take the number from the row above or below.
-5. RTL / ARABIC TABLE HANDLING (CRITICAL):
-   - IGNORE HEADERS: Do NOT extract the table header row (containing "Test Name", "Result", "Unit", "Range") as a data row.
-   - DETECT LAYOUT: If the Test Names are on the RIGHT side of the page:
-   - READ DIRECTION: Read the columns from RIGHT to LEFT.
-   - COLUMN MAPPING:
-     - The text on the FAR RIGHT is the **Test Name** (e.g. "Platelet Crit").
-     - The number immediately to its LEFT is the **Result Value** (e.g. "0.23").
-     - The text immediately to the LEFT of the Result is the **Normal Range**.
-     - The text immediately to the LEFT of the Range is the **Unit**.
-   - ANCHORING: Lock onto the Test Name first. The value MUST be on the same horizontal line.
-   - DO NOT MIX ROWS: "0.23" belongs to "Platelet Crit". Do not assign it to "Monocytes" which is further down.
-   - IMPORTANT: Verify row alignment. Do not let values "drift" up or down.
-6. COMPLETENESS CHECK (CRITICAL):
-   - You MUST extract EVERY SINGLE ROW in the table.
-   - Do not stop until you have reached the bottom of the list.
-   - If there are 20 tests visible, the "medical_data" list MUST have 20 items.
-   - Do not summarize. Do not skip "Normal" rows.
-7. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
-8. Extract report date as YYYY-MM-DD. Look for "Date", "Report Date", or "تاريخ".
-9. Extract patient details (Age, Gender, Date of Birth).
-   - Support ARABIC terms for Gender:
-     - "ذكر" = Male
-     - "أنثى" or "انثى" = Female
-     - Look for "الجنس" (Gender) label.
-   - Support ARABIC terms for Age (e.g., "سنة" or "عام" for Years).
-   - If Age is NOT explicitly written but Date of Birth (DOB) is found (look for "DOB" or "تاريخ الميلاد"), CALCULATE the age based on the Report Date.
-   - Example: DOB 1975, Report 2025 -> Age 50.
-10. IMPORTANT - Full Normal Range:
-   - Extract the FULL normal range exactly as written, including all text and gender-specific info (e.g., "Men: 13-17, Women: 12-16"). 
-   - Keep descriptive text like "Men:" or "Women:" but REMOVE units (e.g., "g/dL", "mg/dL", "%") from the normal range field since units are already in field_unit.
-11. IMPORTANT - Extract category/section for EACH test:
-   - Identify section headers (e.g., "DIFFERENTIAL COUNT", "BIOCHEMISTRY").
-   - Assign the EXACT header text (in UPPERCASE) to the "category" field for every test that belongs to that section.
-   - Example: For a test under "ELECTROLYTES", the category should be "ELECTROLYTES".
-   - If no category header visible, use empty string
-12. FINAL VALIDATION:
-   - Count the number of tests you found.
-   - Verify that you haven't missed the bottom half of the table.
+   - Look for "اسم المريض" (Patient Name) and extract the text next to it.
+   - **CRITICAL:** EXCLUDE labels such as "Name:", "Patient Name:", "Patient:", "اسم", "المريض" from the extracted value.
+   - **ACCURACY:** Copy the text EXACTLY as it appears in the image. Do NOT invent names.
+
+2. **Report Details:**
+   - Extract `report_date` (YYYY-MM-DD).
+   - Extract `doctor_names` (Look for "Dr", "Doctor", "الطبيب").
+   - Extract `patient_age` and `patient_gender`.
+   - **Gender:** "ذكر" = Male, "أنثى" = Female.
+
+---
+
+## FINAL CHECKLIST Before Returning JSON:
+
+- [ ] Every field_name contains an actual test name (never "Test Name")
+- [ ] Every field_value contains a number or qualitative result (never a test name)
+- [ ] No duplicate values across different tests unless truly identical
+- [ ] Units match the test type (% for percentages, proper units for counts)
+- [ ] is_normal correctly reflects whether value is within range
+- [ ] Total count matches visible rows in table
 
 Return ONLY valid JSON:
 {{
