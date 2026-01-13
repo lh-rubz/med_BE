@@ -548,20 +548,43 @@ class UserReportDetail(Resource):
             }
         }, 200
 
-    @reports_ns.doc(security='Bearer Auth', description='DELETE endpoint - FOR TESTING ONLY')
+    @reports_ns.doc(security='Bearer Auth', description='DELETE endpoint')
     @jwt_required()
     def delete(self, report_id):
-        """Delete a specific report by ID - FOR TESTING PURPOSES ONLY"""
+        """Delete a specific report by ID"""
         current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
             return {'message': 'User not found'}, 404
         
-        report = Report.query.filter_by(id=report_id, user_id=current_user_id).first()
+        report = Report.query.get(report_id)
         
         if not report:
             return {'message': 'Report not found'}, 404
+        
+        # Check permissions
+        # 1. Report Owner (Uploader)
+        is_authorized = (report.user_id == current_user_id)
+        
+        # 2. Profile Owner (if report is linked to a profile)
+        if not is_authorized and report.profile_id:
+            profile = Profile.query.get(report.profile_id)
+            if profile and profile.creator_id == current_user_id:
+                is_authorized = True
+            
+            # 3. Shared Profile Manager
+            if not is_authorized:
+                from models import ProfileShare
+                share = ProfileShare.query.filter_by(
+                    profile_id=report.profile_id, 
+                    shared_with_user_id=current_user_id
+                ).first()
+                if share and share.access_level == 'manage':
+                    is_authorized = True
+        
+        if not is_authorized:
+             return {'message': 'Unauthorized: You do not have permission to delete this report'}, 403
         
         try:
             ReportField.query.filter_by(report_id=report_id).delete()
@@ -570,7 +593,7 @@ class UserReportDetail(Resource):
             db.session.commit()
             
             return {
-                'message': 'Report deleted successfully (TESTING MODE)',
+                'message': 'Report deleted successfully',
                 'deleted_report_id': report_id
             }, 200
         except Exception as e:
