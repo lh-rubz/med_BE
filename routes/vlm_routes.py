@@ -533,13 +533,27 @@ Return ONLY valid JSON:
             import traceback
             traceback.print_exc()
 
-        # Step 4: Duplicate Check (using report hash)
-        yield f"data: {json.dumps({'percent': 85, 'message': 'Ensuring this is a new report...'})}\n\n"
+        # Parse extracted report date (YYYY-MM-DD), fallback to now()
+        # Moved before Duplicate Check to allow semantic date matching
+        report_date_obj = datetime.now(timezone.utc)
+        extracted_date = final_data.get('report_date')
+        date_is_valid = False
+        
+        if extracted_date and len(extracted_date) >= 10:
+            try:
+                # Parse YYYY-MM-DD
+                report_date_obj = datetime.strptime(extracted_date[:10], '%Y-%m-%d')
+                date_is_valid = True
+            except:
+                print(f"⚠️ Could not parse report date: {extracted_date}, using now()")
+
+        # Step 4: Duplicate Check (Semantic & Exact)
+        yield f"data: {json.dumps({'percent': 85, 'message': 'Checking for duplicates...'})}\n\n"
         
         try:
             medical_data_list = final_data.get('medical_data', [])
             if len(medical_data_list) > 0:
-                # Calculate report hash
+                # 1. Strict Hash Check (Fastest)
                 report_hash = hashlib.sha256(json.dumps(medical_data_list, sort_keys=True).encode()).hexdigest()
                 
                 # Check if this exact report already exists for this user
@@ -548,8 +562,50 @@ Return ONLY valid JSON:
                     report_hash=report_hash
                 ).first()
                 
+                # 2. Semantic Check (Content Similarity)
+                # Handles cases like PDF vs Images where hash differs but content is identical
+                if not existing_report and date_is_valid:
+                    # Look for reports on the SAME DATE by this user
+                    candidates = Report.query.filter(
+                        Report.user_id == current_user_id,
+                        Report.report_date == report_date_obj
+                    ).all()
+                    
+                    if candidates:
+                        print(f"🔍 Found {len(candidates)} reports on {report_date_obj.date()}. Checking content similarity...")
+                        
+                        # Prepare current report set {(name_norm, value_norm)}
+                        current_set = set()
+                        for item in medical_data_list:
+                            n = item.get('field_name', '').strip().lower()
+                            v = str(item.get('field_value', '')).strip().lower()
+                            if n and v:
+                                current_set.add((n, v))
+                        
+                        if len(current_set) > 0:
+                            for cand in candidates:
+                                # Fetch candidate fields
+                                cand_fields = ReportField.query.filter_by(report_id=cand.id).all()
+                                cand_set = set()
+                                for f in cand_fields:
+                                    n = f.field_name.strip().lower()
+                                    v = f.field_value.strip().lower()
+                                    cand_set.add((n, v))
+                                
+                                # Calculate Overlap
+                                intersection = current_set.intersection(cand_set)
+                                overlap_ratio = len(intersection) / len(current_set) if len(current_set) > 0 else 0
+                                
+                                print(f"   - Candidate #{cand.id}: {len(intersection)}/{len(current_set)} matches ({overlap_ratio:.2f})")
+                                
+                                # Threshold: if > 75% of extracted fields match -> DUPLICATE
+                                if overlap_ratio > 0.75:
+                                    existing_report = cand
+                                    print(f"❌ DETECTED SEMANTIC DUPLICATE of Report #{cand.id}")
+                                    break
+
                 if existing_report:
-                    error_msg = f'This report appears to be a duplicate of an existing report (#{existing_report.id})'
+                    error_msg = f'Duplicate Detected: This report content matches an existing report (#{existing_report.id}) from {existing_report.report_date.strftime("%Y-%m-%d")}'
                     yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_REPORT', 'report_id': existing_report.id})}\n\n"
                     return
                 
@@ -565,15 +621,7 @@ Return ONLY valid JSON:
             # Calculate report hash
             report_hash = hashlib.sha256(json.dumps(final_data['medical_data'], sort_keys=True).encode()).hexdigest()
             
-            # Parse extracted report date (YYYY-MM-DD), fallback to now()
-            report_date_obj = datetime.now(timezone.utc)
-            extracted_date = final_data.get('report_date')
-            if extracted_date and len(extracted_date) >= 10:
-                try:
-                    # Parse YYYY-MM-DD
-                    report_date_obj = datetime.strptime(extracted_date[:10], '%Y-%m-%d')
-                except:
-                    print(f"⚠️ Could not parse report date: {extracted_date}, using now()")
+            # report_date_obj is already parsed above
 
             # Categorize report
             from utils.medical_mappings import categorize_report_type
