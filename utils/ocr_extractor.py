@@ -7,6 +7,7 @@ import io
 from PIL import Image
 from typing import List, Dict, Tuple, Optional
 import re
+from datetime import datetime
 
 
 class MedicalOCR:
@@ -159,6 +160,56 @@ class MedicalOCR:
                         extracted['doctor_name'] = doctor_name
                         break
             
+            # Extract Age (supports English and Arabic)
+            age_match = re.search(r'(?:Age|العمر)[:\s]+(\d+)[\s]*(?:Y|Years|Year|yrs|سنة|عام)?', full_text, re.IGNORECASE)
+            if age_match:
+                extracted['patient_age'] = age_match.group(1).strip()
+            
+            # Calculate Age from DOB if not found
+            if 'patient_age' not in extracted:
+                dob_match = re.search(r'(?:Date of Birth|DOB|D\.O\.B|Birth Date|تاريخ الميلاد)[:\s]+(\d{2}[-/]\d{2}[-/]\d{4})', full_text, re.IGNORECASE)
+                if dob_match:
+                    try:
+                        dob_str = dob_match.group(1).strip()
+                        dob_date = None
+                        # Try common formats
+                        for fmt in ['%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d', '%m/%d/%Y']:
+                            try:
+                                dob_date = datetime.strptime(dob_str, fmt)
+                                break
+                            except ValueError:
+                                continue
+                        
+                        if dob_date:
+                            # Determine reference date (Report Date or Today)
+                            ref_date = datetime.now()
+                            if extracted.get('report_date'):
+                                for fmt in ['%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d']:
+                                    try:
+                                        ref_date = datetime.strptime(extracted['report_date'], fmt)
+                                        break
+                                    except ValueError:
+                                        continue
+                            
+                            # Calculate age
+                            age = ref_date.year - dob_date.year - ((ref_date.month, ref_date.day) < (dob_date.month, dob_date.day))
+                            if age >= 0:
+                                extracted['patient_age'] = str(age)
+                                print(f"💡 Calculated age from DOB ({dob_str}): {age}")
+                    except Exception as e:
+                        print(f"⚠️ Failed to calculate age from DOB: {e}")
+
+            # Extract Gender (supports English and Arabic)
+            gender_match = re.search(r'(?:Gender|Sex|الجنس)[:\s]+([A-Za-z]+|ذكر|أنثى|انثى)', full_text, re.IGNORECASE)
+            if gender_match:
+                g = gender_match.group(1).strip().lower()
+                if g in ['male', 'm', 'ذكر']:
+                    extracted['patient_gender'] = 'Male'
+                elif g in ['female', 'f', 'أنثى', 'انثى']:
+                    extracted['patient_gender'] = 'Female'
+                else:
+                    extracted['patient_gender'] = g.capitalize()
+
             return extracted
         except Exception as e:
             print(f"❌ Structured extraction error: {e}")

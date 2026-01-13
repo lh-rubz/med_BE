@@ -331,11 +331,15 @@ RULES:
    - Extract the FULL patient name exactly as written.
    - Extract the FULL doctor names.
    - IF NO DOCTOR NAME IS FOUND, LEAVE "doctor_names" AS AN EMPTY STRING. Do NOT invent or guess a name.
+   - SUPPORT ARABIC NAMES if present (e.g., "اسم المريض: ...").
 4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7").
    - CRITICAL: Keep symbols like "<", ">", "+", or "-" if they are part of the result value (e.g., "< 6.0", "> 100", "+ve").
 5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
 6. Extract report date as YYYY-MM-DD
-7. Extract patient details (Age, Gender).
+7. Extract patient details (Age, Gender, Date of Birth).
+   - Support ARABIC terms for Gender (e.g., "ذكر" for Male, "أنثى" for Female).
+   - Support ARABIC terms for Age (e.g., "سنة" or "عام" for Years).
+   - If Age is NOT explicitly written but Date of Birth (DOB) is found, CALCULATE the age based on the Report Date (or today if Report Date is missing).
 8. IMPORTANT - Full Normal Range:
    - Extract the FULL normal range exactly as written, including all text and gender-specific info (e.g., "Men: 13-17, Women: 12-16"). 
    - Keep descriptive text like "Men:" or "Women:" but REMOVE units (e.g., "g/dL", "mg/dL", "%") from the normal range field since units are already in field_unit.
