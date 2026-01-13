@@ -435,6 +435,23 @@ If you see asterisks (*), L, H, or arrows (↑↓):
 
 ---
 
+### Issue #6: Test Name Validation
+**Real vs Fake Test Names:**
+
+❌ WRONG:
+- "White blood cells%" → Not a standard test
+- "Test Name" → Placeholder, not extracted
+
+✅ CORRECT:
+- "White blood cells (WBC)" → Absolute count
+- "Neutrophils %" → Percentage 
+- "Neutrophils (Absolute)" → Absolute count
+- "Red blood cells (RBC)" → Absolute count
+
+**If you see unusual test names, recheck the image.**
+
+---
+
 ## Step-by-Step Extraction Process:
 
 **STEP 1:** Look at the image and count total rows in the table (excluding header)
@@ -454,6 +471,11 @@ field_name    field_value  field_unit  normal_range
 - Verify no "Test Name" appears in field_name
 - Verify all field_value entries are numbers or qualitative terms (never test names)
 
+**STEP 5: CATEGORY EXTRACTION (REQUIRED)**
+- Look for section headers like "HEMATOLOGY", "BIOCHEMISTRY", "LIPID PROFILE".
+- Assign the current header to all tests below it until a new header appears.
+- Example: "category": "HEMATOLOGY"
+
 ---
 
 ## INSTRUCTIONS FOR PATIENT & REPORT INFO:
@@ -470,6 +492,10 @@ field_name    field_value  field_unit  normal_range
    - Extract `doctor_names` (Look for "Dr", "Doctor", "الطبيب").
    - Extract `patient_age` and `patient_gender`.
    - **Gender:** "ذكر" = Male, "أنثى" = Female.
+   - **AGE CALCULATION (MANDATORY):**
+     - If age is written as a date (e.g., "01/05/1975"), CALCULATE the age.
+     - Formula: Age = Report Year - Birth Year.
+     - Return ONLY the number (e.g., "50").
 
 ---
 
@@ -491,6 +517,7 @@ Return ONLY valid JSON:
     "report_name": "...",
     "report_type": "...",
     "doctor_names": "...",
+    "is_medical_report": true,
     "total_fields_in_image": <count>,
     "medical_data": [
         {{
@@ -554,8 +581,34 @@ Return ONLY valid JSON:
                      continue
                 
                 if extracted_data.get('medical_data'):
-                    all_extracted_data.extend(extracted_data['medical_data'])
-                    print(f"✅ Extracted {len(extracted_data['medical_data'])} field(s) from page {idx}")
+                    new_items = extracted_data['medical_data']
+                    
+                    # --- DUPLICATE PREVENTION LOGIC ---
+                    unique_new_items = []
+                    existing_test_names = {item['field_name'].lower() for item in all_extracted_data}
+                    
+                    for item in new_items:
+                        test_name = item.get('field_name', '').strip()
+                        test_val = item.get('field_value', '').strip()
+                        
+                        # Skip empty or placeholder items
+                        if not test_name or test_name.lower() == 'test name':
+                            continue
+                            
+                        # Check for exact name match
+                        if test_name.lower() in existing_test_names:
+                            print(f"⚠️ Duplicate test skipped: {test_name}")
+                            continue
+                            
+                        # Basic Validation
+                        if not test_val or test_val.lower() in ['n/a', 'unknown']:
+                             continue
+                             
+                        unique_new_items.append(item)
+                        existing_test_names.add(test_name.lower())
+                    
+                    all_extracted_data.extend(unique_new_items)
+                    print(f"✅ Extracted {len(unique_new_items)} UNIQUE field(s) from page {idx}")
                 
                 # Capture patient info (prefer the most complete one)
                 new_name = extracted_data.get('patient_name', '')
