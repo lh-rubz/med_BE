@@ -352,33 +352,28 @@ class ProfileTransfer(Resource):
         current_user_id = int(get_jwt_identity())
         data = request.json
         
-        # 1. Verify Ownership
-        profile = Profile.query.filter_by(id=id, creator_id=current_user_id).first()
+        profile = Profile.query.get(id)
         if not profile:
-            return {'message': 'Profile not found or you are not the owner'}, 404
+            return {'message': 'Profile not found'}, 404
+        if profile.creator_id != current_user_id:
+            return {'message': 'You are not the owner of this profile'}, 403
             
         if profile.relationship == 'Self':
             return {'message': 'Cannot transfer your own primary profile'}, 400
 
-        # 2. Verify Target User
         target_user = User.query.filter_by(email=data['email']).first()
         if not target_user:
-            return {'message': 'Target user not found'}, 404
+            return {'message': 'Target account not found for this email'}, 400
             
         if target_user.id == current_user_id:
             return {'message': 'Cannot transfer to yourself'}, 400
             
-        # 3. Execute Transfer
-        # - Update creator to new user
-        # - Set relationship to 'Self' (it becomes their main profile)
         old_owner_id = profile.creator_id
         profile.creator_id = target_user.id
         profile.relationship = 'Self'
         
-        # 4. Auto-Share back to Old Owner (so they don't lose access)
         from models import ProfileShare as ProfileShareModel
         
-        # Check if share already exists (unlikely given ownership, but safety first)
         existing_share = ProfileShareModel.query.filter_by(
             profile_id=id,
             shared_with_user_id=old_owner_id
@@ -396,7 +391,13 @@ class ProfileTransfer(Resource):
             
         db.session.commit()
         
-        return {'message': f'Profile ownership transferred to {target_user.email}. You retain manage access.'}
+        return {
+            'id': profile.id,
+            'first_name': profile.first_name,
+            'last_name': profile.last_name,
+            'creator_id': profile.creator_id,
+            'access_level': 'owner'
+        }, 200
 
 @profile_ns.route('/shared_with_me')
 class SharedProfiles(Resource):
