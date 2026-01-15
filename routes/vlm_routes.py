@@ -351,93 +351,233 @@ class ChatResource(Resource):
             
             # Build prompt (Reusing logic)
             # Build OPTIMIZED extraction prompt (reduced by ~40%)
-            prompt_text = f"""Analyze this image (page {idx}/{total_pages}) and determine if it is a medical report.
-
-CRITICAL CHECK:
-- If this image is CLEARLY NOT a medical document (e.g., selfie, landscape, car, receipt, blank page, animal), return ONLY:
-  {{ "is_medical_report": false, "reason": "Not a medical report" }}
-- If it IS a medical report, extract data using these rules:
-
-RULES:
-1. Extract EVERY test with its value, unit, normal range.
-   - CRITICAL: Read the table STRICTLY ROW-BY-ROW from Top to Bottom.
-   - HORIZONTAL ALIGNMENT IS KEY: The value MUST be on the exact same imaginary horizontal line as the test name.
-   - NEAREST NEIGHBOR: If a row seems to have multiple numbers, pick the one closest to the "Result" column.
-   - ALLOW DUPLICATES: If the exact same test name appears twice (e.g. "Monocytes" count and "Monocytes" percentage), EXTRACT BOTH.
-   - CHECK FOR SUFFIXES: Look closely if the text actually says "Monocytes %" or just "Monocytes". Extract EXACTLY what is written.
-   - UNIT DISTINCTION: Even if the names are identical, the UNIT is often different (e.g. "%" vs "K/uL"). Ensure the unit is extracted correctly for that specific row.
-   - PRESERVE ORDER: The "medical_data" list MUST match the exact vertical order of tests in the image.
-   - NO DUPLICATION OF VALUES: Do not reuse a value from one row for another test. For example, if "Platelets" is 257, do NOT assign 257 to "MCH" unless MCH is actually 257.
-   - If a test has NO value on its line, leave field_value as empty string or "N/A". DO NOT look up or down for a number.
-   - Section headers (like "BIOCHEMISTRY", "ELECTROLYTES") are NOT tests. Do NOT extract them as items in the "medical_data" list.
-   - Instead, use these headers to fill the "category" field for all tests following that header.
-2. Report Identification:
-   - report_name: Extract the EXACT title written on the report.
-   - report_type: Choose the CLOSEST match from this standard list: {', '.join(REPORT_TYPES)}.
-3. IMPORTANT - Full Names:
-   - Extract the FULL patient name exactly as written.
-   - CRITICAL: EXCLUDE labels such as "Name:", "Patient Name:", "Patient:" from the value.
-   - STOP extracting the name when you encounter another label (like "Age:", "ID:", "Date:", "Ref Dr:").
-   - Example: If text says "Patient Name: John Doe Age: 45", extract ONLY "John Doe" for patient_name.
-   - Extract the FULL doctor names.
-   - Look for labels like "Dr", "Doctor", "الطبيب", "المعالج".
-   - Example: "الطبيب: جهاد العملة" -> doctor_names: "جهاد العملة"
-   - IF NO DOCTOR NAME IS FOUND, LEAVE "doctor_names" AS AN EMPTY STRING. Do NOT invent or guess a name.
-   - SUPPORT ARABIC NAMES if present.
-     - Look for "اسم المريض" (Patient Name) and extract the text next to it.
-     - Look for "الطبيب" (Doctor) and extract the name next to it.
-     - Example: "اسم المريض: احمد" -> patient_name: "احمد"
-4. Preserve EXACT decimal precision (e.g., "15.75" not "15.7").
-   - CRITICAL: Keep symbols like "<", ">", "+", or "-" if they are part of the result value.
-   - HANDLING FLAGS: If a value has an asterisk (*), "L", "H", or "!" next to it, EXTRACT ONLY THE NUMBER in "field_value". Put the flag/indicator in "notes".
-   - EMPTY VALUES: If a test has a "*" but NO number, treat the value as empty/null. DO NOT take the number from the row above or below.
-5. RTL / ARABIC TABLE HANDLING:
-   - Check headers: If "الفحص" (Test) is on the RIGHT and "النتيجة" (Result) is to the LEFT, this is a Right-to-Left table.
-   - Action: Find the Test Name on the right, then look to its LEFT for the Value.
-   - Ensure the Value is on the EXACT SAME horizontal line.
-6. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
-6. Extract report date as YYYY-MM-DD. Look for "Date", "Report Date", or "تاريخ".
-7. Extract patient details (Age, Gender, Date of Birth).
-   - Support ARABIC terms for Gender:
-     - "ذكر" = Male
-     - "أنثى" or "انثى" = Female
-     - Look for "الجنس" (Gender) label.
-   - Support ARABIC terms for Age (e.g., "سنة" or "عام" for Years).
-   - If Age is NOT explicitly written but Date of Birth (DOB) is found (look for "DOB" or "تاريخ الميلاد"), CALCULATE the age based on the Report Date.
-   - Example: DOB 1975, Report 2025 -> Age 50.
-8. IMPORTANT - Full Normal Range:
-   - Extract the FULL normal range exactly as written, including all text and gender-specific info (e.g., "Men: 13-17, Women: 12-16"). 
-   - Keep descriptive text like "Men:" or "Women:" but REMOVE units (e.g., "g/dL", "mg/dL", "%") from the normal range field since units are already in field_unit.
-9. IMPORTANT - Extract category/section for EACH test:
-   - Identify section headers (e.g., "DIFFERENTIAL COUNT", "BIOCHEMISTRY").
-   - Assign the EXACT header text (in UPPERCASE) to the "category" field for every test that belongs to that section.
-   - Example: For a test under "ELECTROLYTES", the category should be "ELECTROLYTES".
-   - If no category header visible, use empty string
-
-Return ONLY valid JSON:
-{{
-    "patient_name": "...",
-    "patient_age": "...",
-    "patient_gender": "...",
-    "patient_gender": "...",
-    "report_date": "YYYY-MM-DD",
-    "report_name": "...",
-    "report_type": "...",
-    "doctor_names": "...",
-    "total_fields_in_image": <count>,
-    "medical_data": [
-        {{
-            "field_name": "Test Name",
-            "field_value": "123.45 OR 'Normal'",
-            "field_unit": "g/dL or empty",
-            "normal_range": "13.5-17.5 or empty",
-            "is_normal": true,
-            "field_type": "measurement",
-            "category": "DIFFERENTIAL COUNT or empty",
-            "notes": "Marked as Low on report OR empty"
-        }}
-    ]
-}}"""
+            prompt_text = f"""Extract ALL medical data from this image (page {idx}/{total_pages}). 
+ 
+ CRITICAL RULES FOR ACCURATE EXTRACTION: 
+ 
+ 1. STRICT HORIZONTAL ALIGNMENT - READ ROW BY ROW: 
+    - For EACH test row, read ALL values from the EXACT SAME HORIZONTAL LINE 
+    - Use an imaginary horizontal ruler across the page 
+    - DO NOT drift up or down to adjacent rows 
+    - The test name, value, unit, and range MUST all be horizontally aligned 
+    
+    VALIDATION AFTER EXTRACTION: 
+    - RBC: Must be 4.0-6.0 (if you got 40, you read Hematocrit) 
+    - WBC: Must be 4.0-11.0 (if you got 40-70, you read a percentage) 
+    - Platelets: Must be 150-450 (if you got 0.1-0.3, you read Monocytes or PCT) 
+    - Hemoglobin: Must be 12-17 (if you got 40, you read Hematocrit) 
+    - Hematocrit: Must be 36-50% (if you got 24 or 77, you read MCH or MCV) 
+    - Monocytes %: Must be 0-10% (if you got 0.1, that's absolute count) 
+    - Eosinophils %: Must be 0-5% (if you got 0.0, that's absolute count) 
+    - Basophils %: Must be 0-1% (if you got 0.0, that's absolute count) 
+ 
+ 2. PERCENTAGE vs ABSOLUTE COUNT DETECTION: 
+    Look at BOTH the value AND the normal range to determine if it's a percentage or absolute count: 
+    
+    PERCENTAGE TESTS (unit = "%"): 
+    - Range is typically 0-100 (e.g., 20-40, 40-75, 3-10) 
+    - Value is typically 0-100 (e.g., 57.8, 41.1, 5.2) 
+    - Test name should include "%": "Neutrophils %", "Lymphocytes %", "Monocytes %" 
+    
+    ABSOLUTE COUNT TESTS (unit = "10^9/L" or "cells/L"): 
+    - Range is typically 0-10 (e.g., 2.0-7.0, 0.2-1.0, 0.04-0.5) 
+    - Value is typically 0-10 (e.g., 4.1, 0.1, 0.0) 
+    - Test name has NO %: "Neutrophils", "Lymphocytes", "Monocytes" 
+    
+    DECISION RULE: 
+    If value is 5.2 with range 3-7: 
+    - Could be "Monocytes %" (5.2% is normal for 3-7%) 
+    - Unit = "%" 
+    
+    If value is 0.1 with range 0.2-1.0: 
+    - This is "Monocytes" absolute count (0.1 × 10^9/L) 
+    - Unit = "10^9/L" or "cells/L" 
+ 
+ 3. COMMON TEST IDENTIFICATION ERRORS - CHECK THESE: 
+    
+    a) MCV vs MCH vs MPV confusion: 
+    - MCV (Mean Cell Volume): 80-100 fL - measures red blood cell size 
+    - MCH (Mean Cell Hemoglobin): 27-31 pg - measures hemoglobin per cell 
+    - MPV (Mean Platelet Volume): 7-11 fL - measures platelet size 
+    - MCHC (Mean Cell Hemoglobin Concentration): 31-35 g/dL 
+    
+    WRONG PATTERN: 
+    {{ 
+      "field_name": "Mean Platelet Volume (MPV)", 
+      "field_value": "24.2", 
+      "normal_range": "80-100" 
+    }} 
+    → This is WRONG! MPV range is 7-11, not 80-100 
+    → 24.2 with range 27-31 = MCH 
+    → 77.3 with range 80-100 = MCV 
+    
+    b) Differential Count Percentages: 
+    Look at the section header - if it says "DIFFERENTIAL COUNT" or "DIFF": 
+    - All values in this section are PERCENTAGES 
+    - Add % to each test name 
+    - Unit is "%" 
+ 
+ 4. EXTRACT ALL TESTS - DON'T STOP EARLY: 
+    A complete CBC typically includes 15-25 tests: 
+    
+    MAIN CBC PARAMETERS: 
+    - WBC (White Blood Cells) 
+    - RBC (Red Blood Cells) 
+    - Hemoglobin (HGB) 
+    - Hematocrit (HCT) 
+    - MCV (Mean Cell Volume) 
+    - MCH (Mean Cell Hemoglobin) 
+    - MCHC (Mean Cell Hemoglobin Concentration) 
+    - RDW (Red Cell Distribution Width) 
+    - Platelets 
+    - MPV (Mean Platelet Volume) 
+    - PDW (Platelet Distribution Width) - optional 
+    - PCT (Plateletcrit) - optional 
+    
+    DIFFERENTIAL COUNT (Percentages): 
+    - Neutrophils % 
+    - Lymphocytes % 
+    - Monocytes % 
+    - Eosinophils % 
+    - Basophils % 
+    
+    ABSOLUTE COUNTS (optional): 
+    - Neutrophils (absolute) 
+    - Lymphocytes (absolute) 
+    - Monocytes (absolute) 
+    - Eosinophils (absolute) 
+    - Basophils (absolute) 
+    
+    If you only extracted 12 tests, CHECK if you missed: 
+    - MCV, MCH, MCHC (red cell indices) 
+    - Absolute counts of differential 
+    - PDW, PCT, or other platelet parameters 
+ 
+ 5. PATIENT INFORMATION EXTRACTION: 
+    
+    patient_name: 
+    - Look for: "Patient Name:", "Name:", "اسم المريض:", "اسم:", "Patient:" 
+    - Extract ONLY the actual name, EXCLUDE label words 
+    - Arabic labels to exclude: "اسم", "المريض", "المرضى", "المريضة" 
+    - Example: "اسم المريض: أحمد محمد" → extract "أحمد محمد" 
+    - Example: "Patient Name: John Smith" → extract "John Smith" 
+    - If you see "المرضى" alone, this is NOT a name (it means "the patients") 
+    
+    patient_age: 
+    - Look for: "Age:", "العمر:", "DOB:", "Date of Birth:", "تاريخ الميلاد:" 
+    - If you find a DATE (e.g., "01/05/1975"), CALCULATE the age: 
+      age = report_year - birth_year 
+    - Return ONLY the number: "50" (NOT "01/05/1975") 
+    - If age not found, return empty string "" 
+    
+    patient_gender: 
+    - Look for: "Gender:", "Sex:", "الجنس:", "M/F" 
+    - Normalize to: "Male", "Female", "ذكر", or "أنثى" 
+    - Accept: M, F, Male, Female, ذكر, أنثى 
+    
+    doctor_names: 
+    - Look for: "Dr.", "Doctor:", "Ref Dr:", "الطبيب:", "Physician:" 
+    - Extract FULL name 
+    - If not found, return empty string "" 
+ 
+ 6. TABLE ORDER PRESERVATION: 
+    - Extract tests in EXACT vertical order as they appear 
+    - Start from top row, go to bottom row 
+    - DO NOT reorder or reorganize 
+    - medical_data list order = table row order 
+ 
+ 7. NORMAL RANGE EXTRACTION: 
+    - Extract FULL range including gender-specific info: 
+      "Men: 13-17, Women: 12-16" ✓ 
+    - Keep descriptive text: "Men:", "Women:", "Male:", "Female:" 
+    - REMOVE units from normal range (already in field_unit): 
+      "13-17 g/dL" → extract as "13-17" 
+    - If range has multiple formats, keep all: 
+      "<0.05 or 0-0.5" ✓ 
+ 
+ 8. is_normal LOGIC: 
+    value = float(field_value) 
+    min_val = extract_minimum_from(normal_range) 
+    max_val = extract_maximum_from(normal_range) 
+    
+    if min_val <= value <= max_val: 
+        is_normal = true 
+    else: 
+        is_normal = false 
+    
+    Examples: 
+    - Value 41.1, Range 20-40 → is_normal = false (41.1 > 40) 
+    - Value 32, Range 35-80 → is_normal = false (32 < 35) 
+    - Value 7.1, Range 4.0-11.0 → is_normal = true 
+ 
+ 9. NOTES FIELD: 
+    - Add notes ONLY if you see a flag symbol on the SAME ROW as the test 
+    - Flags: H, L, High, Low, ↑, ↓, *, ! 
+    - "Marked as High on report" - only if H, ↑, or High visible 
+    - "Marked as Low on report" - only if L, ↓, or Low visible 
+    - Empty "" if no flag 
+ 
+ 10. QUALITY CHECKS BEFORE RETURNING JSON: 
+     ✓ Patient name is extracted (not empty, not "المرضى") 
+     ✓ Patient age is NUMBER not DATE (50 not 01/05/1975) 
+     ✓ All percentage tests have "%" in name and unit="%" 
+     ✓ All absolute counts have proper units (10^9/L or cells/L) 
+     ✓ Test values match their ranges medically: 
+       - RBC 4-6 ✓ 
+       - Platelets 150-450 ✓ 
+       - Monocytes% 0-10% ✓ 
+       - MCV 80-100 fL ✓ 
+       - MCH 27-31 pg ✓ 
+       - MPV 7-11 fL ✓ 
+     ✓ No test name mismatch (MPV with range 80-100 is WRONG) 
+     ✓ Extracted all visible tests (15-25 for CBC) 
+     ✓ Tests in same order as report 
+     ✓ No duplicate tests 
+     ✓ is_normal correctly calculated 
+ 
+ Return ONLY valid JSON: 
+ {{ 
+     "patient_name": "أحمد محمد", 
+     "patient_age": "50", 
+     "patient_gender": "ذكر", 
+     "report_date": "2025-12-31", 
+     "report_name": "Complete Blood Count", 
+     "report_type": "{', '.join(REPORT_TYPES)}", 
+     "doctor_names": "", 
+     "total_fields_in_image": <exact count>, 
+     "medical_data": [ 
+         {{ 
+             "field_name": "White Blood Cells (WBC)", 
+             "field_value": "7.1", 
+             "field_unit": "10^9/L", 
+             "normal_range": "4.0-11.0", 
+             "is_normal": true, 
+             "field_type": "measurement", 
+             "category": "HEMATOLOGY", 
+             "notes": "" 
+         }}, 
+         {{ 
+             "field_name": "Neutrophils %", 
+             "field_value": "57.8", 
+             "field_unit": "%", 
+             "normal_range": "40-75", 
+             "is_normal": true, 
+             "field_type": "measurement", 
+             "category": "DIFFERENTIAL COUNT", 
+             "notes": "" 
+         }}, 
+         {{ 
+             "field_name": "Mean Cell Volume (MCV)", 
+             "field_value": "77.3", 
+             "field_unit": "fL", 
+             "normal_range": "80-100", 
+             "is_normal": false, 
+             "field_type": "measurement", 
+             "category": "RED CELL INDICES", 
+             "notes": "" 
+         }} 
+     ] 
+ }}"""
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                 image_format = image_info['format']
@@ -487,8 +627,34 @@ Return ONLY valid JSON:
                      continue
                 
                 if extracted_data.get('medical_data'):
-                    all_extracted_data.extend(extracted_data['medical_data'])
-                    print(f"✅ Extracted {len(extracted_data['medical_data'])} field(s) from page {idx}")
+                    new_items = extracted_data['medical_data']
+                    
+                    # --- DUPLICATE PREVENTION LOGIC ---
+                    unique_new_items = []
+                    existing_test_names = {item['field_name'].lower() for item in all_extracted_data}
+                    
+                    for item in new_items:
+                        test_name = item.get('field_name', '').strip()
+                        test_val = item.get('field_value', '').strip()
+                        
+                        # Skip empty or placeholder items
+                        if not test_name or test_name.lower() == 'test name':
+                            continue
+                            
+                        # Check for exact name match
+                        if test_name.lower() in existing_test_names:
+                            print(f"⚠️ Duplicate test skipped: {test_name}")
+                            continue
+                            
+                        # Basic Validation
+                        if not test_val or test_val.lower() in ['n/a', 'unknown']:
+                             continue
+                             
+                        unique_new_items.append(item)
+                        existing_test_names.add(test_name.lower())
+                    
+                    all_extracted_data.extend(unique_new_items)
+                    print(f"✅ Extracted {len(unique_new_items)} UNIQUE field(s) from page {idx}")
                 
                 # Capture patient info (prefer the most complete one)
                 new_name = extracted_data.get('patient_name', '')
