@@ -576,10 +576,34 @@ class UserReportDetail(Resource):
         if not user:
             return {'message': 'User not found'}, 404
         
-        report = Report.query.filter_by(id=report_id, user_id=current_user_id).first()
-        
+        report = Report.query.get(report_id)
         if not report:
             return {'message': 'Report not found'}, 404
+
+        profile_id = request.args.get('profile_id')
+
+        if profile_id:
+            try:
+                profile_id = int(profile_id)
+            except ValueError:
+                return {'message': 'Invalid profile_id'}, 400
+
+            if report.profile_id != profile_id:
+                return {'message': 'Report not found'}, 404
+
+            from models import ProfileShare
+
+            profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            if not profile:
+                share = ProfileShare.query.filter_by(
+                    profile_id=profile_id,
+                    shared_with_user_id=current_user_id
+                ).first()
+                if not share:
+                    return {'message': 'Report not found or unauthorized access'}, 404
+        else:
+            if report.user_id != current_user_id:
+                return {'message': 'Report not found or unauthorized access'}, 404
         
         try:
             ReportField.query.filter_by(report_id=report_id).delete()
