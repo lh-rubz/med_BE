@@ -327,6 +327,12 @@ class ChatResource(Resource):
         total_pages = len(images_list)
         all_extracted_data = []
         patient_info = {}
+        report_owner_id = current_user_id
+        if profile_id:
+            from models import Profile
+            profile = Profile.query.get(profile_id)
+            if profile:
+                report_owner_id = profile.creator_id
         
         yield f"data: {json.dumps({'percent': 20, 'message': f'Analyzing your medical report...'})}\n\n"
         
@@ -824,7 +830,7 @@ class ChatResource(Resource):
                 
                 # Check if this exact report already exists for this user
                 existing_report = Report.query.filter_by(
-                    user_id=current_user_id,
+                        user_id=report_owner_id,
                     report_hash=report_hash
                 ).first()
                 
@@ -833,7 +839,7 @@ class ChatResource(Resource):
                 if not existing_report and date_is_valid:
                     # Look for reports on the SAME DATE by this user
                     candidates = Report.query.filter(
-                        Report.user_id == current_user_id,
+                        Report.user_id == report_owner_id,
                         Report.report_date == report_date_obj
                     ).all()
                     
@@ -899,7 +905,7 @@ class ChatResource(Resource):
                     safe_report_type = raw_report_type
 
             new_report = Report(
-                user_id=current_user_id,
+                user_id=report_owner_id,
                 profile_id=profile_id,
                 report_date=report_date_obj,
                 report_hash=report_hash,
@@ -918,13 +924,13 @@ class ChatResource(Resource):
             
             # Save files
             for f in saved_files:
-                rf = ReportFile(report_id=new_report.id, user_id=current_user_id, **{k:v for k,v in f.items() if k!='is_pdf'})
+                rf = ReportFile(report_id=new_report.id, user_id=report_owner_id, **{k:v for k,v in f.items() if k!='is_pdf'})
                 if f['is_pdf']:
                      # Find associated pages for PDF
                      pdf_pages = [img for img in images_list if img['source_filename'] == f['original_filename']]
                      for p in pdf_pages:
                          rf_page = ReportFile(
-                             report_id=new_report.id, user_id=current_user_id, 
+                             report_id=new_report.id, user_id=report_owner_id, 
                              original_filename=f['original_filename'], stored_filename=f['stored_filename'],
                              file_path=f['file_path'], file_type=f['file_type'], file_size=f['file_size'],
                              file_hash=f['file_hash'], page_number=p.get('page_number')
@@ -939,7 +945,7 @@ class ChatResource(Resource):
                 if isinstance(item, dict):
                     field = ReportField(
                         report_id=new_report.id,
-                        user_id=current_user_id,
+                        user_id=report_owner_id,
                         field_name=item.get('field_name', 'Unknown'),
                         field_value=str(item.get('field_value', '')),
                         field_unit=str(item.get('field_unit', '')),
