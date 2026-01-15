@@ -222,8 +222,16 @@ class ChatResource(Resource):
                     file_content = file.read()
                     file_hash = hashlib.sha256(file_content).hexdigest()
                     file.seek(0)
-                    
-                    existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
+
+                    existing_file = None
+                    if target_profile_id:
+                        existing_file = db.session.query(ReportFile).join(Report, ReportFile.report_id == Report.id).filter(
+                            ReportFile.file_hash == file_hash,
+                            Report.profile_id == target_profile_id
+                        ).first()
+                    else:
+                        existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
+
                     if existing_file:
                         return {
                             'error': f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})',
@@ -256,7 +264,15 @@ class ChatResource(Resource):
                     file.seek(0)
                     
                     if not allow_duplicate:
-                        existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
+                        existing_file = None
+                        if profile_id:
+                            existing_file = db.session.query(ReportFile).join(Report, ReportFile.report_id == Report.id).filter(
+                                ReportFile.file_hash == file_hash,
+                                Report.profile_id == profile_id
+                            ).first()
+                        else:
+                            existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
+
                         if existing_file:
                             error_msg = f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})'
                             yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_FILE', 'report_id': existing_file.report_id})}\n\n"
@@ -862,14 +878,20 @@ class ChatResource(Resource):
                     
                     existing_report = Report.query.filter_by(
                         user_id=report_owner_id,
+                        profile_id=profile_id,
                         report_hash=report_hash
                     ).first()
                     
                     if not existing_report and date_is_valid:
-                        candidates = Report.query.filter(
+                        query = Report.query.filter(
                             Report.user_id == report_owner_id,
                             Report.report_date == report_date_obj
-                        ).all()
+                        )
+                        if profile_id is None:
+                            query = query.filter(Report.profile_id.is_(None))
+                        else:
+                            query = query.filter(Report.profile_id == profile_id)
+                        candidates = query.all()
                         
                         if candidates:
                             print(f"🔍 Found {len(candidates)} reports on {report_date_obj.date()}. Checking content similarity...")
