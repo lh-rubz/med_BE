@@ -262,21 +262,22 @@ class Timeline(Resource):
         # Check for profile_id filter
         profile_id = request.args.get('profile_id')
         
-        # Build query
-        query = Report.query.filter_by(user_id=current_user_id)
-        
+        report_owner_id = current_user_id
         if profile_id:
-            # Verify user owns this profile or has shared access
+            profile_id = int(profile_id)
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
-            
             if not profile:
                 from models import ProfileShare
                 share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
                 if share:
                     profile = Profile.query.get(profile_id)
-            
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
+            if profile.creator_id != current_user_id:
+                report_owner_id = profile.creator_id
+        
+        query = Report.query.filter_by(user_id=report_owner_id)
+        if profile_id:
             query = query.filter_by(profile_id=profile_id)
             
         # Get reports ordered by date
@@ -323,7 +324,9 @@ class HealthTrends(Resource):
         field_names = request.args.get('field_name', '').split(',')
         profile_id = request.args.get('profile_id')
         
+        owner_id = current_user_id
         if profile_id:
+            profile_id = int(profile_id)
             # Verify user owns this profile or has shared access
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
             
@@ -335,6 +338,8 @@ class HealthTrends(Resource):
 
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
+            if profile.creator_id != current_user_id:
+                owner_id = profile.creator_id
         
         if not field_names or field_names == ['']:
             return {'message': 'Please provide field_name parameter'}, 400
@@ -352,7 +357,7 @@ class HealthTrends(Resource):
             filters = [ReportField.field_name.ilike(f"%{term}%") for term in search_terms]
             
             query = db.session.query(ReportField, Report.report_date).join(Report).filter(
-                ReportField.user_id == current_user_id,
+                ReportField.user_id == owner_id,
                 or_(*filters)
             )
             
@@ -400,12 +405,12 @@ class TimelineStats(Resource):
         current_user_id = int(get_jwt_identity())
         profile_id = request.args.get('profile_id')
         
-        query = Report.query.filter_by(user_id=current_user_id)
+        report_owner_id = current_user_id
+        query = Report.query
         
         if profile_id:
-            # Verify user owns this profile or has shared access
+            profile_id = int(profile_id)
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
-            
             if not profile:
                 from models import ProfileShare
                 share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
@@ -414,7 +419,11 @@ class TimelineStats(Resource):
 
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
-            query = query.filter_by(profile_id=profile_id)
+            if profile.creator_id != current_user_id:
+                report_owner_id = profile.creator_id
+            query = query.filter_by(user_id=report_owner_id, profile_id=profile_id)
+        else:
+            query = query.filter_by(user_id=current_user_id)
             
         total_reports = query.count()
         last_report = query.order_by(Report.report_date.desc()).first()
