@@ -884,14 +884,19 @@ class ChatResource(Resource):
         
         new_report_id = None
         try:
-            # Calculate report hash
             report_hash = hashlib.sha256(json.dumps(final_data['medical_data'], sort_keys=True).encode()).hexdigest()
-            
-            # report_date_obj is already parsed above
 
-            # Categorize report
             from utils.medical_mappings import categorize_report_type
             report_category = categorize_report_type(final_data.get('report_type'))
+
+            raw_report_type = final_data.get('report_type')
+            safe_report_type = None
+            if isinstance(raw_report_type, str):
+                raw_report_type = raw_report_type.strip()
+                if len(raw_report_type) > 100:
+                    safe_report_type = raw_report_type[:97] + '...'
+                else:
+                    safe_report_type = raw_report_type
 
             new_report = Report(
                 user_id=current_user_id,
@@ -899,7 +904,7 @@ class ChatResource(Resource):
                 report_date=report_date_obj,
                 report_hash=report_hash,
                 report_name=final_data.get('report_name'),
-                report_type=final_data.get('report_type'),
+                report_type=safe_report_type,
                 report_category=report_category,
                 patient_name=final_data.get('patient_name'),
                 patient_age=final_data.get('patient_age'),
