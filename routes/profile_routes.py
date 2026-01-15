@@ -1,7 +1,7 @@
 from flask import request
 from flask_restx import Resource, Namespace, fields
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from models import db, User, Profile, Report, ReportField, AdditionalField, ReportFile
+from models import db, User, Profile, Report, ReportField, AdditionalField, ReportFile, FamilyConnection
 from datetime import datetime
 
 profile_ns = Namespace('profiles', description='Managed Profile operations')
@@ -229,20 +229,34 @@ class ProfileDetail(Resource):
     def delete(self, id):
         """Delete a managed profile or remove a shared profile"""
         current_user_id = int(get_jwt_identity())
-        
-        # 1. Try to find as Owned Profile
+
         profile = Profile.query.filter_by(id=id, creator_id=current_user_id).first()
-        
+
         if profile:
             if profile.relationship == 'Self':
                 return {'message': 'Cannot delete your own primary profile'}, 400
 
-            # Unlink reports before deleting
-            Report.query.filter_by(profile_id=profile.id).update({Report.profile_id: None})
-            
-            db.session.delete(profile)
-            db.session.commit()
-            return {'message': 'Profile deleted successfully'}
+            try:
+                FamilyConnection.query.filter_by(profile_id=profile.id).delete()
+                Report.query.filter_by(profile_id=profile.id).update({Report.profile_id: None})
+
+                db.session.delete(profile)
+                db.session.commit()
+                return {'message': 'Profile deleted successfully'}
+            except Exception as e:
+                db.session.rollback()
+                error_message = str(e)
+
+                if 'ForeignKeyViolation' in error_message or 'foreign key constraint' in error_message.lower():
+                    return {
+                        'message': 'Cannot delete profile because it is still linked to other records. Please remove related connections first.',
+                        'error': error_message
+                    }, 400
+
+                return {
+                    'message': 'Failed to delete profile',
+                    'error': error_message
+                }, 500
             
         # 2. Try to find as Shared Profile (Remove Access)
         from models import ProfileShare as ProfileShareModel
