@@ -492,7 +492,8 @@ class GoogleCallback(Resource):
                     'first_name': user.first_name,
                     'last_name': user.last_name,
                     'profile_image': user.profile_image,
-                    'google_login': True
+                    'google_login': True,
+                    'biometric_allowed': getattr(user, 'biometric_allowed', True)
                 },
                 'is_new_user': is_new_user,
                 'missing_fields': missing_fields
@@ -628,7 +629,8 @@ class GoogleAuthPost(Resource):
                     'first_name': user.first_name,
                     'last_name': user.last_name,
                     'profile_image': user.profile_image,
-                    'social_login': True
+                    'social_login': True,
+                    'biometric_allowed': getattr(user, 'biometric_allowed', True)
                 },
                 'is_new_user': is_new_user,
                 'missing_fields': missing_fields
