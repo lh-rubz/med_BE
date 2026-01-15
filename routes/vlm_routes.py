@@ -513,32 +513,38 @@ class ChatResource(Resource):
     - Value 32, Range 35-80 → is_normal = false (32 < 35) 
     - Value 7.1, Range 4.0-11.0 → is_normal = true 
  
- 9. NOTES FIELD: 
-    - Add notes ONLY if you see a flag symbol on the SAME ROW as the test 
-    - Flags: H, L, High, Low, ↑, ↓, *, ! 
-    - "Marked as High on report" - only if H, ↑, or High visible 
-    - "Marked as Low on report" - only if L, ↓, or Low visible 
-    - Empty "" if no flag 
- 
- 10. QUALITY CHECKS BEFORE RETURNING JSON: 
-     ✓ Patient name is extracted (not empty, not "المرضى") 
-     ✓ Patient age is NUMBER not DATE (50 not 01/05/1975) 
-     ✓ All percentage tests have "%" in name and unit="%" 
-     ✓ All absolute counts have proper units (10^9/L or cells/L) 
-     ✓ Test values match their ranges medically: 
-       - RBC 4-6 ✓ 
-       - Platelets 150-450 ✓ 
-       - Monocytes% 0-10% ✓ 
-       - MCV 80-100 fL ✓ 
-       - MCH 27-31 pg ✓ 
-       - MPV 7-11 fL ✓ 
-     ✓ No test name mismatch (MPV with range 80-100 is WRONG) 
-     ✓ Extracted all visible tests (15-25 for CBC) 
-     ✓ Tests in same order as report 
-     ✓ No duplicate tests 
-     ✓ is_normal correctly calculated 
- 
- Return ONLY valid JSON: 
+        9. NOTES FIELD: 
+        - Add notes ONLY if you see a flag symbol on the SAME ROW as the test 
+        - Flags: H, L, High, Low, ↑, ↓, *, ! 
+        - "Marked as High on report" - only if H, ↑, or High visible 
+        - "Marked as Low on report" - only if L, ↓, or Low visible 
+        - Empty "" if no flag 
+        
+        10. QUALITY CHECKS BEFORE RETURNING JSON: 
+            ✓ Patient name is extracted (not empty, not "المرضى") 
+            ✓ Patient age is NUMBER not DATE (50 not 01/05/1975) 
+            ✓ All percentage tests have "%" in name and unit="%" 
+            ✓ All absolute counts have proper units (10^9/L or cells/L) 
+            ✓ Test values match their ranges medically: 
+              - RBC 4-6 ✓ 
+              - Platelets 150-450 ✓ 
+              - Monocytes% 0-10% ✓ 
+              - MCV 80-100 fL ✓ 
+              - MCH 27-31 pg ✓ 
+              - MPV 7-11 fL ✓ 
+            ✓ No test name mismatch (MPV with range 80-100 is WRONG) 
+            ✓ Extracted all visible tests (15-25 for CBC) 
+            ✓ Tests in same order as report 
+            ✓ No duplicate tests 
+            ✓ is_normal correctly calculated 
+        
+        11. ZERO GUESSING POLICY: 
+            - If a cell has no clear numeric or qualitative result, DO NOT invent a value 
+            - If you cannot read a test value confidently, skip that test completely 
+            - Do NOT infer gender, age, or report type from name or context; only read explicit labels 
+            - If patient_age, patient_gender, or report_type are not clearly visible, return them as "" 
+        
+        Return ONLY valid JSON: 
  {{ 
      "patient_name": "أحمد محمد", 
      "patient_age": "50", 
@@ -632,7 +638,6 @@ class ChatResource(Resource):
                 if extracted_data.get('medical_data'):
                     new_items = extracted_data['medical_data']
                     
-                    # --- DUPLICATE PREVENTION LOGIC ---
                     unique_new_items = []
                     existing_test_names = {item['field_name'].lower() for item in all_extracted_data}
                     
@@ -640,18 +645,27 @@ class ChatResource(Resource):
                         test_name = item.get('field_name', '').strip()
                         test_val = item.get('field_value', '').strip()
                         
-                        # Skip empty or placeholder items
                         if not test_name or test_name.lower() == 'test name':
                             continue
                             
-                        # Check for exact name match
                         if test_name.lower() in existing_test_names:
                             print(f"⚠️ Duplicate test skipped: {test_name}")
                             continue
                             
-                        # Basic Validation
-                        if not test_val or test_val.lower() in ['n/a', 'unknown']:
-                             continue
+                        if not test_val:
+                            continue
+                        
+                        placeholder_values = {'n/a', 'na', 'n.a', 'unknown', '-', '--', '—', 'nil', 'none'}
+                        if test_val.lower() in placeholder_values:
+                            continue
+                        
+                        has_digit = any(ch.isdigit() for ch in test_val)
+                        value_lower = test_val.lower()
+                        qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
+                        is_qualitative = any(token in value_lower for token in qualitative_tokens)
+                        
+                        if not has_digit and not is_qualitative:
+                            continue
                              
                         unique_new_items.append(item)
                         existing_test_names.add(test_name.lower())
@@ -680,25 +694,47 @@ class ChatResource(Resource):
         yield f"data: {json.dumps({'percent': 75, 'message': 'Double-checking the results...'})}\n\n"
         print(f"🔍 Validating aggregated data ({len(all_extracted_data)} total items)...")
         
-        # Clean Patient Name
         raw_name = patient_info.get('patient_name', '')
         cleaned_name = raw_name
         if cleaned_name:
-            # Remove labels like "Patient Name:", "Name:", "Mr." at start
-            # Added more patterns to catch "Name : John Doe" or "Patient: John Doe"
             cleaned_name = re.sub(r'^(Name|Patient Name|Patient|Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s*[:\-\.]?\s*', '', cleaned_name, flags=re.IGNORECASE)
-            # Remove trailing noise like "Age:...", "Sex:...", "ID:...", "Date:..."
             cleaned_name = re.sub(r'\s+(Age|Sex|Gender|ID|Date|Ref|Dr)\s*[:\-\.].*$', '', cleaned_name, flags=re.IGNORECASE)
             cleaned_name = cleaned_name.strip()
+
+        raw_age = str(patient_info.get('patient_age', '') or '').strip()
+        cleaned_age = ''
+        if raw_age:
+            age_match = re.search(r'\d{1,3}', raw_age)
+            if age_match:
+                cleaned_age = age_match.group(0)
+
+        raw_gender = str(patient_info.get('patient_gender', '') or '').strip()
+        gender_lower = raw_gender.lower()
+        cleaned_gender = ''
+        if gender_lower in ['m', 'male', 'ذكر']:
+            cleaned_gender = 'ذكر'
+        elif gender_lower in ['f', 'female', 'أنثى', 'انثى']:
+            cleaned_gender = 'أنثى'
+
+        raw_report_type = str(patient_info.get('report_type', '') or '').strip()
+        cleaned_report_type = 'General'
+        if raw_report_type:
+            t = raw_report_type.lower()
+            if 'cbc' in t or 'hematology' in t or 'complete blood count' in t:
+                cleaned_report_type = 'Complete Blood Count (CBC)'
+            elif 'chemistry' in t or 'clinical chemistry' in t:
+                cleaned_report_type = 'Clinical Chemistry'
+            else:
+                cleaned_report_type = raw_report_type
 
         # Combine data
         final_data = {
             'patient_name': cleaned_name,
-            'patient_age': patient_info.get('patient_age', ''),
-            'patient_gender': patient_info.get('patient_gender', ''),
+            'patient_age': cleaned_age,
+            'patient_gender': cleaned_gender,
             'report_date': patient_info.get('report_date', ''),
             'report_name': patient_info.get('report_name', 'Medical Report'),
-            'report_type': patient_info.get('report_type', 'General'),
+            'report_type': cleaned_report_type,
             'doctor_names': patient_info.get('doctor_names', ''),
             'medical_data': all_extracted_data
         }
