@@ -140,6 +140,18 @@ def init_db():
     with app.app_context():
         try:
             db.create_all()
+            try:
+                from sqlalchemy import inspect, text
+                engine = db.engine
+                inspector = inspect(engine)
+                columns = [c["name"] for c in inspector.get_columns("user")]
+                if "biometric_allowed" not in columns:
+                    with engine.connect() as connection:
+                        connection.execute(text('ALTER TABLE "user" ADD COLUMN biometric_allowed BOOLEAN DEFAULT TRUE'))
+                        connection.commit()
+                        print('Added biometric_allowed column to "user" table')
+            except Exception as migrate_err:
+                print(f"Database migration warning (biometric_allowed): {migrate_err}")
             print("Database tables created successfully!")
             
             # Seed medical synonyms
