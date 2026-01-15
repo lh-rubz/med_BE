@@ -168,6 +168,8 @@ class ChatResource(Resource):
             return {'error': 'No file part in the request. Please upload a file using form-data with key "file"', 'code': 'NO_FILE'}, 400
         
         files = request.files.getlist('file')
+        allow_duplicate_flag = request.form.get('allow_duplicate', 'false')
+        allow_duplicate = str(allow_duplicate_flag).lower() == 'true'
         profile_id = request.form.get('profile_id')
         
         print(f"DEBUG UPLOAD: User {current_user_id} attempting upload. Profile ID: {profile_id}")
@@ -211,33 +213,30 @@ class ChatResource(Resource):
         if not files or len(files) == 0:
             return {'error': 'No file selected'}, 400
 
-        # Pre-check for duplicates to return 409 Conflict immediately
-        # This prevents returning a 200 OK stream that immediately fails
-        for file in files:
-            if file.filename == '': continue
-            
-            # Read and hash to check for duplicates
-            # Note: We must seek(0) after reading to ensure the file can be read again later
-            try:
-                file_content = file.read()
-                file_hash = hashlib.sha256(file_content).hexdigest()
-                file.seek(0) # CRITICAL: Reset cursor
+        if not allow_duplicate:
+            for file in files:
+                if file.filename == '': 
+                    continue
                 
-                existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
-                if existing_file:
-                    return {
-                        'error': f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})',
-                        'code': 'DUPLICATE_FILE',
-                        'report_id': existing_file.report_id
-                    }, 409
-            except Exception as e:
-                print(f"Pre-check error: {e}")
-                file.seek(0) # Ensure reset even on error
+                try:
+                    file_content = file.read()
+                    file_hash = hashlib.sha256(file_content).hexdigest()
+                    file.seek(0)
+                    
+                    existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
+                    if existing_file:
+                        return {
+                            'error': f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})',
+                            'code': 'DUPLICATE_FILE',
+                            'report_id': existing_file.report_id
+                        }, 409
+                except Exception as e:
+                    print(f"Pre-check error: {e}")
+                    file.seek(0)
 
         # Create user-specific folder
         user_folder = ensure_upload_folder(f"user_{current_user_id}")
         
-        # Generator for streaming response
         def generate_progress():
             try:
                 yield f"data: {json.dumps({'percent': 2, 'message': 'Preparing your file for analysis...'})}\n\n"
@@ -252,17 +251,16 @@ class ChatResource(Resource):
                     
                     yield f"data: {json.dumps({'percent': 5 + int((i/total_files)*15), 'message': f'Wait a second, Optimizing file {i+1} of {total_files}...'})}\n\n"
                     
-                    # 1. Calculate File Hash for Duplicate Detection
                     file_content = file.read()
                     file_hash = hashlib.sha256(file_content).hexdigest()
                     file.seek(0)
                     
-                    # Check for duplicate FILE
-                    existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
-                    if existing_file:
-                        error_msg = f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})'
-                        yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_FILE', 'report_id': existing_file.report_id})}\n\n"
-                        return
+                    if not allow_duplicate:
+                        existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
+                        if existing_file:
+                            error_msg = f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})'
+                            yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_FILE', 'report_id': existing_file.report_id})}\n\n"
+                            return
 
                     # Save file
                     filename = secure_filename(file.filename)
@@ -311,8 +309,7 @@ class ChatResource(Resource):
                     yield f"data: {json.dumps({'error': 'No valid image data to process'})}\n\n"
                     return
 
-                # Process Images Generator
-                yield from self._process_multiple_images_stream(all_images_to_process, current_user_id, user, saved_files, target_profile_id)
+                yield from self._process_multiple_images_stream(all_images_to_process, current_user_id, user, saved_files, target_profile_id, allow_duplicate)
                 
             except Exception as e:
                 print(f"Stream Error: {e}")
@@ -322,7 +319,7 @@ class ChatResource(Resource):
 
         return Response(stream_with_context(generate_progress()), content_type='text/event-stream')
 
-    def _process_multiple_images_stream(self, images_list, current_user_id, user, saved_files, profile_id=None):
+    def _process_multiple_images_stream(self, images_list, current_user_id, user, saved_files, profile_id=None, allow_duplicate=False):
         """Generator that yields progress for image processing steps"""
         total_pages = len(images_list)
         all_extracted_data = []
@@ -819,70 +816,61 @@ class ChatResource(Resource):
             except:
                 print(f"⚠️ Could not parse report date: {extracted_date}, using now()")
 
-        # Step 4: Duplicate Check (Semantic & Exact)
-        yield f"data: {json.dumps({'percent': 85, 'message': 'Checking for duplicates...'})}\n\n"
-        
-        try:
-            medical_data_list = final_data.get('medical_data', [])
-            if len(medical_data_list) > 0:
-                # 1. Strict Hash Check (Fastest)
-                report_hash = hashlib.sha256(json.dumps(medical_data_list, sort_keys=True).encode()).hexdigest()
-                
-                # Check if this exact report already exists for this user
-                existing_report = Report.query.filter_by(
-                        user_id=report_owner_id,
-                    report_hash=report_hash
-                ).first()
-                
-                # 2. Semantic Check (Content Similarity)
-                # Handles cases like PDF vs Images where hash differs but content is identical
-                if not existing_report and date_is_valid:
-                    # Look for reports on the SAME DATE by this user
-                    candidates = Report.query.filter(
-                        Report.user_id == report_owner_id,
-                        Report.report_date == report_date_obj
-                    ).all()
+        if not allow_duplicate:
+            yield f"data: {json.dumps({'percent': 85, 'message': 'Checking for duplicates...'})}\n\n"
+            
+            try:
+                medical_data_list = final_data.get('medical_data', [])
+                if len(medical_data_list) > 0:
+                    report_hash = hashlib.sha256(json.dumps(medical_data_list, sort_keys=True).encode()).hexdigest()
                     
-                    if candidates:
-                        print(f"🔍 Found {len(candidates)} reports on {report_date_obj.date()}. Checking content similarity...")
+                    existing_report = Report.query.filter_by(
+                        user_id=report_owner_id,
+                        report_hash=report_hash
+                    ).first()
+                    
+                    if not existing_report and date_is_valid:
+                        candidates = Report.query.filter(
+                            Report.user_id == report_owner_id,
+                            Report.report_date == report_date_obj
+                        ).all()
                         
-                        # Prepare current report set {(name_norm, value_norm)}
-                        current_set = set()
-                        for item in medical_data_list:
-                            n = item.get('field_name', '').strip().lower()
-                            v = str(item.get('field_value', '')).strip().lower()
-                            if n and v:
-                                current_set.add((n, v))
-                        
-                        if len(current_set) > 0:
-                            for cand in candidates:
-                                # Fetch candidate fields
-                                cand_fields = ReportField.query.filter_by(report_id=cand.id).all()
-                                cand_set = set()
-                                for f in cand_fields:
-                                    n = f.field_name.strip().lower()
-                                    v = f.field_value.strip().lower()
-                                    cand_set.add((n, v))
-                                
-                                # Calculate Overlap
-                                intersection = current_set.intersection(cand_set)
-                                overlap_ratio = len(intersection) / len(current_set) if len(current_set) > 0 else 0
-                                
-                                print(f"   - Candidate #{cand.id}: {len(intersection)}/{len(current_set)} matches ({overlap_ratio:.2f})")
-                                
-                                # Threshold: if > 75% of extracted fields match -> DUPLICATE
-                                if overlap_ratio > 0.75:
-                                    existing_report = cand
-                                    print(f"❌ DETECTED SEMANTIC DUPLICATE of Report #{cand.id}")
-                                    break
-
-                if existing_report:
-                    error_msg = f'Duplicate Detected: This report content matches an existing report (#{existing_report.id}) from {existing_report.report_date.strftime("%Y-%m-%d")}'
-                    yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_REPORT', 'report_id': existing_report.id})}\n\n"
-                    return
-                
-        except Exception as e:
-             print(f"Duplicate Check Error: {e}")
+                        if candidates:
+                            print(f"🔍 Found {len(candidates)} reports on {report_date_obj.date()}. Checking content similarity...")
+                            
+                            current_set = set()
+                            for item in medical_data_list:
+                                n = item.get('field_name', '').strip().lower()
+                                v = str(item.get('field_value', '')).strip().lower()
+                                if n and v:
+                                    current_set.add((n, v))
+                            
+                            if len(current_set) > 0:
+                                for cand in candidates:
+                                    cand_fields = ReportField.query.filter_by(report_id=cand.id).all()
+                                    cand_set = set()
+                                    for f in cand_fields:
+                                        n = f.field_name.strip().lower()
+                                        v = f.field_value.strip().lower()
+                                        cand_set.add((n, v))
+                                    
+                                    intersection = current_set.intersection(cand_set)
+                                    overlap_ratio = len(intersection) / len(current_set) if len(current_set) > 0 else 0
+                                    
+                                    print(f"   - Candidate #{cand.id}: {len(intersection)}/{len(current_set)} matches ({overlap_ratio:.2f})")
+                                    
+                                    if overlap_ratio > 0.75:
+                                        existing_report = cand
+                                        print(f"❌ DETECTED SEMANTIC DUPLICATE of Report #{cand.id}")
+                                        break
+            
+                    if existing_report:
+                        error_msg = f'Duplicate Detected: This report content matches an existing report (#{existing_report.id}) from {existing_report.report_date.strftime("%Y-%m-%d")}'
+                        yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_REPORT', 'report_id': existing_report.id})}\n\n"
+                        return
+                    
+            except Exception as e:
+                print(f"Duplicate Check Error: {e}")
 
         # Step 5: Saving
         yield f"data: {json.dumps({'percent': 90, 'message': 'Saving your report...'})}\n\n"
