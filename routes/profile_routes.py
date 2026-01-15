@@ -13,7 +13,9 @@ profile_model = profile_ns.model('Profile', {
     'date_of_birth': fields.String(description='Date of Birth (YYYY-MM-DD)'),
     'gender': fields.String(description='Gender'),
     'relationship': fields.String(required=True, description='Relationship to owner (e.g., Son, Father, Self)'),
-    'created_at': fields.String(readOnly=True, description='Profile creation date')
+    'created_at': fields.String(readOnly=True, description='Profile creation date'),
+    'creator_id': fields.Integer(description='Owner user ID'),
+    'access_level': fields.String(description='Effective access level for current user (owner, manage, upload, view)')
 })
 
 @profile_ns.route('/')
@@ -33,14 +35,10 @@ class ProfileList(Resource):
         shared_entries = ProfileShareModel.query.filter_by(shared_with_user_id=current_user_id).all()
         shared_profiles = [entry.profile for entry in shared_entries]
         
-        # Combine and remove duplicates
         all_profiles = {profile.id: profile for profile in owned_profiles + shared_profiles}.values()
         
-        # Contextualize Relationship Labels
         results = []
         for p in all_profiles:
-            # We must convert to dict to modify the relationship field for the response
-            # without modifying the database object
             p_dict = {
                 'id': p.id,
                 'first_name': p.first_name,
@@ -48,11 +46,20 @@ class ProfileList(Resource):
                 'date_of_birth': p.date_of_birth,
                 'gender': p.gender,
                 'relationship': p.relationship,
-                'created_at': p.created_at
+                'created_at': p.created_at,
+                'creator_id': p.creator_id
             }
-            
-            # If the profile is shared (not owned by current user) AND is marked as 'Self' (meaning it is the owner's profile)
-            # We change the label to 'Account Owner' to avoid confusion in the UI
+
+            if p.creator_id == current_user_id:
+                p_dict['access_level'] = 'owner'
+            else:
+                share_entry = None
+                for entry in shared_entries:
+                    if entry.profile_id == p.id:
+                        share_entry = entry
+                        break
+                p_dict['access_level'] = getattr(share_entry, 'access_level', None)
+
             if p.creator_id != current_user_id:
                 if p.relationship == 'Self':
                     p_dict['relationship'] = 'Account Owner'
