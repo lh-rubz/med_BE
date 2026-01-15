@@ -131,29 +131,27 @@ class UserReports(Resource):
             """
                 # إذا كان Profile مشترك أو تم إنشاؤه عبر connection، لا حاجة للتحقق
         
-        # Determine report owner
         report_owner_id = current_user_id
 
         if profile_id:
-            # Profile object is already fetched in the validation block above
-            # Check for ProfileShare explicitly as requested
             share = ProfileShare.query.filter_by(
                 profile_id=profile_id,
                 shared_with_user_id=current_user_id
             ).first()
 
-            if share:
-                # If shared via ProfileShare, owner is the profile creator
+            if share or profile.creator_id != current_user_id:
                 report_owner_id = profile.creator_id
-            elif profile.creator_id != current_user_id:
-                # Shared Profile fallback (in case checked via ownership logic directly)
-                report_owner_id = profile.creator_id
-        
-        # Build query
-        query = Report.query.filter_by(user_id=report_owner_id)
         
         if profile_id:
-            query = query.filter_by(profile_id=profile_id)
+            if report_owner_id != current_user_id:
+                query = Report.query.filter(
+                    Report.profile_id == profile_id,
+                    or_(Report.user_id == report_owner_id, Report.user_id == current_user_id)
+                )
+            else:
+                query = Report.query.filter_by(user_id=current_user_id, profile_id=profile_id)
+        else:
+            query = Report.query.filter_by(user_id=current_user_id)
         
         reports = query.order_by(Report.created_at.desc()).all()
         
@@ -276,9 +274,16 @@ class Timeline(Resource):
             if profile.creator_id != current_user_id:
                 report_owner_id = profile.creator_id
         
-        query = Report.query.filter_by(user_id=report_owner_id)
         if profile_id:
-            query = query.filter_by(profile_id=profile_id)
+            if report_owner_id != current_user_id:
+                query = Report.query.filter(
+                    Report.profile_id == profile_id,
+                    or_(Report.user_id == report_owner_id, Report.user_id == current_user_id)
+                )
+            else:
+                query = Report.query.filter_by(user_id=current_user_id, profile_id=profile_id)
+        else:
+            query = Report.query.filter_by(user_id=current_user_id)
             
         # Get reports ordered by date
         reports = query.order_by(Report.report_date.desc()).all()
@@ -327,7 +332,6 @@ class HealthTrends(Resource):
         owner_id = current_user_id
         if profile_id:
             profile_id = int(profile_id)
-            # Verify user owns this profile or has shared access
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
             
             if not profile:
@@ -356,10 +360,19 @@ class HealthTrends(Resource):
             # Build query with OR condition for all aliases
             filters = [ReportField.field_name.ilike(f"%{term}%") for term in search_terms]
             
-            query = db.session.query(ReportField, Report.report_date).join(Report).filter(
-                ReportField.user_id == owner_id,
-                or_(*filters)
-            )
+            if profile_id and owner_id != current_user_id:
+                query = db.session.query(ReportField, Report.report_date).join(Report).filter(
+                    or_(
+                        ReportField.user_id == owner_id,
+                        ReportField.user_id == current_user_id
+                    ),
+                    or_(*filters)
+                )
+            else:
+                query = db.session.query(ReportField, Report.report_date).join(Report).filter(
+                    ReportField.user_id == owner_id,
+                    or_(*filters)
+                )
             
             if profile_id:
                 query = query.filter(Report.profile_id == profile_id)
@@ -421,7 +434,14 @@ class TimelineStats(Resource):
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
             if profile.creator_id != current_user_id:
                 report_owner_id = profile.creator_id
-            query = query.filter_by(user_id=report_owner_id, profile_id=profile_id)
+
+            if report_owner_id != current_user_id:
+                query = query.filter(
+                    Report.profile_id == profile_id,
+                    or_(Report.user_id == report_owner_id, Report.user_id == current_user_id)
+                )
+            else:
+                query = query.filter_by(user_id=current_user_id, profile_id=profile_id)
         else:
             query = query.filter_by(user_id=current_user_id)
             
