@@ -263,6 +263,8 @@ class Timeline(Resource):
         profile_id = request.args.get('profile_id')
         
         # Build query
+        query = Report.query.filter_by(user_id=current_user_id)
+        
         if profile_id:
             # Verify user owns this profile or has shared access
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
@@ -275,12 +277,7 @@ class Timeline(Resource):
             
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
-            
-            # For shared profiles, we just filter by profile_id (reports belong to creator, not current_user)
-            query = Report.query.filter_by(profile_id=profile_id)
-        else:
-            # Default: Show all reports for the current user
-            query = Report.query.filter_by(user_id=current_user_id)
+            query = query.filter_by(profile_id=profile_id)
             
         # Get reports ordered by date
         reports = query.order_by(Report.report_date.desc()).all()
@@ -354,18 +351,13 @@ class HealthTrends(Resource):
             # Build query with OR condition for all aliases
             filters = [ReportField.field_name.ilike(f"%{term}%") for term in search_terms]
             
+            query = db.session.query(ReportField, Report.report_date).join(Report).filter(
+                ReportField.user_id == current_user_id,
+                or_(*filters)
+            )
+            
             if profile_id:
-                # Use profile_id filter for shared/specific profiles
-                query = db.session.query(ReportField, Report.report_date).join(Report).filter(
-                    Report.profile_id == profile_id,
-                    or_(*filters)
-                )
-            else:
-                # Default: Filter by current user
-                query = db.session.query(ReportField, Report.report_date).join(Report).filter(
-                    ReportField.user_id == current_user_id,
-                    or_(*filters)
-                )
+                query = query.filter(Report.profile_id == profile_id)
                 
             fields = query.order_by(Report.report_date).all()
             
@@ -406,9 +398,9 @@ class TimelineStats(Resource):
     def get(self):
         """Get high-level statistics for the timeline header (optionally filtered by profile)"""
         current_user_id = int(get_jwt_identity())
-        
-        # Check for profile_id filter
         profile_id = request.args.get('profile_id')
+        
+        query = Report.query.filter_by(user_id=current_user_id)
         
         if profile_id:
             # Verify user owns this profile or has shared access
@@ -422,10 +414,7 @@ class TimelineStats(Resource):
 
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
-            
-            query = Report.query.filter_by(profile_id=profile_id)
-        else:
-            query = Report.query.filter_by(user_id=current_user_id)
+            query = query.filter_by(profile_id=profile_id)
             
         total_reports = query.count()
         last_report = query.order_by(Report.report_date.desc()).first()
@@ -548,43 +537,20 @@ class UserReportDetail(Resource):
             }
         }, 200
 
-    @reports_ns.doc(security='Bearer Auth', description='DELETE endpoint')
+    @reports_ns.doc(security='Bearer Auth', description='DELETE endpoint - FOR TESTING ONLY')
     @jwt_required()
     def delete(self, report_id):
-        """Delete a specific report by ID"""
+        """Delete a specific report by ID - FOR TESTING PURPOSES ONLY"""
         current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
         if not user:
             return {'message': 'User not found'}, 404
         
-        report = Report.query.get(report_id)
+        report = Report.query.filter_by(id=report_id, user_id=current_user_id).first()
         
         if not report:
             return {'message': 'Report not found'}, 404
-        
-        # Check permissions
-        # 1. Report Owner (Uploader)
-        is_authorized = (report.user_id == current_user_id)
-        
-        # 2. Profile Owner (if report is linked to a profile)
-        if not is_authorized and report.profile_id:
-            profile = Profile.query.get(report.profile_id)
-            if profile and profile.creator_id == current_user_id:
-                is_authorized = True
-            
-            # 3. Shared Profile Manager
-            if not is_authorized:
-                from models import ProfileShare
-                share = ProfileShare.query.filter_by(
-                    profile_id=report.profile_id, 
-                    shared_with_user_id=current_user_id
-                ).first()
-                if share and share.access_level == 'manage':
-                    is_authorized = True
-        
-        if not is_authorized:
-             return {'message': 'Unauthorized: You do not have permission to delete this report'}, 403
         
         try:
             ReportField.query.filter_by(report_id=report_id).delete()
@@ -593,7 +559,7 @@ class UserReportDetail(Resource):
             db.session.commit()
             
             return {
-                'message': 'Report deleted successfully',
+                'message': 'Report deleted successfully (TESTING MODE)',
                 'deleted_report_id': report_id
             }, 200
         except Exception as e:
