@@ -309,22 +309,39 @@ class MedicalValidator:
         """
         validated = field.copy()
         
-        # Detect and normalize empty values
-        empty_indicators = {'', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
-                          'nil', 'none', 'unknown', 'null', 'غير متوفر', 'غير موجود'}
+        # Detect and normalize empty values - be very strict
+        empty_indicators = {'', ' ', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
+                          'nil', 'none', 'unknown', 'null', 'nul', 'not available', '.', '..',
+                          'غير متوفر', 'غير موجود'}
         raw_field_value = validated.get('field_value', '')
         field_value_str = str(raw_field_value).strip() if raw_field_value else ''
         field_value_lower = field_value_str.lower()
         
-        # If value is an empty indicator, set to empty string
+        # If value is an empty indicator or suspiciously short/non-numeric, set to empty string
         if not field_value_str or field_value_lower in empty_indicators:
             validated['field_value'] = ''
             field_value = ''
         else:
-            # Normalize field value (preserve decimal precision) for non-empty values
-            normalized = MedicalValidator.normalize_decimal(field_value_str)
-            validated['field_value'] = normalized
-            field_value = normalized
+            # Check if it's actually a valid number (not just random text that might be misaligned)
+            # If it contains digits, treat as potentially valid
+            has_digits = any(ch.isdigit() for ch in field_value_str)
+            if not has_digits and len(field_value_str) < 3:
+                # Suspicious: very short and no digits - might be misaligned
+                # Check if it's a known qualitative value
+                qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
+                is_qualitative = any(token in field_value_lower for token in qualitative_tokens)
+                if not is_qualitative:
+                    validated['field_value'] = ''
+                    field_value = ''
+                else:
+                    # It's a qualitative value, keep it
+                    validated['field_value'] = field_value_str
+                    field_value = field_value_str
+            else:
+                # Normalize field value (preserve decimal precision) for non-empty values
+                normalized = MedicalValidator.normalize_decimal(field_value_str)
+                validated['field_value'] = normalized
+                field_value = normalized
         
         # Normalize normal_range but preserve full descriptive text
         # CRITICAL: Do NOT invent or create normal_range if it's missing/empty

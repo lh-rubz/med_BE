@@ -466,54 +466,113 @@ READ CAREFULLY - CRITICAL RULES:
 - Extract patient_dob or patient_age ONLY from the RIGHT table, "تاريخ الميلاد" or "عمر" row
 - Extract doctor_names from the LEFT table, row with "الطبيب" label - DO NOT confuse doctor name with patient name!
 
-STEP 3: LAB TABLE EXTRACTION (CRITICAL - NO MIXING VALUES!)
-Extract test results from tables. Each ROW is one test. NEVER mix values between rows.
+STEP 3: LAB TABLE EXTRACTION (CRITICAL - BE EXTREMELY CAREFUL!)
+Extract test results from tables. This is the MOST IMPORTANT and ERROR-PRONE step.
+Work SLOWLY and METHODICALLY. Read each row INDEPENDENTLY.
 
-Map column headers:
-- Arabic: "الفحص"/"الاختبار" -> field_name
-- Arabic: "النتيجة"/"القيمة" -> field_value  
-- Arabic: "الوحدة" -> field_unit
-- Arabic: "المعدل الطبيعي"/"النتيجة الطبيعية" -> normal_range
-- English: "Test"/"Examination" -> field_name
-- English: "Result"/"Value" -> field_value
-- English: "Unit" -> field_unit
-- English: "Normal Range"/"Reference Range" -> normal_range
+⚠️ COMMON ERRORS TO AVOID:
+- DO NOT take values from the row above or below when current row is empty
+- DO NOT mix columns when lines are slanted or handwritten
+- DO NOT invent normal_range values - if it's empty, it's EMPTY
+- DO NOT guess values - if you can't read it clearly, mark as empty
 
-ROW-BY-ROW EXTRACTION RULES:
-1. For EACH row in the table:
-   - Read field_name from the test name column
-   - Read field_value from the result column in THE SAME ROW
-   - Read field_unit from the unit column in THE SAME ROW
-   - Read normal_range from the range column in THE SAME ROW
-   - Do NOT take field_value from a different row even if current row is empty
+HOW TO READ TABLES CORRECTLY:
+1. Identify table structure FIRST:
+   - Find column headers (usually in first row): "الفحص", "النتيجة", "الوحدة", "المعدل الطبيعي"
+   - OR English headers: "Test", "Result", "Unit", "Normal Range"
+   - Count how many columns there are
+   - Note if lines are straight, slanted, or handwritten
 
-2. EMPTY VALUE DETECTION:
-   If field_value cell contains ANY of these, treat as EMPTY and return "":
-   - Empty cell / blank
-   - Only dashes: "-", "--", "—"
-   - Only asterisks: "*", "**", "***"
-   - Placeholders: "N/A", "n/a", "NA", "N.A", "nil", "none", "unknown"
-   - Do NOT fill empty values with values from other rows or cells
+2. Map column headers to their purpose:
+   - Arabic: "الفحص"/"الاختبار" -> field_name
+   - Arabic: "النتيجة"/"القيمة" -> field_value  
+   - Arabic: "الوحدة" -> field_unit
+   - Arabic: "المعدل الطبيعي"/"النتيجة الطبيعية" -> normal_range
+   - English: "Test"/"Examination" -> field_name
+   - English: "Result"/"Value" -> field_value
+   - English: "Unit" -> field_unit
+   - English: "Normal Range"/"Reference Range" -> normal_range
 
-3. normal_range - CRITICAL RULES:
-   - Read normal_range EXACTLY as written in the table
-   - If the cell is empty, blank, "-", "*", "(-)", or contains no numbers, return "" (empty string)
-   - DO NOT invent or guess normal_range values
-   - DO NOT copy normal_range from another row
-   - If you cannot read it clearly, return "" (empty string)
-   - Examples of valid ranges: "(74-110)", "(0-200)", "12-16", "(12.0-16.0)"
-   - Examples of empty: "-", "(-)", "*", blank cell, "N/A"
+ROW-BY-ROW EXTRACTION (READ EACH ROW ISOLATED):
+Process ONE row at a time. For each row:
+1. Locate the row boundaries - follow horizontal lines (even if slanted)
+2. Identify which column is which BY POSITION (not by guessing)
+3. Read field_name from the test name column in THIS SPECIFIC ROW
+4. Read field_value from the result column in THIS SPECIFIC ROW (same row as field_name)
+5. Read field_unit from the unit column in THIS SPECIFIC ROW (same row)
+6. Read normal_range from the range column in THIS SPECIFIC ROW (same row)
 
-4. is_normal calculation:
-   - ONLY set is_normal if BOTH conditions are true:
-     a) field_value is not empty and contains a number
-     b) normal_range is not empty and contains a numeric range like "(12-16)" or "0-200"
-   - If normal_range is empty ("") or missing, set is_normal to null (DO NOT guess!)
-   - If field_value is empty or non-numeric, set is_normal to null
-   - Compare numeric field_value against numeric normal_range:
-     * If value is within range: is_normal = true
-     * If value is outside range: is_normal = false
-   - If normal_range exists but you cannot parse it, set is_normal to null
+CRITICAL RULES FOR ALIGNMENT:
+- If lines are slanted/handwritten, trace the horizontal line of THIS row
+- If a cell appears empty in THIS row, it is EMPTY - do NOT look at other rows
+- Each test row is INDEPENDENT - values belong ONLY to their row
+- If you're unsure which value belongs to which row, follow the horizontal line carefully
+
+EMPTY VALUE DETECTION (STRICT):
+If field_value cell in THIS ROW contains ANY of these, treat as EMPTY and return "":
+- Empty cell / completely blank
+- Only dashes: "-", "--", "—" (even one dash means empty!)
+- Only asterisks: "*", "**", "***"
+- Only dots: ".", ".."
+- Placeholders: "N/A", "n/a", "NA", "N.A", "nil", "none", "unknown", "غير متوفر"
+- If cell looks suspicious or unclear, treat as EMPTY
+- NEVER fill empty values with values from:
+  * The row above
+  * The row below  
+  * A different column
+  * Your own assumptions
+
+3. normal_range - ABSOLUTE CRITICAL RULES (DO NOT INVENT VALUES!):
+   This is where MOST ERRORS happen. Be EXTREMELY careful.
+   
+   - Read normal_range EXACTLY as written in THIS ROW's range column
+   - Follow the horizontal line of THIS ROW to find the correct range cell
+   - If the cell is empty, blank, or unclear → return "" (empty string)
+   - If you see ONLY these symbols (no numbers), return "":
+     * "-" (dash)
+     * "--" (double dash)
+     * "—" (em dash)
+     * "*" (asterisk)
+     * "**", "***"
+     * "(-)" (dash in parentheses)
+     * "." (dot)
+     * "N/A", "n/a", "NA"
+     * Any symbol without numbers = EMPTY
+   
+   - DO NOT invent normal_range values - EVER!
+   - DO NOT copy normal_range from:
+     * The row above
+     * The row below
+     * A different test
+     * Your memory of similar tests
+   
+   - DO NOT assume a range even if the test name is familiar
+   - If you cannot read it clearly or it looks empty, return "" (empty string)
+   - When in doubt, return "" - empty is better than wrong
+   
+   - Examples of VALID ranges (must have numbers): "(74-110)", "(0-200)", "12-16", "(12.0-16.0)", "0-130"
+   - Examples of EMPTY (return ""): "-", "(-)", "*", blank cell, "N/A", any symbol without numbers
+
+4. is_normal calculation (ONLY when you have BOTH value AND range):
+   ⚠️ NEVER set is_normal to true/false if you're missing data!
+   
+   - Set is_normal ONLY if ALL these are true:
+     a) field_value is NOT empty ("")
+     b) field_value contains a valid number
+     c) normal_range is NOT empty ("")
+     d) normal_range contains a numeric range like "(12-16)" or "0-200"
+   
+   - If normal_range is empty ("") or missing → set is_normal to null (NOT true, NOT false!)
+   - If field_value is empty or non-numeric → set is_normal to null
+   - If you're not 100% sure about the comparison → set is_normal to null
+   
+   - To compare (only if both exist):
+     * Extract numbers from field_value (e.g., "109" from "109 mg/dl")
+     * Extract min/max from normal_range (e.g., 74 and 110 from "(74-110)")
+     * If value >= min AND value <= max: is_normal = true
+     * If value < min OR value > max: is_normal = false
+   
+   - If normal_range exists but you cannot parse the numbers from it → set is_normal to null
 
 4. COMPLEX TABLES:
    - Handle tables with multiple sections (e.g., "HEMATOLOGY", "CLINICAL CHEMISTRY")
@@ -593,44 +652,47 @@ Use this schema:
                     print(f"🔁 Retrying extraction for Image {idx} with table-focused prompt...")
                     table_only_prompt = f"""You are reading a medical LAB REPORT image (page {idx}/{total_pages}). 
 The report may be in ENGLISH or ARABIC or BOTH.
+Tables may have handwritten lines, slanted lines, or unclear alignment.
 
-CRITICAL RULES:
-- Read each table row INDEPENDENTLY - each row is one test
-- NEVER mix values from different rows or columns
-- If a cell is empty (dash, asterisk, blank), return "" for that field_value
-- Only set is_normal if normal_range contains numeric range, otherwise set null
+⚠️ CRITICAL - READ SLOWLY AND CAREFULLY:
+1. Process ONE row at a time - do NOT mix rows
+2. Follow the horizontal line of EACH row carefully (even if slanted)
+3. If a cell in THIS row is empty, it's EMPTY - do NOT take value from row above/below
+4. If normal_range cell is "-", "(-)", "*", or blank, return "" - do NOT invent values
 
-Extract table data by mapping column headers:
+HOW TO READ TABLES:
+- Identify column headers first: "الفحص", "النتيجة", "الوحدة", "المعدل الطبيعي" (Arabic) or "Test", "Result", "Unit", "Normal Range" (English)
+- For EACH row, trace the horizontal line from left to right
+- Read values ONLY from cells that align with THIS row's horizontal line
 
-Arabic headers:
-- "الفحص" / "الاختبار" -> field_name
-- "النتيجة" / "القيمة" -> field_value  
-- "الوحدة" -> field_unit
-- "المعدل الطبيعي" / "النتيجة الطبيعية" -> normal_range
+EXTRACTION RULES FOR EACH ROW:
+1. field_name: Read from test name column in THIS ROW
+2. field_value: Read from result column in THIS ROW (same horizontal line as field_name)
+   - If empty, "-", "*", blank → return ""
+   - Do NOT use value from row above or below
+3. field_unit: Read from unit column in THIS ROW
+4. normal_range: Read from range column in THIS ROW
+   - If empty, "-", "(-)", "*", or any symbol without numbers → return ""
+   - DO NOT copy from another row
+   - DO NOT invent range values
+5. is_normal: 
+   - null if field_value is "" OR normal_range is ""
+   - true/false ONLY if both have valid numbers
 
-English headers:
-- "Test" / "Examination" -> field_name
-- "Result" / "Value" -> field_value
-- "Unit" -> field_unit
-- "Normal Range" / "Reference Range" -> normal_range
-
-For EACH row:
-1. Read field_name from test name column
-2. Read field_value from result column IN THE SAME ROW (not from other rows!)
-3. Read field_unit from unit column IN THE SAME ROW
-4. Read normal_range from range column IN THE SAME ROW
-5. If field_value is empty/dash/asterisk, set it to ""
-6. Set is_normal: null if no normal_range or empty value, otherwise true/false based on comparison
+EMPTY DETECTION:
+- field_value is EMPTY if: blank, "-", "--", "*", ".", "N/A", "n/a"
+- normal_range is EMPTY if: blank, "-", "(-)", "*", any symbol without numbers
+- When empty, return "" (empty string), do NOT guess
 
 Return JSON with this structure only:
 {{
   "medical_data": [
     {{
       "field_name": "Test name (prefer English if available)",
-      "field_value": "numeric value as string, or \"\" if empty",
+      "field_value": "numeric value as string, or \"\" if empty/missing",
       "field_unit": "unit string, or \"\"",
-      "normal_range": "range like \"(12-16)\", or \"\" if missing",
-      "is_normal": true or false or null,
+      "normal_range": "range like \"(12-16)\", or \"\" if missing/empty",
+      "is_normal": true or false or null (null if missing range or value),
       "category": "section name like \"HEMATOLOGY\" or \"\"",
       "notes": "any notes or \"\""
     }}
@@ -685,10 +747,21 @@ Return ONLY this JSON object, no markdown."""
                         
                         # Enhanced empty value detection - recognize all empty indicators
                         empty_indicators = {'', ' ', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
-                                          'nil', 'none', 'unknown', 'null', 'nul', 'not available', 
+                                          'nil', 'none', 'unknown', 'null', 'nul', 'not available', '.', '..',
                                           'غير متوفر', 'غير موجود'}
                         test_val_cleaned = test_val.strip() if test_val else ''
                         test_val_lower = test_val_cleaned.lower()
+                        
+                        # Also check normal_range for empty indicators
+                        normal_range_raw = str(item.get('normal_range', '') or '').strip()
+                        normal_range_lower = normal_range_raw.lower()
+                        
+                        # Clean normal_range if it's an empty indicator
+                        if normal_range_raw in ['-', '--', '—', '*', '(-)', '.'] or normal_range_lower in empty_indicators:
+                            # Check if it actually contains numbers - if not, it's empty
+                            if not any(ch.isdigit() for ch in normal_range_raw):
+                                item['normal_range'] = ''
+                                print(f"⚠️ Cleaned empty normal_range for {test_name}: '{normal_range_raw}' -> ''")
                         
                         # If value is an empty indicator, set it to empty string but still process the field
                         if test_val_lower in empty_indicators or not test_val_cleaned:
