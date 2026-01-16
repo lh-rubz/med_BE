@@ -374,30 +374,34 @@ class ChatResource(Resource):
 Your task is to extract structured medical data from this image (page {idx}/{total_pages}).
 
 STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
-- The header has TWO tables. 
-- LAYOUT: [Value] | [Label] (Right-to-Left).
-- The LABELS are on the RIGHT. The VALUES are on the LEFT.
+- The header has TWO tables (Right and Left) with Arabic labels.
+- VISUALIZE THE ROW: [Value]   |   [Label]
 
 - EXTRACT RULES:
   1. patient_name:
-     - Find Label "اسم المريض" (Right side).
-     - Take Value from the LEFT side.
-  
-  2. patient_gender (CRITICAL):
+     - Find Label "اسم المريض" (Patient Name).
+     - The Value is the text immediately to the LEFT of this label.
+     - Extracted Value MUST NOT be "اسم المريض". It must be a person's name (e.g. 3-4 words).
+     - If you extract "اسم المريض", LOOK AGAIN.
+
+  2. patient_gender:
      - Find Label "الجنس".
-     - Look at the Value to the LEFT.
-     - If "انثى" or "أنثى" -> OUTPUT "Female".
-     - If "ذكر" -> OUTPUT "Male".
+     - Look at the text to the LEFT:
+       - If word is "انثى" or "أنثى" -> OUTPUT "Female".
+       - If word is "ذكر" -> OUTPUT "Male".
+     - STRICTLY FOLLOW THIS. Do not output Male if the text says "انثى".
 
   3. patient_age (CALCULATE IT):
-     - Find "تاريخ الميلاد" (DOB) and "التاريخ" (Report Date).
+     - Find "تاريخ الميلاد" (DOB) e.g. "01/05/1975".
+     - Find "التاريخ" (Report Date).
      - CALCULATE: Report Year - Birth Year.
+     - Do not guess "30" or other numbers. CALCULATE IT.
 
   4. doctor_names:
-     - Find Label "الطبيب" (usually in the Left-side table, bottom row).
-     - Take Value from the LEFT of the label.
-     - Extract whatever text is next to "الطبيب".
-
+     - Find Label "الطبيب" (usually in the Left-side table).
+     - Value is to the LEFT.
+     - Extract the name.
+  
   5. report_date:
      - Find "تاريخ الطلب" or "Date".
 
