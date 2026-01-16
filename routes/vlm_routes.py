@@ -368,74 +368,98 @@ class ChatResource(Resource):
             print(f"🤖 Step 1: Structuring data with Qwen2-VL (native vision)...")
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Extracting medical values from page {idx}...'})}\n\n"
             
-            # Build prompt (Reusing logic)
-            # Build OPTIMIZED extraction prompt (reduced by ~40%)
-            prompt_text = f"""ACT AS AN EXPERT MEDICAL DATA DIGITIZER. 
-Your task is to extract structured medical data from this image (page {idx}/{total_pages}).
+            prompt_text = f"""You are an expert medical data digitizer.
 
-DATA EXTRACTION STRATEGY:
-- The Patient Info Header is split into TWO separate grids (Right & Left).
+You receive a medical report IMAGE (page {idx}/{total_pages}). The report may be:
+- Arabic, English, or mixed
+- Printed, scanned, rotated, or low quality
+- With header tables, main tables, lines, or free text
 
-STEP 1: RIGHT GRID (PATIENT DETAILS)
-- Look at the table on the RIGHT side.
-- Read it Right-to-Left (Label | Value).
+Your job is to read the WHOLE image carefully and return a single JSON object with strictly correct values.
 
-  1. Patient Name ("اسم المريض"):
-     - Locate "اسم المريض".
-     - Extract the text to its LEFT.
-     - Expect a full name (3-4 words).
-  
-  2. Patient Gender ("الجنس"):
-     - Locate "الجنس".
-     - Extract the text to its LEFT.
-     - If text is "انثى" -> OUTPUT "Female".
-     - If text is "ذكر" -> OUTPUT "Male".
-  
-  3. Patient Age ("تاريخ الميلاد"):
-     - Locate "تاريخ الميلاد".
-     - Extract DOB Year (e.g. 1975).
-     - Calculate Age = Current Year (2026) - 1975 = 51.
+GENERAL RULES:
+- Always read values exactly from the report; never guess or correct.
+- If a field is missing, blurred, or not clearly present, return an empty string "" for it.
+- Never invent a name, date, gender, age, doctor, or result.
+- If multiple candidates exist, choose the one closest to the main patient header.
+- Do not copy label words as values (for example: "اسم المريض", "Patient Name").
 
-STEP 2: LEFT GRID (DOCTOR & DATE)
-- Look at the table on the LEFT side.
-- Read it Right-to-Left (Label | Value).
+STEP 1: PATIENT HEADER READING
+Scan all regions (right/left, top/bottom) and treat any "label : value" pair as a candidate.
+Handle both Arabic and English labels:
 
-  1. Report Date ("تاريخ الطلب"):
-     - Locate "تاريخ الطلب" or "التاريخ".
-     - Extract the date value.
-     
-  2. Doctor Name ("الطبيب"):
-     - **CRITICAL**: Locate the label "الطبيب" (usually the bottom row of this left grid).
-     - Extract the text to its LEFT.
-     - Example: "Dr. Name" or Arabic name.
-     - Do not leave this empty.
+- Patient Name labels:
+  - "اسم المريض", "المريض", "Patient Name", "Name"
+  -> Value must be a person name only, without labels or extra words.
 
-STEP 3: TABLE EXTRACTION
-- Extract the main lab results table.
-- Columns: Test Name | Result | Unit | Normal Range
-- Special Handling:
-  - Is Normal: Use "H" / "L" flags if present. Otherwise, check if Result is inside Range.
-  - Normal Range: Return "" (empty string) if the cell is empty or just text.
+- Gender labels:
+  - "الجنس", "Sex", "Gender"
+  -> Allowed values: "Male" or "Female" only.
+  -> If you see "ذكر" -> return "Male".
+  -> If you see "انثى" or "أنثى" -> return "Female".
+  -> Do not infer gender from the name.
 
-STEP 4: JSON STRUCTURE
-Return a SINGLE JSON object. 
-DO NOT include "header_rows". 
-DO NOT include markdown.
+- Date of Birth / Age labels:
+  - "تاريخ الميلاد", "DOB", "Date of Birth", "Age"
+  -> Prefer extracting full DATE OF BIRTH when available.
+  -> Normalize date to "YYYY-MM-DD" when possible.
+  -> If only age is written (for example "50 Y", "50 years"), extract the number of years.
+
+- Report Date labels:
+  - "تاريخ الطلب", "التاريخ", "Report Date"
+  -> Normalize to "YYYY-MM-DD" when possible.
+
+- Doctor labels:
+  - "الطبيب", "Doctor", "Physician", "Ref By"
+  -> Return only the doctor name or names, separated by commas if more than one.
+
+STEP 2: SPECIAL CASE – TWO GRIDS LAYOUT
+If you see two header tables side by side (as in many Palestinian lab forms):
+- The right grid usually contains labels in Arabic ("رقم المريض", "اسم المريض", "الجنس", "تاريخ الميلاد").
+- The left grid usually contains labels like "تاريخ الطلب", "الطبيب".
+For each row:
+- Column on the right = label.
+- Column on the left = value.
+
+Use this layout only if it matches what you see. Otherwise, just use the generic rules.
+
+STEP 3: LAB TABLE EXTRACTION
+Extract all rows from any lab result table.
+
+Map Arabic and English headers:
+- "الفحص", "الاختبار", "Test" -> field_name
+- "النتيجة", "Result" -> field_value
+- "الوحدة", "Unit" -> field_unit
+- "المعدل الطبيعي", "Normal Range" -> normal_range
+
+Rules:
+- If a cell is empty or just dashes, return "".
+- Do not invent values.
+- is_normal:
+  - If an explicit flag exists (H, L, arrows, abnormal/normal words) use it.
+  - Otherwise, compare numeric result to the numeric part of the normal range.
+  - If you cannot decide, set is_normal to null.
+
+STEP 4: JSON OUTPUT FORMAT
+Return exactly one JSON object, no markdown, no explanations.
+
+Use this schema:
 
 {{
-  "patient_name": "string (Full Name)",
-  "patient_age": "string",
-  "patient_gender": "string (Male/Female)",
-  "report_date": "YYYY-MM-DD",
-  "report_type": "{', '.join(REPORT_TYPES)}",
-  "doctor_names": "string",
+  "patient_name": "string (full name only, no labels)",
+  "patient_age": "string (age in years only, for example \"50\")",
+  "patient_dob": "string date YYYY-MM-DD or \"\" if unknown",
+  "patient_gender": "string (\"Male\" or \"Female\" or \"\")",
+  "report_date": "YYYY-MM-DD or \"\"",
+  "report_type": "{', '.join(REPORT_TYPES)} or free text",
+  "doctor_names": "string of doctor names, comma-separated, or \"\"",
   "medical_data": [
     {{
-      "field_name": "string (Prefer English)",
-      "field_value": "string or number",
+      "field_name": "string (prefer English if available)",
+      "field_value": "string or number as text",
       "field_unit": "string",
       "normal_range": "string",
-      "is_normal": boolean,
+      "is_normal": true or false or null,
       "category": "string",
       "notes": "string"
     }}
@@ -607,13 +631,47 @@ Return ONLY this JSON object."""
             cleaned_name = re.sub(r'^(Name|Patient Name|Patient|Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s*[:\-\.]?\s*', '', cleaned_name, flags=re.IGNORECASE)
             cleaned_name = re.sub(r'\s+(Age|Sex|Gender|ID|Date|Ref|Dr)\s*[:\-\.].*$', '', cleaned_name, flags=re.IGNORECASE)
             cleaned_name = cleaned_name.strip()
+            name_lower = cleaned_name.replace(':', '').strip().lower()
+            if name_lower in ['اسم المريض', 'patient name', 'name']:
+                cleaned_name = ''
 
         raw_age = str(patient_info.get('patient_age', '') or '').strip()
+        raw_dob = str(patient_info.get('patient_dob', '') or '').strip()
         cleaned_age = ''
-        if raw_age:
+        cleaned_dob = ''
+        dob_candidates = [raw_dob, raw_age]
+        for text in dob_candidates:
+            if not text:
+                continue
+            digits = re.findall(r'\d+', text)
+            if len(digits) >= 3:
+                part1, part2, part3 = digits[0], digits[1], digits[2]
+                try:
+                    if len(part1) == 4:
+                        year = int(part1)
+                        month = int(part2)
+                        day = int(part3)
+                    else:
+                        day = int(part1)
+                        month = int(part2)
+                        year = int(part3)
+                    dob_date = datetime(year, month, day).date()
+                    today = datetime.now(timezone.utc).date()
+                    age_years = today.year - dob_date.year - (
+                        (today.month, today.day) < (dob_date.month, dob_date.day)
+                    )
+                    if 0 <= age_years <= 120:
+                        cleaned_age = str(age_years)
+                        cleaned_dob = dob_date.isoformat()
+                        break
+                except ValueError:
+                    continue
+        if not cleaned_age and raw_age:
             age_match = re.search(r'\d{1,3}', raw_age)
             if age_match:
-                cleaned_age = age_match.group(0)
+                age_val = int(age_match.group(0))
+                if 0 <= age_val <= 120:
+                    cleaned_age = str(age_val)
 
         raw_gender = str(patient_info.get('patient_gender', '') or '').strip()
         gender_lower = raw_gender.lower()
@@ -638,6 +696,7 @@ Return ONLY this JSON object."""
         final_data = {
             'patient_name': cleaned_name,
             'patient_age': cleaned_age,
+            'patient_dob': cleaned_dob,
             'patient_gender': cleaned_gender,
             'report_date': patient_info.get('report_date', ''),
             'report_name': patient_info.get('report_name', 'Medical Report'),
