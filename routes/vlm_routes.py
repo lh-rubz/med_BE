@@ -384,7 +384,7 @@ STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
   - ENGLISH layout: "| LABEL | VALUE |" → value is on the RIGHT of the label.
   - VERTICAL layout: value is DIRECTLY BELOW the label.
 
-- EXTRACT THESE FIELDS (NO GUESSING, NO SWAPPING):
+- EXTRACT THESE FIELDS (NO GUESSING, NO SWAPPING) AND IGNORE OTHER ADMINISTRATIVE ROWS:
   1. patient_name:
      - Prefer method A (label-based):
        - Find label "اسم المريض" or "Patient Name".
@@ -430,10 +430,12 @@ STEP 2: EXTRACT MEDICAL DATA TABLE (STRICT ROW + COLUMN ALIGNMENT)
   1. Read all cells on that SAME visual line.
   2. Map each cell by its COLUMN position:
      - Column under "الفحص" / "Test" → field_name.
-     - Column under "النتيجة" / "Result" → field_value.
-     - Column under "النتيجة الطبيعية" / "Reference Range" → normal_range (COPY THE FULL TEXT, including separate ranges for male/female or child/adult).
-     - Column under "الوحدة" / "Unit" → field_unit.
-     - Column under "ملاحظات" / "Comments" → notes.
+      - Column under "النتيجة" / "Result" → field_value.
+      - Column under "النتيجة الطبيعية" / "Reference Range" → normal_range (COPY THE FULL TEXT, including separate ranges for male/female or child/adult).
+      - Column under "الوحدة" / "Unit" → field_unit.
+      - Column under "ملاحظات" / "Comments" → notes.
+  3. If BOTH Arabic and English test names appear in the same row or table, ALWAYS use the ENGLISH test name for field_name and category, and treat the Arabic text as comments only.
+  4. Only use a fully Arabic field_name when there is NO English test name anywhere for that row.
   3. NEVER take numbers from the normal_range or unit columns as the main field_value.
   4. VALIDATE: field_value must come from the SAME ROW as field_name, from the "Result" column only.
   5. Skip empty rows or rows that clearly do not contain a test.
