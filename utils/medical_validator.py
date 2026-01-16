@@ -110,7 +110,7 @@ class MedicalValidator:
     
     @staticmethod
     def calculate_is_normal(field_value: str, normal_range: str, 
-                           current_is_normal: Optional[bool] = None) -> bool:
+                           current_is_normal: Optional[bool] = None) -> Optional[bool]:
         """
         Deterministically calculate if a value is within normal range
         
@@ -153,8 +153,13 @@ class MedicalValidator:
                         if min_val <= value <= max_val:
                             return True
 
-        # Fallback to VLM's guess or default to True
-        return current_is_normal if current_is_normal is not None else True
+        # Fallback:
+        # Only trust the model's guess if a normal_range string exists.
+        if current_is_normal is not None and normal_range:
+            return current_is_normal
+        
+        # Otherwise, when there is no clear evidence, treat status as unknown
+        return None
     
     @staticmethod
     def extract_doctor_names(text: str) -> str:

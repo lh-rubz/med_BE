@@ -586,7 +586,7 @@ Return ONLY this JSON object."""
                         if not test_val:
                             continue
                         
-                        placeholder_values = {'n/a', 'na', 'n.a', 'unknown', '-', '--', '—', 'nil', 'none'}
+                        placeholder_values = {'n/a', 'na', 'n.a', 'unknown', '-', '--', '—', 'nil', 'none', '*', '***'}
                         if test_val.lower() in placeholder_values:
                             continue
                         
@@ -660,7 +660,7 @@ Return ONLY this JSON object."""
                     age_years = today.year - dob_date.year - (
                         (today.month, today.day) < (dob_date.month, dob_date.day)
                     )
-                    if 0 <= age_years <= 120:
+                    if 1 <= age_years <= 120:
                         cleaned_age = str(age_years)
                         cleaned_dob = dob_date.isoformat()
                         break
@@ -670,7 +670,7 @@ Return ONLY this JSON object."""
             age_match = re.search(r'\d{1,3}', raw_age)
             if age_match:
                 age_val = int(age_match.group(0))
-                if 0 <= age_val <= 120:
+                if 1 <= age_val <= 120:
                     cleaned_age = str(age_val)
 
         raw_gender = str(patient_info.get('patient_gender', '') or '').strip()
@@ -945,7 +945,7 @@ Return ONLY this JSON object."""
                         field_value=str(item.get('field_value', '')),
                         field_unit=str(item.get('field_unit', '')),
                         normal_range=str(item.get('normal_range', '')),
-                        is_normal=bool(item.get('is_normal', True)),
+                        is_normal=item.get('is_normal') if isinstance(item.get('is_normal'), bool) else None,
                         field_type=str(item.get('field_type', 'measurement')),
                         category=str(item.get('category', '')),
                         notes=str(item.get('notes', ''))
