@@ -372,36 +372,35 @@ class ChatResource(Resource):
             # Build OPTIMIZED extraction prompt (reduced by ~40%)
             prompt_text = f"""ACT AS AN EXPERT MEDICAL DATA DIGITIZER. 
 Your task is to extract structured medical data from this image (page {idx}/{total_pages}).
-The report is likely in ARABIC and ENGLISH.
 
 STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
-- Locate the header section.
-- LABELS: "اسم المريض" (Patient Name), "العمر" (Age), "تاريخ الميلاد" (DOB), "الجنس" (Sex), "التاريخ" (Date), "الطبيب" (Doctor).
+- The header usually contains TWO tables (Right and Left). Scan BOTH.
 
-- STRICT EXTRACTION RULES:
+- EXTRACT RULES:
   1. patient_name:
-     - Find "اسم المريض". Value is usually NEXT to it or BELOW it.
-     - Extract the FULL Arabic name (e.g., "رئيسة خضر طالب خطيب").
-     - Do NOT change "رئيسة" to "رئيسي". Read exactly what is written.
+     - Find "اسم المريض" on the Right Table.
+     - Value is in the SAME row (e.g., "رئيسة خضر طالب خطيب").
   
-  2. patient_gender:
-     - Find "الجنس" or "Sex".
-     - Value is "ذكر" (Male) or "انثى" / "أنثى" (Female).
-     - CRITICAL: If you see "انثى", output "Female". If you see "ذكر", output "Male".
+  2. patient_gender (STRICT):
+     - Find "الجنس" (Sex).
+     - Read the value in that row closely.
+     - If it is "انثى" or "أنثى" -> OUTPUT "Female".
+     - If it is "ذكر" -> OUTPUT "Male".
+     - DO NOT DEFAULT TO MALE. LOOK AT THE TEXT.
 
   3. patient_age (CALCULATE IT):
      - Find "تاريخ الميلاد" (DOB) -> e.g., "01/05/1975".
-     - Find "التاريخ" (Report Date) -> e.g., "2025" or "2026".
-     - CALCULATE: Report Year ({datetime.now().year}) - Birth Year.
-     - Example: 2025 - 1975 = 50.
-     - NEVER return "01" or "05" if the DOB is 01/05/... -> That is the day/month, NOT age.
-     - If you find an explicit "Age" field (e.g. "Age: 50"), use it. Otherwise, CALCULATE.
-
-  4. report_date:
-     - Find "تاريخ الطلب" or "Date".
+     - Find "التاريخ" (Report Date).
+     - CALCULATE: Report Year - Birth Year.
   
-  5. doctor_names:
-     - Find "الطبيب" or "Doctor".
+  4. doctor_names:
+     - Find the label "الطبيب" (Doctor).
+     - It is often in the LEFT header table, last row.
+     - Extract the name next to it (e.g., "جهاد العملة", "د. محمد", etc).
+     - Do not leave empty if "الطبيب" exists.
+
+  5. report_date:
+     - Find "تاريخ الطلب" or "Date".
 
 STEP 2: EXTRACT MEDICAL DATA TABLE
 - Find the main table. Map columns:
