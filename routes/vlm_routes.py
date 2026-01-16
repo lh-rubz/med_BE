@@ -375,36 +375,38 @@ Your task is to extract structured medical data from this image (page {idx}/{tot
 
 STEP 1: DETECT LANGUAGE & LAYOUT
 - Scan the header.
-- IF ENGLISH (LTR): Expect "Label: Value" (e.g. "Patient Name: John Doe").
-- IF ARABIC (RTL): Expect "Value :Label" (Value on Left) OR "Label: Value" (Value on Right) depending on the grid.
-- STRATEGY: Find the Label words -> Scan mostly to the LEFT (Arabic) or RIGHT (English). USE VISUAL PROXIMITY.
+- IF ARABIC (RTL): Expect "Value | Label" (Value is to the LEFT of Label).
+- IF ENGLISH (LTR): Expect "Label: Value" (Value is to the RIGHT of Label).
 
-STEP 2: EXTRACT HEADER INFO (Universal Rules)
-  1. patient_name:
-     - Labels: "اسم المريض", "Patient Name", "Name".
-     - ACTION: Find label -> Look next to it (Left or Right).
-     - ERROR CHECK: Extracted value CANNOT be "اسم المريض" or "Patient Name".
-     - ERROR CHECK: Must be a person's name (text string).
+STEP 2: EXTRACT HEADER INFO (Rules)
+  1. patient_gender (HIGHEST PRIORITY):
+     - SEARCH the header for: "انثى", "أنثى", "Female", "F".
+     - IF FOUND: OUTPUT "Female". (Even if it says "Mr" or looks like a male name).
+     - IF NOT FOUND: Check for "ذكر", "Male", "M". If found -> "Male".
+     - CRITICAL: "انثى" = "Female". Do not hallucinate "Male".
 
-  2. patient_gender:
-     - Labels: "الجنس", "Sex", "Gender".
-     - GLOBAL SCAN: If you see "انثى" / "أنثى" / "Female" ANYWHERE in the header -> Female.
-     - Else if you see "ذكر" / "Male" -> Male.
-     - Fallback: "Male" only if "Male" word is explicitly found.
+  2. patient_name:
+     - Find "اسم المريض" or "Patient Name".
+     - Look at the text NEXT to it (Left for Arabic, Right for English).
+     - EXTRACT EXACTLY AS WRITTEN.
+     - Do NOT autocorrect names.
+     - Example: If text is "رئيسة", do NOT change to "رئيسي".
+     - Example: If text is "هبة", do NOT change to "هبا".
+     - ERROR CHECK: Value cannot be "اسم المريض".
 
   3. patient_age (CALCULATE IT):
-     - Labels: "تاريخ الميلاد", "DOB".
-     - Find the Birth Year (YYYY).
-     - Find the Report Date (YYYY).
+     - Find "تاريخ الميلاد" (DOB) -> Extract Year (YYYY).
+     - Find Report Date -> Extract Year (YYYY).
      - CALCULATE: Report Year - Birth Year.
-     - Do not just guess a low number like "01" (day) or "05" (month).
+     - If DOB is 1975 and Report is 2025 -> Age is 50.
+     - Do NOT output "48" if the math is clearly 50.
 
   4. doctor_names:
-     - Labels: "الطبيب", "Doctor", "Ref By".
-     - Look for a name with "Dr." or "د." prefix nearby.
+     - Find "الطبيب" or "Doctor".
+     - Look for the name nearby (often Left side in Arabic tables).
 
   5. report_date:
-     - Labels: "التاريخ", "Date", "Reporting Date".
+     - Find "التاريخ" or "Date".
 
 STEP 3: EXTRACT MEDICAL DATA TABLE
 - Find the main results table.
