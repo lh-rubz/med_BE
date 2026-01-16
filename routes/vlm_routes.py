@@ -436,9 +436,10 @@ STEP 2: EXTRACT MEDICAL DATA TABLE (STRICT ROW + COLUMN ALIGNMENT)
       - Column under "ملاحظات" / "Comments" → notes.
   3. If BOTH Arabic and English test names appear in the same row or table, ALWAYS use the ENGLISH test name for field_name and category, and treat the Arabic text as comments only.
   4. Only use a fully Arabic field_name when there is NO English test name anywhere for that row.
-  3. NEVER take numbers from the normal_range or unit columns as the main field_value.
-  4. VALIDATE: field_value must come from the SAME ROW as field_name, from the "Result" column only.
-  5. Skip empty rows or rows that clearly do not contain a test.
+  5. NEVER take numbers from the normal_range or unit columns as the main field_value.
+  6. VALIDATE: field_value must come from the SAME ROW as field_name, from the "Result" column only.
+  7. Skip empty rows or rows that clearly do not contain a test.
+  8. It is WRONG to return an empty \"medical_data\" array if you see a lab table with English tests and numeric results. In that case you MUST extract at least one row into medical_data.
 
 STEP 3: MEDICAL VALIDATION (SANITY CHECKS)
 - For Complete Blood Count (CBC), typical ranges (for adults):
