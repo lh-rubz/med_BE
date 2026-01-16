@@ -372,103 +372,68 @@ class ChatResource(Resource):
             # Build OPTIMIZED extraction prompt (reduced by ~40%)
             prompt_text = f"""ACT AS AN EXPERT MEDICAL DATA DIGITIZER. 
 Your task is to extract structured medical data from this image (page {idx}/{total_pages}) into JSON format.
-The report can contain both ARABIC and ENGLISH text. You fully understand both languages and must read Arabic exactly as printed (do NOT translate names or labels).
+The report can contain ARABIC, ENGLISH, or BOTH languages.
+- You typically encounter keys and values.
+- In ENGLISH (LTR), it is "KEY: VALUE".
+- In ARABIC (RTL), it might visually appear as "VALUE :KEY" or "KEY: VALUE" depending on layout.
+- Use VISUAL PROXIMITY. If a value is right next to "Patient Name", it is the name.
 
 STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
-- Locate the header section at the top of the page.
-- The header may be a single table, split into two grids (Left/Right), or just text fields.
-- Carefully SCAN the ENTIRE header from edge to edge before deciding the values.
-- Identify where the labels are (for example: "اسم المريض", "Patient Name", "الطبيب", "Doctor", "الجنس", "Sex").
-- Determine how each label is related to its value:
-  - ARABIC layout: "| VALUE | LABEL |" → value is on the LEFT of the label.
-  - ENGLISH layout: "| LABEL | VALUE |" → value is on the RIGHT of the label.
-  - VERTICAL layout: value is DIRECTLY BELOW the label.
+- Scan the top section for patient details.
+- LABELS to look for:
+  - Name: "اسم المريض", "Patient Name", "Name", "المريض".
+  - Age/DOB: "العمر", "Age", "تاريخ الميلاد", "DOB", "Birth Date".
+  - Sex: "الجنس", "Sex", "Gender", "النوع".
+  - Date: "التاريخ", "Date", "Reporting Date".
+  - Doctor: "الطبيب", "Doctor", "Dr", "Ref By", "المحول".
 
-- EXTRACT THESE FIELDS (NO GUESSING, NO SWAPPING) AND IGNORE OTHER ADMINISTRATIVE ROWS:
+- EXTRACT RULES:
   1. patient_name:
-     - Prefer method A (label-based):
-       - Find label "اسم المريض" or "Patient Name".
-       - Take the text in the SAME ROW (or directly below) this label as patient_name.
-     - If you truly cannot find these labels, use method B (best name in header):
-       - Look in the header tables for a value that looks like a personal name:
-         - 2 or more words, mostly letters (Arabic or English), not an ID, not a date, not a number.
-       - Use that value as patient_name.
-     - Extract FULL text exactly as written.
-     - Example (Arabic): "| فلان الفلاني | اسم المريض |" → patient_name = "فلان الفلاني".
-     - Do NOT shorten, translate, or replace the name.
-     - Pay close attention to Arabic characters: distinguish "ة" (Ta Marbuta) from "ي" (Ya) at end of names.
-     - Do NOT take the doctor name as patient_name (doctor name is always in the row with label "الطبيب" / "Doctor" / "Physician").
-     - NEVER invent generic placeholder names like "أحمد محمد", "محمد", "خالد", etc. Use only text that actually appears in the header.
+     - Look for the label first.
+     - If found, extract the text immediately next to it.
+     - If NO label found, look for a 3-4 word name (Arabic or English) in the top center/left/right.
+     - Arabic names often look like "محمد أحمد علي" (3+ words).
+     - CLEAN THE RESULT: Remove the label itself if caught (e.g. if you see "Name: Ahmed", return "Ahmed").
   2. patient_gender:
-     - Prefer method A (label-based):
-       - Find label "الجنس" or "Sex".
-       - Take exactly the value in the SAME ROW as this label.
-     - If you cannot see these labels but you see clear gender words in the header ("ذكر", "انثى", "أنثى", "Male", "Female"), use that value as patient_gender.
-     - Use exactly the value you see (e.g., "انثى", "أنثى", "ذكر", "Male", "Female").
-     - QUALITY CHECK: If the الجنس cell clearly contains a female word (like "انثى" or "أنثى" or "Female"), patient_gender MUST be female and NEVER "ذكر"/"Male".
-  3. Date of Birth / Age:
-     - Find label "تاريخ الميلاد" or "DOB".
-     - Extract the date from the SAME ROW (or directly below) this label (e.g., "01/05/1975").
-     - CALCULATE Age: report_year - birth_year (return only the number as string).
+     - Look for "Male", "Female", "M", "F", "ذكر", "أنثى", "انثى".
+     - Normalize to: "Male" (for ذكر/Male) or "Female" (for أنثى/Female).
+  3. patient_age:
+     - Look for "Age: 30" or "30 Years". Returns just the number "30".
+     - Or calculate from DOB.
   4. doctor_names:
-     - Prefer method A (label-based):
-       - Find label "الطبيب" or "Doctor" or "Physician".
-       - doctor_names MUST be the text in the SAME ROW as this label (or directly below it).
-     - If you cannot find these labels, use method B (best doctor-looking name in header):
-       - Look for a value that contains a doctor title such as "د.", "دكتور", "Dr", "Doctor".
-       - Use that value as doctor_names.
-     - Example (Arabic): "| د. خالد مثال | الطبيب |" → doctor_names = "د. خالد مثال" and patient_name is the name in the row of "اسم المريض", NOT this one.
-     - If you truly cannot find any doctor-related text in the header, set doctor_names = "".
+     - Look for labels like "Dr.", "د.", "Doctor".
   5. report_date:
-     - Find label "تاريخ الطلب" or "Date".
-     - Extract ONLY the date/time value next to that label.
+     - Look for the date the report was printed or collected.
 
-STEP 2: EXTRACT MEDICAL DATA TABLE (STRICT ROW + COLUMN ALIGNMENT)
-- Locate the main table that contains the medical test results.
-- First, identify the HEADER ROW of this table (the row with column names such as "الفحص", "النتيجة", "النتيجة الطبيعية", "الوحدة", "ملاحظات" or "Test", "Result", "Reference Range", "Unit", "Comments").
-- For EVERY row under that header:
-  1. Read all cells on that SAME visual line.
-  2. Map each cell by its COLUMN position:
-     - Column under "الفحص" / "Test" → field_name.
-      - Column under "النتيجة" / "Result" → field_value.
-      - Column under "النتيجة الطبيعية" / "Reference Range" → normal_range (COPY THE FULL TEXT, including separate ranges for male/female or child/adult).
-      - Column under "الوحدة" / "Unit" → field_unit.
-      - Column under "ملاحظات" / "Comments" → notes.
-  3. If BOTH Arabic and English test names appear in the same row or table, ALWAYS use the ENGLISH test name for field_name and category, and treat the Arabic text as comments only.
-  4. Only use a fully Arabic field_name when there is NO English test name anywhere for that row.
-  5. NEVER take numbers from the normal_range or unit columns as the main field_value.
-  6. VALIDATE: field_value must come from the SAME ROW as field_name, from the "Result" column only.
-  7. Skip empty rows or rows that clearly do not contain a test.
-  8. It is WRONG to return an empty \"medical_data\" array if you see a lab table with English tests and numeric results. In that case you MUST extract at least one row into medical_data.
+STEP 2: EXTRACT MEDICAL DATA TABLE
+- Find the main table with results.
+- Columns might be in Arabic or English. Map them generally to:
+  - Test Name ("الفحص", "Test", "Analyses") -> field_name
+  - Result ("النتيجة", "Result", "Observed Value") -> field_value
+  - Unit ("الوحدة", "Unit") -> field_unit
+  - Reference ("المعدل الطبيعي", "Reference", "Normal Range") -> normal_range
+  - Notes ("ملاحظات", "Notes") -> notes
 
-STEP 3: MEDICAL VALIDATION (SANITY CHECKS)
-- For Complete Blood Count (CBC), typical ranges (for adults):
-  - RBC: 4.0-6.0.
-  - WBC: 4.0-11.0.
-  - Platelets: 150-450.
-  - Hemoglobin: 12-17.
-  - Hematocrit: 36-50%.
-- If a value is extremely far from any reasonable range (e.g., RBC=40, WBC=200, Platelets=5000), you are likely using the wrong column or row. In that case, RECHECK the row and use the correct number from the "Result" column.
+- CRITICAL:
+  - If a row has an Arabic test name (e.g. "هيموجلوبين") AND an English abbreviation (e.g. "Hb" or "Hemoglobin"), PREFER THE ENGLISH NAME for 'field_name'.
+  - If ONLY Arabic is present, use the Arabic name.
+  - 'field_value' MUST be the actual result number/text from the specific row.
+  - IGNORE section headers that are just category titles (e.g. "HEMATOLOGY") if they have no result.
 
-STEP 4: JSON STRUCTURE
+STEP 3: JSON STRUCTURE
 Return a SINGLE JSON object:
 {{
-  "header_rows": [
-    {{
-      "label": "string (header label exactly as seen, e.g. \"اسم المريض\")",
-      "value": "string (full text in the corresponding value cell)"
-    }}
-  ],
-  "patient_name": "string (copied from the row derived for patient name)",
-  "patient_age": "string (age number, e.g., \"50\")",
-  "patient_gender": "string (must match الجنس / Sex row value)",
-  "report_date": "YYYY-MM-DD or full timestamp",
+  "header_rows": [],
+  "patient_name": "string",
+  "patient_age": "string",
+  "patient_gender": "string",
+  "report_date": "YYYY-MM-DD",
   "report_type": "{', '.join(REPORT_TYPES)}",
-  "doctor_names": "string (copied from the row derived for doctor name, or empty)",
+  "doctor_names": "string",
   "medical_data": [
     {{
-      "field_name": "string",
-      "field_value": "number or short text",
+      "field_name": "string (prefer English)",
+      "field_value": "string or number",
       "field_unit": "string",
       "normal_range": "string",
       "is_normal": boolean,
@@ -501,24 +466,71 @@ Return a SINGLE JSON object:
                 response_text = completion.choices[0].message.content.strip()
                 print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
                 
-                # Parsing logic
                 extracted_data = {}
-                try:
-                    import re
-                    # Try to find the largest outer JSON object
-                    start_idx = response_text.find('{')
-                    end_idx = response_text.rfind('}')
+                for attempt in range(2):
+                    try:
+                        import re
+                        start_idx = response_text.find('{')
+                        end_idx = response_text.rfind('}')
+                        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                            json_str = response_text[start_idx:end_idx+1]
+                            extracted_data = json.loads(json_str)
+                            print(f"✅ JSON extracted for Image {idx} (attempt {attempt+1})")
+                        else:
+                            print(f"⚠️ No JSON brackets found in response for Image {idx} (attempt {attempt+1})")
+                            print(f"RAW: {response_text[:200]}...")
+                    except Exception as json_err:
+                        print(f"⚠️ JSON Parsing Failed for Image {idx} (attempt {attempt+1}): {json_err}")
+                        print(f"RAW RESPONSE: {response_text}")
                     
-                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                        json_str = response_text[start_idx:end_idx+1]
-                        extracted_data = json.loads(json_str)
-                        print(f"✅ JSON extracted for Image {idx}")
-                    else:
-                        print(f"⚠️ No JSON brackets found in response for Image {idx}")
-                        print(f"RAW: {response_text[:200]}...")
-                except Exception as json_err:
-                    print(f"⚠️ JSON Parsing Failed for Image {idx}: {json_err}")
-                    print(f"RAW RESPONSE: {response_text}")
+                    if extracted_data.get('medical_data') or attempt == 1:
+                        break
+                    
+                    print(f"🔁 Retrying extraction for Image {idx} with table-focused prompt...")
+                    table_only_prompt = f"""You are reading a medical LAB REPORT image (page {idx}/{total_pages}). 
+The report may be in ENGLISH or ARABIC or BOTH.
+
+Your Goal: Extract the table data.
+
+- If headers are Arabic (e.g. "الفحص", "النتيجة"), map them:
+  - "الفحص" -> field_name
+  - "النتيجة" -> field_value
+  - "الوحدة" -> field_unit
+  - "المعدل الطبيعي" -> normal_range
+- If headers are English (e.g. "Test", "Result"), map them directly.
+
+Extract every row from that table into JSON with this structure only:
+{{
+  "medical_data": [
+    {{
+      "field_name": "Test name (Prefer English if available, otherwise Arabic)",
+      "field_value": "numeric or short text value",
+      "field_unit": "unit string",
+      "normal_range": "full reference range text",
+      "is_normal": true or false,
+      "category": "category name",
+      "notes": "optional notes"
+    }}
+  ]
+}}
+Return ONLY this JSON object."""
+                    content = [
+                        {'type': 'text', 'text': table_only_prompt},
+                        {
+                            'type': 'image_url',
+                            'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                        }
+                    ]
+                    completion = ollama_client.chat.completions.create(
+                        model=Config.OLLAMA_MODEL,
+                        messages=[{'role': 'user', 'content': content}],
+                        temperature=0.1,
+                        response_format={"type": "json_object"},
+                        max_tokens=600,
+                        timeout=90.0
+                    )
+                    response_text = completion.choices[0].message.content.strip()
+                    print(f"🔍 RAW RESPONSE (retry) for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
                 
                 header_rows = extracted_data.get('header_rows') or []
                 if isinstance(header_rows, list):
