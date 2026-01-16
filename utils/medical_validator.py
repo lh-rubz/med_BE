@@ -117,48 +117,83 @@ class MedicalValidator:
         Args:
             field_value: The measured value
             normal_range: The normal range string
-            current_is_normal: VLM's guess (used as fallback)
+            current_is_normal: VLM's guess (used as fallback, but ignored if no range)
             
         Returns:
-            True if normal, False if abnormal
+            True if normal, False if abnormal, None if cannot determine
         """
-        # Handle qualitative results
-        value_lower = str(field_value).lower().strip()
+        # Check if field_value is empty or an empty indicator
+        empty_indicators = {'', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
+                          'nil', 'none', 'unknown', 'null', 'غير متوفر', 'غير موجود'}
+        value_str = str(field_value).strip() if field_value else ''
+        value_lower = value_str.lower()
         
-        # Check if it's a qualitative normal result
+        # If value is empty or an empty indicator, return None (cannot determine)
+        if not value_str or value_lower in empty_indicators:
+            return None
+        
+        # Handle qualitative results (only if we have a meaningful text value)
         if any(pattern in value_lower for pattern in MedicalValidator.NORMAL_QUALITATIVE):
             return True
         
-        # Check if it's a qualitative abnormal result
         if any(pattern in value_lower for pattern in MedicalValidator.ABNORMAL_QUALITATIVE):
             return False
         
-        # Try numeric comparison
-        if normal_range:
-            # Some ranges contain multiple sub-ranges like "Male: 13-17, Female: 12-16"
-            # Split on delimiters and evaluate against each numeric interval; if value
-            # fits ANY interval, treat as normal.
-            segments = re.split(r'[;,/]+', normal_range)
-            try:
-                numeric_match = re.search(r'[-+]?\d*\.?\d+', str(field_value))
-                value = float(numeric_match.group()) if numeric_match else None
-            except (ValueError, TypeError):
-                value = None
-
-            if value is not None:
-                for segment in segments:
-                    range_tuple = MedicalValidator.parse_range(segment)
-                    if range_tuple:
-                        min_val, max_val = range_tuple
-                        if min_val <= value <= max_val:
-                            return True
-
-        # Fallback:
-        # Only trust the model's guess if a normal_range string exists.
-        if current_is_normal is not None and normal_range:
-            return current_is_normal
+        # CRITICAL: Only calculate is_normal if we have a valid numeric normal_range
+        # If normal_range is missing, empty, or non-numeric, return None
+        if not normal_range or not isinstance(normal_range, str):
+            return None
         
-        # Otherwise, when there is no clear evidence, treat status as unknown
+        normal_range_clean = normal_range.strip()
+        empty_range_indicators = {'', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
+                                 'nil', 'none', 'unknown', 'null', 'غير متوفر'}
+        if not normal_range_clean or normal_range_clean.lower() in empty_range_indicators:
+            return None
+        
+        # Check if normal_range contains numeric pattern (e.g., "12-16", "(0-200)", "<10")
+        has_numeric_range = bool(re.search(r'[-+]?\d*\.?\d+\s*[-<>=]+\s*[-+]?\d*\.?\d+', normal_range_clean))
+        has_numeric_range = has_numeric_range or bool(re.search(r'[<>]\s*[-+]?\d*\.?\d+', normal_range_clean))
+        
+        # If no numeric range found, return None (cannot determine without valid range)
+        if not has_numeric_range:
+            return None
+        
+        # Try numeric comparison with valid range
+        # Some ranges contain multiple sub-ranges like "Male: 13-17, Female: 12-16"
+        # Split on delimiters and evaluate against each numeric interval
+        segments = re.split(r'[;,/]+', normal_range_clean)
+        
+        # Extract numeric value from field_value
+        try:
+            numeric_match = re.search(r'[-+]?\d*\.?\d+', value_str)
+            value = float(numeric_match.group()) if numeric_match else None
+        except (ValueError, TypeError, AttributeError):
+            value = None
+        
+        # If we have a numeric value, compare against ranges
+        if value is not None:
+            for segment in segments:
+                range_tuple = MedicalValidator.parse_range(segment)
+                if range_tuple:
+                    min_val, max_val = range_tuple
+                    if min_val <= value <= max_val:
+                        return True
+                    # If we found a valid range but value is outside, it's abnormal
+                    # (but continue checking other segments in case of multiple ranges)
+                    if min_val != float('-inf') or max_val != float('inf'):
+                        # We have a valid finite range and value is outside - mark as abnormal
+                        # But first check all segments to see if it fits any
+                        pass
+            
+            # After checking all segments, if we parsed at least one range and value didn't fit
+            # any of them, it's abnormal
+            for segment in segments:
+                if MedicalValidator.parse_range(segment):
+                    # Found at least one valid range but value didn't match - abnormal
+                    return False
+        
+        # If we have a numeric range but couldn't extract numeric value from field_value,
+        # and it's not qualitative, return None (cannot determine)
         return None
     
     @staticmethod
@@ -271,15 +306,22 @@ class MedicalValidator:
         """
         validated = field.copy()
         
-        # Normalize field value (preserve decimal precision)
-        field_value = validated.get('field_value', '')
-        if field_value:
-            normalized = MedicalValidator.normalize_decimal(str(field_value))
+        # Detect and normalize empty values
+        empty_indicators = {'', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
+                          'nil', 'none', 'unknown', 'null', 'غير متوفر', 'غير موجود'}
+        raw_field_value = validated.get('field_value', '')
+        field_value_str = str(raw_field_value).strip() if raw_field_value else ''
+        field_value_lower = field_value_str.lower()
+        
+        # If value is an empty indicator, set to empty string
+        if not field_value_str or field_value_lower in empty_indicators:
+            validated['field_value'] = ''
+            field_value = ''
+        else:
+            # Normalize field value (preserve decimal precision) for non-empty values
+            normalized = MedicalValidator.normalize_decimal(field_value_str)
             validated['field_value'] = normalized
             field_value = normalized
-        else:
-            # Ensure key exists even if empty
-            validated['field_value'] = ''
         
         # Normalize normal_range but preserve full descriptive text
         normal_range = str(validated.get('normal_range', ''))
@@ -290,7 +332,7 @@ class MedicalValidator:
             normal_range = re.sub(pattern, unit, normal_range)
             validated['normal_range'] = normal_range
         
-        # Recalculate is_normal deterministically
+        # Recalculate is_normal deterministically (will return None for empty values or missing ranges)
         normal_range = validated.get('normal_range', '')
         current_is_normal = validated.get('is_normal')
         

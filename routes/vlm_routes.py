@@ -383,62 +383,106 @@ GENERAL RULES:
 - Never invent a name, date, gender, age, doctor, or result.
 - If multiple candidates exist, choose the one closest to the main patient header.
 - Do not copy label words as values (for example: "اسم المريض", "Patient Name").
+- CRITICAL: Each test result row is independent. NEVER mix values from different rows or columns.
 
 STEP 1: PATIENT HEADER READING
-Scan all regions (right/left, top/bottom) and treat any "label : value" pair as a candidate.
-Handle both Arabic and English labels:
+Scan all regions (right/left, top/bottom) carefully. Look for header tables or sections.
+Handle both Arabic and English labels. Read each label-value pair precisely:
 
 - Patient Name labels:
-  - "اسم المريض", "المريض", "Patient Name", "Name"
-  -> Value must be a person name only, without labels or extra words.
+  - Arabic: "اسم المريض", "المريض", "الاسم"
+  - English: "Patient Name", "Name", "Patient"
+  -> Extract ONLY the actual name. Remove any labels or prefixes like "Name:", "Patient Name:".
+  -> Return the full name as written (Arabic or English).
+  -> If name contains extra text like "Patient Name: John Doe", extract only "John Doe".
+  -> If not found, return "".
 
 - Gender labels:
-  - "الجنس", "Sex", "Gender"
-  -> Allowed values: "Male" or "Female" only.
-  -> If you see "ذكر" -> return "Male".
-  -> If you see "انثى" or "أنثى" -> return "Female".
-  -> Do not infer gender from the name.
+  - Arabic: "الجنس", "الجنسي"
+  - English: "Sex", "Gender"
+  -> Return "Male" if you see: "ذكر", "Male", "M", "ذكر" in Arabic
+  -> Return "Female" if you see: "أنثى", "انثى", "Female", "F", "أنثى" in Arabic
+  -> If not found or unclear, return "".
+  -> Do NOT infer gender from names.
 
 - Date of Birth / Age labels:
-  - "تاريخ الميلاد", "DOB", "Date of Birth", "Age"
-  -> Prefer extracting full DATE OF BIRTH when available.
-  -> Normalize date to "YYYY-MM-DD" when possible.
-  -> If only age is written (for example "50 Y", "50 years"), extract the number of years.
+  - Arabic: "تاريخ الميلاد", "عمر", "العمر"
+  - English: "DOB", "Date of Birth", "Birth Date", "Age"
+  -> If DATE OF BIRTH is found, extract and normalize to "YYYY-MM-DD" format.
+  -> If only AGE is found (e.g., "50 years", "50 Y", "50"), extract the number only (e.g., "50").
+  -> If both are found, prefer date of birth for patient_dob and calculate/use age for patient_age.
+  -> Date formats to recognize: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD-MM-YYYY
+  -> If not found, return "" for both.
 
 - Report Date labels:
-  - "تاريخ الطلب", "التاريخ", "Report Date"
-  -> Normalize to "YYYY-MM-DD" when possible.
+  - Arabic: "تاريخ الطلب", "التاريخ", "تاريخ الفحص"
+  - English: "Report Date", "Date", "Test Date"
+  -> Normalize to "YYYY-MM-DD" format when possible.
+  -> If not found, return "".
 
 - Doctor labels:
-  - "الطبيب", "Doctor", "Physician", "Ref By"
-  -> Return only the doctor name or names, separated by commas if more than one.
+  - Arabic: "الطبيب", "طبيب"
+  - English: "Doctor", "Physician", "Ref By", "Referred By"
+  -> Extract only the doctor name(s), without prefixes like "Dr.", "Doctor:".
+  -> If multiple doctors, separate with commas.
+  -> If not found, return "".
 
-STEP 2: SPECIAL CASE – TWO GRIDS LAYOUT
-If you see two header tables side by side (as in many Palestinian lab forms):
-- The right grid usually contains labels in Arabic ("رقم المريض", "اسم المريض", "الجنس", "تاريخ الميلاد").
-- The left grid usually contains labels like "تاريخ الطلب", "الطبيب".
-For each row:
-- Column on the right = label.
-- Column on the left = value.
+STEP 2: SPECIAL CASE – HEADER TABLES (Palestinian/Arabic Lab Forms)
+Many reports have two side-by-side header tables:
+- RIGHT table: Patient information (Arabic labels like "رقم المريض", "اسم المريض", "الجنس", "تاريخ الميلاد", "رقم الهوية")
+- LEFT table: Request information (Arabic labels like "تاريخ الطلب", "رقم الطلب", "الطبيب")
 
-Use this layout only if it matches what you see. Otherwise, just use the generic rules.
+READ CAREFULLY:
+- Each row has: LABEL in one cell, VALUE in adjacent cell.
+- Match each label to its correct value in the SAME row.
+- Do NOT mix values from different rows.
+- Extract patient_name from the row with "اسم المريض" label.
+- Extract patient_gender from the row with "الجنس" label.
+- Extract patient_dob or patient_age from "تاريخ الميلاد" or "عمر" row.
 
-STEP 3: LAB TABLE EXTRACTION
-Extract all rows from any lab result table.
+STEP 3: LAB TABLE EXTRACTION (CRITICAL - NO MIXING VALUES!)
+Extract test results from tables. Each ROW is one test. NEVER mix values between rows.
 
-Map Arabic and English headers:
-- "الفحص", "الاختبار", "Test" -> field_name
-- "النتيجة", "Result" -> field_value
-- "الوحدة", "Unit" -> field_unit
-- "المعدل الطبيعي", "Normal Range" -> normal_range
+Map column headers:
+- Arabic: "الفحص"/"الاختبار" -> field_name
+- Arabic: "النتيجة"/"القيمة" -> field_value  
+- Arabic: "الوحدة" -> field_unit
+- Arabic: "المعدل الطبيعي"/"النتيجة الطبيعية" -> normal_range
+- English: "Test"/"Examination" -> field_name
+- English: "Result"/"Value" -> field_value
+- English: "Unit" -> field_unit
+- English: "Normal Range"/"Reference Range" -> normal_range
 
-Rules:
-- If a cell is empty or just dashes, return "".
-- Do not invent values.
-- is_normal:
-  - If an explicit flag exists (H, L, arrows, abnormal/normal words) use it.
-  - Otherwise, compare numeric result to the numeric part of the normal range.
-  - If you cannot decide, set is_normal to null.
+ROW-BY-ROW EXTRACTION RULES:
+1. For EACH row in the table:
+   - Read field_name from the test name column
+   - Read field_value from the result column in THE SAME ROW
+   - Read field_unit from the unit column in THE SAME ROW
+   - Read normal_range from the range column in THE SAME ROW
+   - Do NOT take field_value from a different row even if current row is empty
+
+2. EMPTY VALUE DETECTION:
+   If field_value cell contains ANY of these, treat as EMPTY and return "":
+   - Empty cell / blank
+   - Only dashes: "-", "--", "—"
+   - Only asterisks: "*", "**", "***"
+   - Placeholders: "N/A", "n/a", "NA", "N.A", "nil", "none", "unknown"
+   - Do NOT fill empty values with values from other rows or cells
+
+3. is_normal calculation:
+   - ONLY set is_normal if normal_range contains numeric range (e.g., "(12-16)", "0-200")
+   - If normal_range is empty, missing, or non-numeric (e.g., "-", "*", empty string), set is_normal to null
+   - If field_value is empty or non-numeric, set is_normal to null
+   - Compare numeric field_value against numeric normal_range:
+     * If value is within range: is_normal = true
+     * If value is outside range: is_normal = false
+   - If normal_range exists but you cannot parse it or compare, set is_normal to null
+
+4. COMPLEX TABLES:
+   - Handle tables with multiple sections (e.g., "HEMATOLOGY", "CLINICAL CHEMISTRY")
+   - Each section may have its own column structure
+   - Read each section's headers carefully
+   - Maintain row alignment - each field_value must come from the same row as its field_name
 
 STEP 4: JSON OUTPUT FORMAT
 Return exactly one JSON object, no markdown, no explanations.
@@ -446,22 +490,22 @@ Return exactly one JSON object, no markdown, no explanations.
 Use this schema:
 
 {{
-  "patient_name": "string (full name only, no labels)",
-  "patient_age": "string (age in years only, for example \"50\")",
-  "patient_dob": "string date YYYY-MM-DD or \"\" if unknown",
+  "patient_name": "string (full name only, no labels or prefixes)",
+  "patient_age": "string (age in years as number only, e.g. \"50\" or \"\" if unknown)",
+  "patient_dob": "string (date YYYY-MM-DD or \"\" if unknown)",
   "patient_gender": "string (\"Male\" or \"Female\" or \"\")",
-  "report_date": "YYYY-MM-DD or \"\"",
+  "report_date": "string (YYYY-MM-DD or \"\")",
   "report_type": "{', '.join(REPORT_TYPES)} or free text",
-  "doctor_names": "string of doctor names, comma-separated, or \"\"",
+  "doctor_names": "string (doctor names comma-separated, or \"\")",
   "medical_data": [
     {{
-      "field_name": "string (prefer English if available)",
-      "field_value": "string or number as text",
-      "field_unit": "string",
-      "normal_range": "string",
-      "is_normal": true or false or null,
-      "category": "string",
-      "notes": "string"
+      "field_name": "string (test name, prefer English if available)",
+      "field_value": "string (numeric value as text, or \"\" if empty/missing)",
+      "field_unit": "string (unit like mg/dl, g/dL, etc., or \"\")",
+      "normal_range": "string (reference range like \"(12-16)\", or \"\" if missing)",
+      "is_normal": true or false or null (null if no normal_range or empty value),
+      "category": "string (section name like \"HEMATOLOGY\" or \"\")",
+      "notes": "string (any notes or \"\")"
     }}
   ]
 }}
@@ -513,30 +557,49 @@ Use this schema:
                     table_only_prompt = f"""You are reading a medical LAB REPORT image (page {idx}/{total_pages}). 
 The report may be in ENGLISH or ARABIC or BOTH.
 
-Your Goal: Extract the table data.
+CRITICAL RULES:
+- Read each table row INDEPENDENTLY - each row is one test
+- NEVER mix values from different rows or columns
+- If a cell is empty (dash, asterisk, blank), return "" for that field_value
+- Only set is_normal if normal_range contains numeric range, otherwise set null
 
-- If headers are Arabic (e.g. "الفحص", "النتيجة"), map them:
-  - "الفحص" -> field_name
-  - "النتيجة" -> field_value
-  - "الوحدة" -> field_unit
-  - "المعدل الطبيعي" -> normal_range
-- If headers are English (e.g. "Test", "Result"), map them directly.
+Extract table data by mapping column headers:
 
-Extract every row from that table into JSON with this structure only:
+Arabic headers:
+- "الفحص" / "الاختبار" -> field_name
+- "النتيجة" / "القيمة" -> field_value  
+- "الوحدة" -> field_unit
+- "المعدل الطبيعي" / "النتيجة الطبيعية" -> normal_range
+
+English headers:
+- "Test" / "Examination" -> field_name
+- "Result" / "Value" -> field_value
+- "Unit" -> field_unit
+- "Normal Range" / "Reference Range" -> normal_range
+
+For EACH row:
+1. Read field_name from test name column
+2. Read field_value from result column IN THE SAME ROW (not from other rows!)
+3. Read field_unit from unit column IN THE SAME ROW
+4. Read normal_range from range column IN THE SAME ROW
+5. If field_value is empty/dash/asterisk, set it to ""
+6. Set is_normal: null if no normal_range or empty value, otherwise true/false based on comparison
+
+Return JSON with this structure only:
 {{
   "medical_data": [
     {{
-      "field_name": "Test name (Prefer English if available, otherwise Arabic)",
-      "field_value": "numeric or short text value",
-      "field_unit": "unit string",
-      "normal_range": "full reference range text",
-      "is_normal": true or false,
-      "category": "category name",
-      "notes": "optional notes"
+      "field_name": "Test name (prefer English if available)",
+      "field_value": "numeric value as string, or \"\" if empty",
+      "field_unit": "unit string, or \"\"",
+      "normal_range": "range like \"(12-16)\", or \"\" if missing",
+      "is_normal": true or false or null,
+      "category": "section name like \"HEMATOLOGY\" or \"\"",
+      "notes": "any notes or \"\""
     }}
   ]
 }}
-Return ONLY this JSON object."""
+Return ONLY this JSON object, no markdown."""
                     content = [
                         {'type': 'text', 'text': table_only_prompt},
                         {
@@ -576,39 +639,97 @@ Return ONLY this JSON object."""
                         test_name = str(raw_test_name).strip() if raw_test_name is not None else ''
                         test_val = str(raw_test_val).strip() if raw_test_val is not None else ''
                         
-                        if not test_name or test_name.lower() == 'test name':
+                        if not test_name or test_name.lower() in ['test name', 'test', 'الفحص', 'الاختبار']:
                             continue
                             
                         if test_name.lower() in existing_test_names:
                             print(f"⚠️ Duplicate test skipped: {test_name}")
                             continue
-                            
-                        if not test_val:
+                        
+                        # Enhanced empty value detection - recognize all empty indicators
+                        empty_indicators = {'', ' ', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
+                                          'nil', 'none', 'unknown', 'null', 'nul', 'not available', 
+                                          'غير متوفر', 'غير موجود'}
+                        test_val_cleaned = test_val.strip() if test_val else ''
+                        test_val_lower = test_val_cleaned.lower()
+                        
+                        # If value is an empty indicator, set it to empty string but still process the field
+                        if test_val_lower in empty_indicators or not test_val_cleaned:
+                            # Set field_value to empty string - don't skip the field entirely
+                            item['field_value'] = ''
+                            # Still add the field but mark it as having no value
+                            unique_new_items.append(item)
+                            existing_test_names.add(test_name.lower())
                             continue
                         
-                        placeholder_values = {'n/a', 'na', 'n.a', 'unknown', '-', '--', '—', 'nil', 'none', '*', '***'}
-                        if test_val.lower() in placeholder_values:
-                            continue
-                        
-                        has_digit = any(ch.isdigit() for ch in test_val)
-                        value_lower = test_val.lower()
+                        # Check for qualitative results (normal/abnormal text)
                         qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
-                        is_qualitative = any(token in value_lower for token in qualitative_tokens)
+                        is_qualitative = any(token in test_val_lower for token in qualitative_tokens)
                         
-                        if not has_digit and not is_qualitative:
-                            continue
-                             
-                        unique_new_items.append(item)
-                        existing_test_names.add(test_name.lower())
+                        # Check if value contains numbers
+                        has_digit = any(ch.isdigit() for ch in test_val_cleaned)
+                        
+                        # Accept if it has digits OR is a qualitative result
+                        if has_digit or is_qualitative:
+                            unique_new_items.append(item)
+                            existing_test_names.add(test_name.lower())
+                        else:
+                            # Value doesn't look like a valid medical result - skip
+                            print(f"⚠️ Skipping invalid test value: {test_name} = '{test_val_cleaned}'")
                     
                     all_extracted_data.extend(unique_new_items)
                     print(f"✅ Extracted {len(unique_new_items)} UNIQUE field(s) from page {idx}")
                 
-                # Capture patient info (prefer the most complete one)
-                new_name = extracted_data.get('patient_name', '')
-                current_name = patient_info.get('patient_name', '')
-                if len(new_name) > len(current_name):
-                     patient_info = extracted_data
+                # Capture patient info - merge intelligently, prefer most complete data
+                new_name = str(extracted_data.get('patient_name', '') or '').strip()
+                new_gender = str(extracted_data.get('patient_gender', '') or '').strip()
+                new_age = str(extracted_data.get('patient_age', '') or '').strip()
+                new_dob = str(extracted_data.get('patient_dob', '') or '').strip()
+                new_doctor = str(extracted_data.get('doctor_names', '') or '').strip()
+                new_report_date = str(extracted_data.get('report_date', '') or '').strip()
+                
+                current_name = str(patient_info.get('patient_name', '') or '').strip()
+                current_gender = str(patient_info.get('patient_gender', '') or '').strip()
+                current_age = str(patient_info.get('patient_age', '') or '').strip()
+                current_dob = str(patient_info.get('patient_dob', '') or '').strip()
+                
+                # Merge patient info: use new data if current is empty, or if new is longer/more complete
+                if not current_name and new_name:
+                    patient_info['patient_name'] = new_name
+                elif new_name and len(new_name) > len(current_name):
+                    patient_info['patient_name'] = new_name
+                    
+                if not current_gender and new_gender:
+                    patient_info['patient_gender'] = new_gender
+                elif new_gender and not current_gender:
+                    patient_info['patient_gender'] = new_gender
+                    
+                if not current_age and new_age:
+                    patient_info['patient_age'] = new_age
+                elif new_age and not current_age:
+                    patient_info['patient_age'] = new_age
+                    
+                if not current_dob and new_dob:
+                    patient_info['patient_dob'] = new_dob
+                elif new_dob and not current_dob:
+                    patient_info['patient_dob'] = new_dob
+                    
+                if new_doctor and not patient_info.get('doctor_names'):
+                    patient_info['doctor_names'] = new_doctor
+                elif new_doctor and new_doctor != patient_info.get('doctor_names'):
+                    # Append if different
+                    existing = patient_info.get('doctor_names', '')
+                    if existing:
+                        patient_info['doctor_names'] = f"{existing}, {new_doctor}"
+                    else:
+                        patient_info['doctor_names'] = new_doctor
+                        
+                if new_report_date and not patient_info.get('report_date'):
+                    patient_info['report_date'] = new_report_date
+                    
+                # Keep report_type if not set
+                if not patient_info.get('report_type') and extracted_data.get('report_type'):
+                    patient_info['report_type'] = extracted_data.get('report_type')
 
                 print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")
                      
@@ -625,60 +746,111 @@ Return ONLY this JSON object."""
         yield f"data: {json.dumps({'percent': 75, 'message': 'Double-checking the results...'})}\n\n"
         print(f"🔍 Validating aggregated data ({len(all_extracted_data)} total items)...")
         
+        # Clean and extract patient name
         raw_name = patient_info.get('patient_name', '')
         cleaned_name = str(raw_name) if raw_name is not None else ''
         if cleaned_name:
-            cleaned_name = re.sub(r'^(Name|Patient Name|Patient|Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s*[:\-\.]?\s*', '', cleaned_name, flags=re.IGNORECASE)
-            cleaned_name = re.sub(r'\s+(Age|Sex|Gender|ID|Date|Ref|Dr)\s*[:\-\.].*$', '', cleaned_name, flags=re.IGNORECASE)
+            # Remove common prefixes and labels (both English and Arabic)
+            cleaned_name = re.sub(r'^(Name|Patient Name|Patient|Mr\.?|Mrs\.?|Ms\.?|Dr\.?|اسم المريض|المريض|الاسم)\s*[:\-\.]?\s*', '', cleaned_name, flags=re.IGNORECASE)
+            # Remove suffixes that might contain extra info
+            cleaned_name = re.sub(r'\s+(Age|Sex|Gender|ID|Date|Ref|Dr|عمر|الجنس|رقم|تاريخ)\s*[:\-\.].*$', '', cleaned_name, flags=re.IGNORECASE)
             cleaned_name = cleaned_name.strip()
-            name_lower = cleaned_name.replace(':', '').strip().lower()
-            if name_lower in ['اسم المريض', 'patient name', 'name']:
+            name_lower = cleaned_name.replace(':', '').replace('-', '').strip().lower()
+            # Reject if name is actually a label
+            if name_lower in ['اسم المريض', 'patient name', 'name', 'المريض', 'الاسم', '']:
                 cleaned_name = ''
+            # Remove any remaining label-like prefixes
+            if cleaned_name:
+                cleaned_name = re.sub(r'^[:\-\.\s]+', '', cleaned_name)
+                cleaned_name = re.sub(r'[:\-\.\s]+$', '', cleaned_name)
 
+        # Extract and process date of birth and age
         raw_age = str(patient_info.get('patient_age', '') or '').strip()
         raw_dob = str(patient_info.get('patient_dob', '') or '').strip()
         cleaned_age = ''
         cleaned_dob = ''
+        
+        # Try to parse date of birth first (more reliable)
         dob_candidates = [raw_dob, raw_age]
         for text in dob_candidates:
             if not text:
                 continue
-            digits = re.findall(r'\d+', text)
-            if len(digits) >= 3:
-                part1, part2, part3 = digits[0], digits[1], digits[2]
-                try:
-                    if len(part1) == 4:
-                        year = int(part1)
-                        month = int(part2)
-                        day = int(part3)
-                    else:
-                        day = int(part1)
-                        month = int(part2)
-                        year = int(part3)
-                    dob_date = datetime(year, month, day).date()
-                    today = datetime.now(timezone.utc).date()
-                    age_years = today.year - dob_date.year - (
-                        (today.month, today.day) < (dob_date.month, dob_date.day)
-                    )
-                    if 1 <= age_years <= 120:
-                        cleaned_age = str(age_years)
-                        cleaned_dob = dob_date.isoformat()
-                        break
-                except ValueError:
-                    continue
+            # Try various date formats
+            # Format 1: YYYY-MM-DD
+            try:
+                dob_date = datetime.strptime(text[:10], '%Y-%m-%d').date()
+                today = datetime.now(timezone.utc).date()
+                age_years = today.year - dob_date.year - (
+                    (today.month, today.day) < (dob_date.month, dob_date.day)
+                )
+                if 1 <= age_years <= 120:
+                    cleaned_age = str(age_years)
+                    cleaned_dob = dob_date.isoformat()
+                    break
+            except (ValueError, IndexError):
+                pass
+            
+            # Format 2: DD/MM/YYYY or MM/DD/YYYY
+            date_patterns = [
+                (r'(\d{1,2})/(\d{1,2})/(\d{4})', lambda m: (int(m.group(3)), int(m.group(2)), int(m.group(1)))),  # DD/MM/YYYY
+                (r'(\d{4})-(\d{1,2})-(\d{1,2})', lambda m: (int(m.group(1)), int(m.group(2)), int(m.group(3)))),  # YYYY-MM-DD
+            ]
+            
+            for pattern, parser in date_patterns:
+                match = re.search(pattern, text)
+                if match:
+                    try:
+                        year, month, day = parser(match)
+                        dob_date = datetime(year, month, day).date()
+                        today = datetime.now(timezone.utc).date()
+                        age_years = today.year - dob_date.year - (
+                            (today.month, today.day) < (dob_date.month, dob_date.day)
+                        )
+                        if 1 <= age_years <= 120:
+                            cleaned_age = str(age_years)
+                            cleaned_dob = dob_date.isoformat()
+                            break
+                    except (ValueError, IndexError):
+                        continue
+                if cleaned_age:
+                    break
+            if cleaned_age:
+                break
+        
+        # If we have DOB but no age calculated, calculate it now
+        if cleaned_dob and not cleaned_age:
+            try:
+                dob_date = datetime.strptime(cleaned_dob[:10], '%Y-%m-%d').date()
+                today = datetime.now(timezone.utc).date()
+                age_years = today.year - dob_date.year - (
+                    (today.month, today.day) < (dob_date.month, dob_date.day)
+                )
+                if 1 <= age_years <= 120:
+                    cleaned_age = str(age_years)
+            except (ValueError, IndexError):
+                pass
+        
+        # If no DOB found, try to extract age directly
         if not cleaned_age and raw_age:
-            age_match = re.search(r'\d{1,3}', raw_age)
+            # Extract numeric age (handle formats like "50 years", "50 Y", "50")
+            age_match = re.search(r'\b(\d{1,3})\b', raw_age)
             if age_match:
-                age_val = int(age_match.group(0))
-                if 1 <= age_val <= 120:
-                    cleaned_age = str(age_val)
+                try:
+                    age_val = int(age_match.group(1))
+                    if 1 <= age_val <= 120:
+                        cleaned_age = str(age_val)
+                except ValueError:
+                    pass
 
+        # Clean and normalize gender
         raw_gender = str(patient_info.get('patient_gender', '') or '').strip()
         gender_lower = raw_gender.lower()
         cleaned_gender = ''
-        if any(token in gender_lower for token in ['ذكر', 'm', 'male']):
-            cleaned_gender = 'ذكر'
-        elif any(token in gender_lower for token in ['أنثى', 'انثى', 'f', 'female']):
+        # Arabic: ذكر = Male, أنثى/انثى = Female
+        # English: Male/M = Male, Female/F = Female
+        if any(token in gender_lower for token in ['ذكر', 'male', 'm']):
+            cleaned_gender = 'ذكر'  # Store in Arabic as per original code
+        elif any(token in gender_lower for token in ['أنثى', 'انثى', 'female', 'f']):
             cleaned_gender = 'أنثى'
 
         raw_report_type = str(patient_info.get('report_type', '') or '').strip()
