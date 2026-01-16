@@ -385,18 +385,24 @@ STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
 
 - EXTRACT THESE FIELDS (NO GUESSING, NO SWAPPING):
   1. patient_name:
-     - Find label "اسم المريض" or "Patient Name".
-     - The patient_name MUST be the text in the SAME ROW (or directly below) this label.
+     - Prefer method A (label-based):
+       - Find label "اسم المريض" or "Patient Name".
+       - Take the text in the SAME ROW (or directly below) this label as patient_name.
+     - If you truly cannot find these labels, use method B (best name in header):
+       - Look in the header tables for a value that looks like a personal name:
+         - 2 or more words, mostly letters (Arabic or English), not an ID, not a date, not a number.
+       - Use that value as patient_name.
      - Extract FULL text exactly as written.
      - Example (Arabic): "| فلان الفلاني | اسم المريض |" → patient_name = "فلان الفلاني".
      - Do NOT shorten, translate, or replace the name.
      - Pay close attention to Arabic characters: distinguish "ة" (Ta Marbuta) from "ي" (Ya) at end of names.
-     - Do NOT take the doctor name as patient_name (doctor name is always in the row with label "الطبيب" / "Doctor").
-     - If you cannot clearly see any name next to "اسم المريض" / "Patient Name", set patient_name = "" (empty string).
-     - NEVER invent generic Arabic names like "أحمد محمد", "محمد", "خالد", etc.
+     - Do NOT take the doctor name as patient_name (doctor name is always in the row with label "الطبيب" / "Doctor" / "Physician").
+     - NEVER invent generic placeholder names like "أحمد محمد", "محمد", "خالد", etc. Use only text that actually appears in the header.
   2. patient_gender:
-     - Find label "الجنس" or "Sex".
-     - Take exactly the value in the SAME ROW as this label.
+     - Prefer method A (label-based):
+       - Find label "الجنس" or "Sex".
+       - Take exactly the value in the SAME ROW as this label.
+     - If you cannot see these labels but you see clear gender words in the header ("ذكر", "انثى", "أنثى", "Male", "Female"), use that value as patient_gender.
      - Use exactly the value you see (e.g., "انثى", "أنثى", "ذكر", "Male", "Female").
      - QUALITY CHECK: If the الجنس cell clearly contains a female word (like "انثى" or "أنثى" or "Female"), patient_gender MUST be female and NEVER "ذكر"/"Male".
   3. Date of Birth / Age:
@@ -404,11 +410,14 @@ STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
      - Extract the date from the SAME ROW (or directly below) this label (e.g., "01/05/1975").
      - CALCULATE Age: report_year - birth_year (return only the number as string).
   4. doctor_names:
-     - Find label "الطبيب" or "Doctor" or "Physician".
-     - doctor_names MUST be the text in the SAME ROW as this label (or directly below it).
+     - Prefer method A (label-based):
+       - Find label "الطبيب" or "Doctor" or "Physician".
+       - doctor_names MUST be the text in the SAME ROW as this label (or directly below it).
+     - If you cannot find these labels, use method B (best doctor-looking name in header):
+       - Look for a value that contains a doctor title such as "د.", "دكتور", "Dr", "Doctor".
+       - Use that value as doctor_names.
      - Example (Arabic): "| د. خالد مثال | الطبيب |" → doctor_names = "د. خالد مثال" and patient_name is the name in the row of "اسم المريض", NOT this one.
-     - If that cell is blank or no doctor label exists anywhere, set doctor_names = "".
-     - If you can see a doctor value anywhere next to "الطبيب"/"Doctor"/"Physician", then doctor_names MUST NOT be empty.
+     - If you truly cannot find any doctor-related text in the header, set doctor_names = "".
   5. report_date:
      - Find label "تاريخ الطلب" or "Date".
      - Extract ONLY the date/time value next to that label.
