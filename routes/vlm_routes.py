@@ -375,23 +375,32 @@ Your task is to extract structured medical data from this image (page {idx}/{tot
 
 STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
 - Locate the grid/table at the top of the page.
-- **CRITICAL FOR ARABIC HEADERS**: 
-  - The layout is often: | VALUE | LABEL |
-  - You must look to the **LEFT** of the label to find the value.
+- CRITICAL FOR ARABIC HEADERS:
+  - Layout is usually: | VALUE | LABEL |
+  - You must look to the LEFT of each label cell to find its value.
   
-- EXTRACT THESE FIELDS:
-  1. Patient Name: Find label "اسم المريض" or "Patient Name". 
-     - Look to the LEFT cell. Extract FULL text .
-     - DO NOT hallucinate "أحمد محمد".
-  2. Gender: Find label "الجنس" or "Sex".
-     - Look to the LEFT. Extract "انثى" (Female) or "ذكر" (Male).
-  3. Date of Birth/Age: Find label "تاريخ الميلاد" or "DOB".
-     - Look to the LEFT. Extract date (e.g., "01/05/1975").
-     - CALCULATE Age: Report Year (e.g., 2025) - Birth Year (e.g., 1975) = 50.
-  4. Doctor Name: Find label "الطبيب" or "Doctor".
-     - Look to the LEFT. Extract name .
-  5. Report Date: Find label "تاريخ الطلب" or "Date".
-     - Look to the LEFT. Extract date.
+- EXTRACT THESE FIELDS (NO GUESSING):
+  1. patient_name:
+     - Find label "اسم المريض" or "Patient Name".
+     - Look to the LEFT cell and copy the FULL text exactly as written.
+     - Do NOT shorten, translate, or replace the name.
+     - If you cannot clearly see any name, set patient_name = "" (empty string).
+     - NEVER invent generic Arabic names like "أحمد محمد", "محمد", "خالد", etc.
+  2. patient_gender:
+     - Find label "الجنس" or "Sex".
+     - Look to the LEFT. Extract exactly "انثى" or "ذكر" or their English forms.
+  3. Date of Birth / Age:
+     - Find label "تاريخ الميلاد" or "DOB".
+     - Look to the LEFT. Extract the date (e.g., "01/05/1975").
+     - CALCULATE Age: report_year - birth_year (return only the number as string).
+  4. doctor_names:
+     - Find label "الطبيب" or "Doctor".
+     - Look to the LEFT. Copy the full name exactly as printed (e.g., "جهاد العملة").
+     - If that cell is blank or no doctor label exists, set doctor_names = "".
+     - If you can see a doctor value, doctor_names MUST NOT be empty.
+  5. report_date:
+     - Find label "تاريخ الطلب" or "Date".
+     - Look to the LEFT. Extract the date/time value.
 
 STEP 2: EXTRACT MEDICAL DATA ROW-BY-ROW (STRICT ALIGNMENT)
 - Locate the main table with test results.
@@ -411,12 +420,12 @@ STEP 3: MEDICAL VALIDATION (SANITY CHECKS)
 STEP 4: JSON STRUCTURE
 Return a SINGLE JSON object:
 {{
-  "patient_name": "string",
-  "patient_age": "string (number)",
+  "patient_name": "string (copied exactly from header or empty)",
+  "patient_age": "string (age number, e.g., \"50\")",
   "patient_gender": "string (Male/Female/ذكر/أنثى)",
-  "report_date": "YYYY-MM-DD",
+  "report_date": "YYYY-MM-DD or full timestamp",
   "report_type": "{', '.join(REPORT_TYPES)}",
-  "doctor_names": "string",
+  "doctor_names": "string (exact doctor name or empty)",
   "medical_data": [
     {{
       "field_name": "string",
