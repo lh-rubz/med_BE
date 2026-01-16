@@ -372,6 +372,7 @@ class ChatResource(Resource):
             # Build OPTIMIZED extraction prompt (reduced by ~40%)
             prompt_text = f"""ACT AS AN EXPERT MEDICAL DATA DIGITIZER. 
 Your task is to extract structured medical data from this image (page {idx}/{total_pages}) into JSON format.
+The report can contain both ARABIC and ENGLISH text. You fully understand both languages and must read Arabic exactly as printed (do NOT translate names or labels).
 
 STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
 - Locate the header section at the top of the page.
@@ -410,7 +411,7 @@ STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
      - Extract the full name found near this label.
      - Example (Arabic): "| د. خالد مثال | الطبيب |" → doctor_names MUST be "د. خالد مثال" and patient_name MUST NOT be "د. خالد مثال".
      - If that cell is blank or no doctor label exists, set doctor_names = "".
-     - If you can see a doctor value, doctor_names MUST NOT be empty.
+      - If you can see a doctor value anywhere in the report, doctor_names MUST NOT be empty.
   5. report_date:
      - Find label "تاريخ الطلب" or "Date".
      - Extract the date/time value.
@@ -579,9 +580,9 @@ Return a SINGLE JSON object:
         raw_gender = str(patient_info.get('patient_gender', '') or '').strip()
         gender_lower = raw_gender.lower()
         cleaned_gender = ''
-        if gender_lower in ['m', 'male', 'ذكر']:
+        if any(token in gender_lower for token in ['ذكر', 'm', 'male']):
             cleaned_gender = 'ذكر'
-        elif gender_lower in ['f', 'female', 'أنثى', 'انثى']:
+        elif any(token in gender_lower for token in ['أنثى', 'انثى', 'f', 'female']):
             cleaned_gender = 'أنثى'
 
         raw_report_type = str(patient_info.get('report_type', '') or '').strip()
