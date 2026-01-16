@@ -373,50 +373,52 @@ class ChatResource(Resource):
             prompt_text = f"""ACT AS AN EXPERT MEDICAL DATA DIGITIZER. 
 Your task is to extract structured medical data from this image (page {idx}/{total_pages}).
 
-STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
-- The header has TWO tables (Right and Left) with Arabic labels.
-- VISUALIZE THE ROW: [Value]   |   [Label]
+STEP 1: DETECT LANGUAGE & LAYOUT
+- Scan the header.
+- IF ENGLISH (LTR): Expect "Label: Value" (e.g. "Patient Name: John Doe").
+- IF ARABIC (RTL): Expect "Value :Label" (Value on Left) OR "Label: Value" (Value on Right) depending on the grid.
+- STRATEGY: Find the Label words -> Scan mostly to the LEFT (Arabic) or RIGHT (English). USE VISUAL PROXIMITY.
 
-- EXTRACT RULES:
+STEP 2: EXTRACT HEADER INFO (Universal Rules)
   1. patient_name:
-     - Find Label "اسم المريض" (Patient Name).
-     - The Value is the text immediately to the LEFT of this label.
-     - Extracted Value MUST NOT be "اسم المريض". It must be a person's name (e.g. 3-4 words).
-     - If you extract "اسم المريض", LOOK AGAIN.
+     - Labels: "اسم المريض", "Patient Name", "Name".
+     - ACTION: Find label -> Look next to it (Left or Right).
+     - ERROR CHECK: Extracted value CANNOT be "اسم المريض" or "Patient Name".
+     - ERROR CHECK: Must be a person's name (text string).
 
   2. patient_gender:
-     - Find Label "الجنس".
-     - Look at the text to the LEFT:
-       - If word is "انثى" or "أنثى" -> OUTPUT "Female".
-       - If word is "ذكر" -> OUTPUT "Male".
-     - STRICTLY FOLLOW THIS. Do not output Male if the text says "انثى".
+     - Labels: "الجنس", "Sex", "Gender".
+     - GLOBAL SCAN: If you see "انثى" / "أنثى" / "Female" ANYWHERE in the header -> Female.
+     - Else if you see "ذكر" / "Male" -> Male.
+     - Fallback: "Male" only if "Male" word is explicitly found.
 
   3. patient_age (CALCULATE IT):
-     - Find "تاريخ الميلاد" (DOB) e.g. "01/05/1975".
-     - Find "التاريخ" (Report Date).
+     - Labels: "تاريخ الميلاد", "DOB".
+     - Find the Birth Year (YYYY).
+     - Find the Report Date (YYYY).
      - CALCULATE: Report Year - Birth Year.
-     - Do not guess "30" or other numbers. CALCULATE IT.
+     - Do not just guess a low number like "01" (day) or "05" (month).
 
   4. doctor_names:
-     - Find Label "الطبيب" (usually in the Left-side table).
-     - Value is to the LEFT.
-     - Extract the name.
-  
-  5. report_date:
-     - Find "تاريخ الطلب" or "Date".
+     - Labels: "الطبيب", "Doctor", "Ref By".
+     - Look for a name with "Dr." or "د." prefix nearby.
 
-STEP 2: EXTRACT MEDICAL DATA TABLE
-- Find the main table. Map columns:
-  - "الفحص" / "Test" -> field_name (PREFER ENGLISH KEY IF AVAILABLE)
-  - "النتيجة" / "Result" -> field_value
-  - "الوحدة" / "Unit" -> field_unit
-  - "المعدل الطبيعي" / "Ref Range" -> normal_range
+  5. report_date:
+     - Labels: "التاريخ", "Date", "Reporting Date".
+
+STEP 3: EXTRACT MEDICAL DATA TABLE
+- Find the main results table.
+- Map columns dynamically:
+  - Test Name: "Test", "Assay", "الفحص".
+  - Result: "Result", "Value", "النتيجة".
+  - Unit: "Unit", "الوحدة".
+  - Ref Range: "Reference", "Range", "المعدل الطبيعي".
   
 - CRITICAL:
   - If a test has English (e.g. "FBS") and Arabic, use the English name.
   - "field_value" must be the result column.
 
-STEP 3: JSON STRUCTURE
+STEP 4: JSON STRUCTURE
 Return a SINGLE JSON object. 
 DO NOT include "header_rows" or any extra fields. 
 DO NOT include markdown formatting (```json).
