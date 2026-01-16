@@ -811,12 +811,28 @@ Return ONLY this JSON object, no markdown."""
                 current_dob = str(patient_info.get('patient_dob', '') or '').strip()
                 
                 # Filter out common false positives for patient name
-                # Reject if name looks like a doctor title or label
-                name_reject_patterns = ['دكتور', 'doctor', 'dr.', 'طبيب', 'الطبيب', 'الموظف', 'employee']
+                # Reject if name looks like a label, doctor title, or field name
+                name_reject_patterns = [
+                    # Arabic labels
+                    'رقم المريض', 'اسم المريض', 'المريض', 'الاسم', 
+                    'دكتور', 'طبيب', 'الطبيب', 'الموظف',
+                    # English labels
+                    'doctor', 'dr.', 'employee', 'patient name', 'patient id', 'patient number',
+                    'name', 'id number', 'gender', 'sex', 'date of birth', 'dob',
+                    # Partial matches
+                    'patient', 'رقم', 'اسم'
+                ]
                 if new_name:
-                    name_lower = new_name.lower()
-                    if any(pattern in name_lower for pattern in name_reject_patterns):
-                        print(f"⚠️ Rejected suspicious patient name: {new_name}")
+                    name_lower = new_name.lower().strip()
+                    # Check if name matches any reject pattern exactly or starts with it
+                    for pattern in name_reject_patterns:
+                        if name_lower == pattern.lower() or name_lower.startswith(pattern.lower() + ':'):
+                            print(f"⚠️ Rejected suspicious patient name (label): {new_name}")
+                            new_name = ''
+                            break
+                    # Also reject if name is too short or looks like a number only
+                    if new_name and (len(new_name) < 3 or new_name.strip().isdigit()):
+                        print(f"⚠️ Rejected suspicious patient name (too short/numeric): {new_name}")
                         new_name = ''
                 
                 # Merge patient info: use new data if current is empty, or if new is longer/more complete
@@ -894,23 +910,40 @@ Return ONLY this JSON object, no markdown."""
         print(f"   DOB: '{patient_info.get('patient_dob', '')}'")
         print(f"{'='*80}\n")
         
-        # Clean and extract patient name
+        # Clean and extract patient name - STRICT REJECTION OF LABELS
         raw_name = patient_info.get('patient_name', '')
         cleaned_name = str(raw_name) if raw_name is not None else ''
         if cleaned_name:
-            # Remove common prefixes and labels (both English and Arabic)
-            cleaned_name = re.sub(r'^(Name|Patient Name|Patient|Mr\.?|Mrs\.?|Ms\.?|Dr\.?|اسم المريض|المريض|الاسم)\s*[:\-\.]?\s*', '', cleaned_name, flags=re.IGNORECASE)
-            # Remove suffixes that might contain extra info
-            cleaned_name = re.sub(r'\s+(Age|Sex|Gender|ID|Date|Ref|Dr|عمر|الجنس|رقم|تاريخ)\s*[:\-\.].*$', '', cleaned_name, flags=re.IGNORECASE)
-            cleaned_name = cleaned_name.strip()
-            name_lower = cleaned_name.replace(':', '').replace('-', '').strip().lower()
-            # Reject if name is actually a label
-            if name_lower in ['اسم المريض', 'patient name', 'name', 'المريض', 'الاسم', '']:
-                cleaned_name = ''
-            # Remove any remaining label-like prefixes
+            # First, reject common labels (Arabic and English) - exact match or starts with
+            label_patterns = [
+                'رقم المريض', 'اسم المريض', 'المريض', 'الاسم', 'رقم', 'اسم',
+                'patient name', 'patient id', 'patient number', 'name', 'patient',
+                'دكتور', 'طبيب', 'doctor', 'dr.'
+            ]
+            name_lower_orig = cleaned_name.lower().strip()
+            for label in label_patterns:
+                if name_lower_orig == label.lower() or name_lower_orig.startswith(label.lower() + ':'):
+                    print(f"⚠️ Rejected name (matches label): '{cleaned_name}'")
+                    cleaned_name = ''
+                    break
+            
             if cleaned_name:
-                cleaned_name = re.sub(r'^[:\-\.\s]+', '', cleaned_name)
-                cleaned_name = re.sub(r'[:\-\.\s]+$', '', cleaned_name)
+                # Remove common prefixes and labels (both English and Arabic)
+                cleaned_name = re.sub(r'^(Name|Patient Name|Patient|Mr\.?|Mrs\.?|Ms\.?|Dr\.?|اسم المريض|المريض|الاسم|رقم المريض)\s*[:\-\.]?\s*', '', cleaned_name, flags=re.IGNORECASE)
+                # Remove suffixes that might contain extra info
+                cleaned_name = re.sub(r'\s+(Age|Sex|Gender|ID|Date|Ref|Dr|عمر|الجنس|رقم|تاريخ)\s*[:\-\.].*$', '', cleaned_name, flags=re.IGNORECASE)
+                cleaned_name = cleaned_name.strip()
+                name_lower = cleaned_name.replace(':', '').replace('-', '').strip().lower()
+                
+                # Reject if name is actually a label or too short/numeric
+                if name_lower in ['اسم المريض', 'patient name', 'name', 'المريض', 'الاسم', 'رقم المريض', 'رقم', 'اسم', '']:
+                    cleaned_name = ''
+                elif len(cleaned_name) < 3 or cleaned_name.strip().isdigit():
+                    cleaned_name = ''
+                else:
+                    # Remove any remaining label-like prefixes/suffixes
+                    cleaned_name = re.sub(r'^[:\-\.\s]+', '', cleaned_name)
+                    cleaned_name = re.sub(r'[:\-\.\s]+$', '', cleaned_name)
 
         # Extract and process date of birth and age
         raw_age = str(patient_info.get('patient_age', '') or '').strip()

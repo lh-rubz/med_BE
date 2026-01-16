@@ -113,7 +113,8 @@ class MedicalValidator:
     
     @staticmethod
     def calculate_is_normal(field_value: str, normal_range: str, 
-                           current_is_normal: Optional[bool] = None) -> Optional[bool]:
+                           current_is_normal: Optional[bool] = None,
+                           patient_gender: Optional[str] = None) -> Optional[bool]:
         """
         Deterministically calculate if a value is within normal range
         
@@ -163,8 +164,9 @@ class MedicalValidator:
         
         # Try numeric comparison with valid range
         # Some ranges contain multiple sub-ranges like "Male: 13-17, Female: 12-16"
+        # Or Arabic: "ذكر: 13-17, أنثى: 12-16"
         # Split on delimiters and evaluate against each numeric interval
-        segments = re.split(r'[;,/]+', normal_range_clean)
+        # If patient_gender is provided, prioritize matching gender-specific range
         
         # Extract numeric value from field_value
         try:
@@ -178,9 +180,45 @@ class MedicalValidator:
             found_valid_range = False
             value_in_range = False
             
+            # Normalize gender for matching
+            gender_normalized = None
+            if patient_gender:
+                gender_str = str(patient_gender).lower().strip()
+                if any(g in gender_str for g in ['male', 'ذكر', 'm']):
+                    gender_normalized = 'male'
+                elif any(g in gender_str for g in ['female', 'أنثى', 'انثى', 'f']):
+                    gender_normalized = 'female'
+            
+            # Check for gender-specific ranges first (if gender is known)
+            if gender_normalized:
+                # Look for patterns like "Male: 13-17" or "ذكر: 13-17" or "Female: 12-16" or "أنثى: 12-16"
+                gender_patterns = {
+                    'male': [r'male\s*:?\s*', r'ذكر\s*:?\s*'],
+                    'female': [r'female\s*:?\s*', r'أنثى\s*:?\s*', r'انثى\s*:?\s*']
+                }
+                
+                for pattern in gender_patterns[gender_normalized]:
+                    match = re.search(pattern + r'([-+]?\d*\.?\d+\s*-\s*[-+]?\d*\.?\d+)', normal_range_clean, re.IGNORECASE)
+                    if match:
+                        range_str = match.group(1)
+                        range_tuple = MedicalValidator.parse_range(range_str)
+                        if range_tuple:
+                            min_val, max_val = range_tuple
+                            found_valid_range = True
+                            if min_val <= value <= max_val:
+                                return True
+                            else:
+                                return False  # Value is outside gender-specific range
+            
+            # If no gender-specific range found or gender not provided, check all ranges
+            # Split on common delimiters (comma, semicolon, slash)
+            segments = re.split(r'[;,/]+', normal_range_clean)
+            
             # Check all segments to see if value fits any range
             for segment in segments:
-                range_tuple = MedicalValidator.parse_range(segment)
+                # Skip gender labels in segments
+                segment_clean = re.sub(r'^\s*(male|female|ذكر|أنثى|انثى)\s*:?\s*', '', segment, flags=re.IGNORECASE).strip()
+                range_tuple = MedicalValidator.parse_range(segment_clean)
                 if range_tuple:
                     found_valid_range = True
                     min_val, max_val = range_tuple
@@ -297,7 +335,7 @@ class MedicalValidator:
         return deduplicated
     
     @staticmethod
-    def validate_and_normalize_field(field: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_and_normalize_field(field: Dict[str, Any], patient_gender: Optional[str] = None) -> Dict[str, Any]:
         """
         Validate and normalize a single medical field
         
@@ -372,7 +410,8 @@ class MedicalValidator:
         validated['is_normal'] = MedicalValidator.calculate_is_normal(
             field_value,
             normal_range,
-            current_is_normal
+            current_is_normal,
+            patient_gender
         )
         
         # Ensure all required fields exist
@@ -396,12 +435,15 @@ class MedicalValidator:
         """
         processed = extracted_data.copy()
         
+        # Get patient gender for gender-specific range matching
+        patient_gender = processed.get('patient_gender', '')
+        
         # Validate and normalize each field
         medical_data = processed.get('medical_data', [])
         if medical_data:
-            # Validate each field
+            # Validate each field with patient gender
             validated_fields = [
-                MedicalValidator.validate_and_normalize_field(field)
+                MedicalValidator.validate_and_normalize_field(field, patient_gender)
                 for field in medical_data
             ]
             
