@@ -351,233 +351,66 @@ class ChatResource(Resource):
             
             # Build prompt (Reusing logic)
             # Build OPTIMIZED extraction prompt (reduced by ~40%)
-            prompt_text = f"""Extract ALL medical data from this image (page {idx}/{total_pages}). 
- 
- CRITICAL RULES FOR ACCURATE EXTRACTION: 
- 
- 1. STRICT HORIZONTAL ALIGNMENT - READ ROW BY ROW: 
-    - For EACH test row, read ALL values from the EXACT SAME HORIZONTAL LINE 
-    - Use an imaginary horizontal ruler across the page 
-    - DO NOT drift up or down to adjacent rows 
-    - The test name, value, unit, and range MUST all be horizontally aligned 
-    
-    VALIDATION AFTER EXTRACTION: 
-    - RBC: Must be 4.0-6.0 (if you got 40, you read Hematocrit) 
-    - WBC: Must be 4.0-11.0 (if you got 40-70, you read a percentage) 
-    - Platelets: Must be 150-450 (if you got 0.1-0.3, you read Monocytes or PCT) 
-    - Hemoglobin: Must be 12-17 (if you got 40, you read Hematocrit) 
-    - Hematocrit: Must be 36-50% (if you got 24 or 77, you read MCH or MCV) 
-    - Monocytes %: Must be 0-10% (if you got 0.1, that's absolute count) 
-    - Eosinophils %: Must be 0-5% (if you got 0.0, that's absolute count) 
-    - Basophils %: Must be 0-1% (if you got 0.0, that's absolute count) 
- 
- 2. PERCENTAGE vs ABSOLUTE COUNT DETECTION: 
-    Look at BOTH the value AND the normal range to determine if it's a percentage or absolute count: 
-    
-    PERCENTAGE TESTS (unit = "%"): 
-    - Range is typically 0-100 (e.g., 20-40, 40-75, 3-10) 
-    - Value is typically 0-100 (e.g., 57.8, 41.1, 5.2) 
-    - Test name should include "%": "Neutrophils %", "Lymphocytes %", "Monocytes %" 
-    
-    ABSOLUTE COUNT TESTS (unit = "10^9/L" or "cells/L"): 
-    - Range is typically 0-10 (e.g., 2.0-7.0, 0.2-1.0, 0.04-0.5) 
-    - Value is typically 0-10 (e.g., 4.1, 0.1, 0.0) 
-    - Test name has NO %: "Neutrophils", "Lymphocytes", "Monocytes" 
-    
-    DECISION RULE: 
-    If value is 5.2 with range 3-7: 
-    - Could be "Monocytes %" (5.2% is normal for 3-7%) 
-    - Unit = "%" 
-    
-    If value is 0.1 with range 0.2-1.0: 
-    - This is "Monocytes" absolute count (0.1 × 10^9/L) 
-    - Unit = "10^9/L" or "cells/L" 
- 
- 3. COMMON TEST IDENTIFICATION ERRORS - CHECK THESE: 
-    
-    a) MCV vs MCH vs MPV confusion: 
-    - MCV (Mean Cell Volume): 80-100 fL - measures red blood cell size 
-    - MCH (Mean Cell Hemoglobin): 27-31 pg - measures hemoglobin per cell 
-    - MPV (Mean Platelet Volume): 7-11 fL - measures platelet size 
-    - MCHC (Mean Cell Hemoglobin Concentration): 31-35 g/dL 
-    
-    WRONG PATTERN: 
-    {{ 
-      "field_name": "Mean Platelet Volume (MPV)", 
-      "field_value": "24.2", 
-      "normal_range": "80-100" 
-    }} 
-    → This is WRONG! MPV range is 7-11, not 80-100 
-    → 24.2 with range 27-31 = MCH 
-    → 77.3 with range 80-100 = MCV 
-    
-    b) Differential Count Percentages: 
-    Look at the section header - if it says "DIFFERENTIAL COUNT" or "DIFF": 
-    - All values in this section are PERCENTAGES 
-    - Add % to each test name 
-    - Unit is "%" 
- 
- 4. EXTRACT ALL TESTS - DON'T STOP EARLY: 
-    A complete CBC typically includes 15-25 tests: 
-    
-    MAIN CBC PARAMETERS: 
-    - WBC (White Blood Cells) 
-    - RBC (Red Blood Cells) 
-    - Hemoglobin (HGB) 
-    - Hematocrit (HCT) 
-    - MCV (Mean Cell Volume) 
-    - MCH (Mean Cell Hemoglobin) 
-    - MCHC (Mean Cell Hemoglobin Concentration) 
-    - RDW (Red Cell Distribution Width) 
-    - Platelets 
-    - MPV (Mean Platelet Volume) 
-    - PDW (Platelet Distribution Width) - optional 
-    - PCT (Plateletcrit) - optional 
-    
-    DIFFERENTIAL COUNT (Percentages): 
-    - Neutrophils % 
-    - Lymphocytes % 
-    - Monocytes % 
-    - Eosinophils % 
-    - Basophils % 
-    
-    ABSOLUTE COUNTS (optional): 
-    - Neutrophils (absolute) 
-    - Lymphocytes (absolute) 
-    - Monocytes (absolute) 
-    - Eosinophils (absolute) 
-    - Basophils (absolute) 
-    
-    If you only extracted 12 tests, CHECK if you missed: 
-    - MCV, MCH, MCHC (red cell indices) 
-    - Absolute counts of differential 
-    - PDW, PCT, or other platelet parameters 
- 
- 5. PATIENT INFORMATION EXTRACTION: 
-    
-    patient_name: 
-    - Look for: "Patient Name:", "Name:", "اسم المريض:", "اسم:", "Patient:" 
-    - Extract ONLY the actual name, EXCLUDE label words 
-    - Arabic labels to exclude: "اسم", "المريض", "المرضى", "المريضة" 
-    - Example: "اسم المريض: أحمد محمد" → extract "أحمد محمد" 
-    - Example: "Patient Name: John Smith" → extract "John Smith" 
-    - If you see "المرضى" alone, this is NOT a name (it means "the patients") 
-    
-    patient_age: 
-    - Look for: "Age:", "العمر:", "DOB:", "Date of Birth:", "تاريخ الميلاد:" 
-    - If you find a DATE (e.g., "01/05/1975"), CALCULATE the age: 
-      age = report_year - birth_year 
-    - Return ONLY the number: "50" (NOT "01/05/1975") 
-    - If age not found, return empty string "" 
-    
-    patient_gender: 
-    - Look for: "Gender:", "Sex:", "الجنس:", "M/F" 
-    - Normalize to: "Male", "Female", "ذكر", or "أنثى" 
-    - Accept: M, F, Male, Female, ذكر, أنثى 
-    
-    doctor_names: 
-    - Look for: "Dr.", "Doctor:", "Ref Dr:", "الطبيب:", "Physician:" 
-    - Extract FULL name 
-    - If not found, return empty string "" 
- 
- 6. TABLE ORDER PRESERVATION: 
-    - Extract tests in EXACT vertical order as they appear 
-    - Start from top row, go to bottom row 
-    - DO NOT reorder or reorganize 
-    - medical_data list order = table row order 
- 
- 7. NORMAL RANGE EXTRACTION: 
-    - Extract FULL range including gender-specific info: 
-      "Men: 13-17, Women: 12-16" ✓ 
-    - Keep descriptive text: "Men:", "Women:", "Male:", "Female:" 
-    - REMOVE units from normal range (already in field_unit): 
-      "13-17 g/dL" → extract as "13-17" 
-    - If range has multiple formats, keep all: 
-      "<0.05 or 0-0.5" ✓ 
- 
- 8. is_normal LOGIC: 
-    value = float(field_value) 
-    min_val = extract_minimum_from(normal_range) 
-    max_val = extract_maximum_from(normal_range) 
-    
-    if min_val <= value <= max_val: 
-        is_normal = true 
-    else: 
-        is_normal = false 
-    
-    Examples: 
-    - Value 41.1, Range 20-40 → is_normal = false (41.1 > 40) 
-    - Value 32, Range 35-80 → is_normal = false (32 < 35) 
-    - Value 7.1, Range 4.0-11.0 → is_normal = true 
- 
- 9. NOTES FIELD: 
-    - Add notes ONLY if you see a flag symbol on the SAME ROW as the test 
-    - Flags: H, L, High, Low, ↑, ↓, *, ! 
-    - "Marked as High on report" - only if H, ↑, or High visible 
-    - "Marked as Low on report" - only if L, ↓, or Low visible 
-    - Empty "" if no flag 
- 
- 10. QUALITY CHECKS BEFORE RETURNING JSON: 
-     ✓ Patient name is extracted (not empty, not "المرضى") 
-     ✓ Patient age is NUMBER not DATE (50 not 01/05/1975) 
-     ✓ All percentage tests have "%" in name and unit="%" 
-     ✓ All absolute counts have proper units (10^9/L or cells/L) 
-     ✓ Test values match their ranges medically: 
-       - RBC 4-6 ✓ 
-       - Platelets 150-450 ✓ 
-       - Monocytes% 0-10% ✓ 
-       - MCV 80-100 fL ✓ 
-       - MCH 27-31 pg ✓ 
-       - MPV 7-11 fL ✓ 
-     ✓ No test name mismatch (MPV with range 80-100 is WRONG) 
-     ✓ Extracted all visible tests (15-25 for CBC) 
-     ✓ Tests in same order as report 
-     ✓ No duplicate tests 
-     ✓ is_normal correctly calculated 
- 
- Return ONLY valid JSON: 
- {{ 
-     "patient_name": "أحمد محمد", 
-     "patient_age": "50", 
-     "patient_gender": "ذكر", 
-     "report_date": "2025-12-31", 
-     "report_name": "Complete Blood Count", 
-     "report_type": "{', '.join(REPORT_TYPES)}", 
-     "doctor_names": "", 
-     "total_fields_in_image": <exact count>, 
-     "medical_data": [ 
-         {{ 
-             "field_name": "White Blood Cells (WBC)", 
-             "field_value": "7.1", 
-             "field_unit": "10^9/L", 
-             "normal_range": "4.0-11.0", 
-             "is_normal": true, 
-             "field_type": "measurement", 
-             "category": "HEMATOLOGY", 
-             "notes": "" 
-         }}, 
-         {{ 
-             "field_name": "Neutrophils %", 
-             "field_value": "57.8", 
-             "field_unit": "%", 
-             "normal_range": "40-75", 
-             "is_normal": true, 
-             "field_type": "measurement", 
-             "category": "DIFFERENTIAL COUNT", 
-             "notes": "" 
-         }}, 
-         {{ 
-             "field_name": "Mean Cell Volume (MCV)", 
-             "field_value": "77.3", 
-             "field_unit": "fL", 
-             "normal_range": "80-100", 
-             "is_normal": false, 
-             "field_type": "measurement", 
-             "category": "RED CELL INDICES", 
-             "notes": "" 
-         }} 
-     ] 
- }}"""
+            prompt_text = f"""ACT AS AN EXPERT MEDICAL DATA DIGITIZER. 
+Your task is to extract structured medical data from this image (page {idx}/{total_pages}) into JSON format.
+
+STEP 1: ANALYZE THE IMAGE LAYOUT
+- Locate the main table containing test results.
+- Identify the columns: "Test Name", "Result/Value", "Unit", "Reference Range/Normal Range".
+- Locate the Patient Information header (Name, Age, Gender, Date).
+
+STEP 2: EXTRACT DATA ROW-BY-ROW (CRITICAL: STRICT HORIZONTAL ALIGNMENT)
+- Start from the first row of the test table.
+- For EACH row:
+  1. Extract the Test Name from the leftmost column.
+  2. Move horizontally to the right to find the Result Value.
+  3. Continue horizontally to find the Unit and Reference Range.
+  4. VALIDATE ALIGNMENT: The Value, Unit, and Range MUST be on the exact same horizontal line as the Test Name.
+  5. DO NOT look at values in the row above or below.
+
+STEP 3: APPLY MEDICAL VALIDATION RULES (DO NOT HALLUCINATE)
+- RBC: Must be 4.0-6.0 (if value is ~40, you are reading Hematocrit - STOP).
+- WBC: Must be 4.0-11.0 (if value is ~40-70, you are reading Neutrophils % - STOP).
+- Platelets: Must be 150-450 (if value is < 1.0, you are reading Monocytes - STOP).
+- Hemoglobin: Must be 12-17.
+- Hematocrit: Must be 36-50%.
+- Percentages (Neutrophils%, etc.): Value 0-100, Range 0-100, Unit "%".
+- Absolute Counts: Value 0-10, Range 0-10, Unit "10^9/L" or "cells/uL".
+
+STEP 4: HANDLE PATIENT INFO
+- Name: Extract full name. Ignore labels like "Name:", "Patient:", "اسم المريض".
+  * Arabic: "اسم المريض: أحمد" -> "أحمد".
+- Age: If explicitly stated ("Age: 50"), extract "50". 
+  * If only DOB found ("01/01/1980"), CALCULATE age (Current Year - 1980 = 45).
+- Gender: Normalize to "Male"/"Female" or "ذكر"/"أنثى".
+
+STEP 5: JSON STRUCTURE
+Return a SINGLE JSON object with this exact structure:
+{{
+  "patient_name": "string",
+  "patient_age": "string (number only)",
+  "patient_gender": "string",
+  "report_date": "YYYY-MM-DD",
+  "report_type": "{', '.join(REPORT_TYPES)}",
+  "medical_data": [
+    {{
+      "field_name": "Exact Test Name (add % if percentage)",
+      "field_value": "Number",
+      "field_unit": "Unit",
+      "normal_range": "Range",
+      "is_normal": boolean,
+      "category": "Header Name",
+      "notes": "Flags (H/L) or empty"
+    }}
+  ]
+}}
+
+CRITICAL CHECKS:
+- Did you extract the correct value for the correct test?
+- Did you confuse Monocytes % (0-10) with Monocytes Absolute (0.2-1.0)?
+- Did you confuse MCV (80-100) with MCH (27-31)?
+- Extract ALL tests in the table. Do not stop early.
+"""
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                 image_format = image_info['format']
