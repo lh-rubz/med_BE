@@ -67,7 +67,7 @@ class MedicalValidator:
         Parse normal range string into min/max tuple
         
         Args:
-            range_str: Range string like "13.5-17.5" or "150000-410000"
+            range_str: Range string like "13.5-17.5", "(74-110)", "150000-410000", etc.
             
         Returns:
             Tuple of (min, max) or None if cannot parse
@@ -75,11 +75,14 @@ class MedicalValidator:
         if not range_str or not isinstance(range_str, str):
             return None
         
-        # Clean the string
+        # Clean the string - remove parentheses and whitespace
         range_str = range_str.strip()
+        # Remove common formatting: parentheses, brackets, etc.
+        range_str = re.sub(r'^[\(\[<]|[\)\]>]$', '', range_str).strip()
         
-        # Pattern: number-number or number - number
-        match = re.match(r'([-+]?\d*\.?\d+)\s*-\s*([-+]?\d*\.?\d+)', range_str)
+        # Pattern: number-number or number - number (with optional parentheses)
+        # Use search instead of match to find pattern anywhere in string
+        match = re.search(r'([-+]?\d*\.?\d+)\s*-\s*([-+]?\d*\.?\d+)', range_str)
         if match:
             try:
                 min_val = float(match.group(1))
@@ -89,7 +92,7 @@ class MedicalValidator:
                 pass
         
         # Pattern: < number (upper limit only)
-        match = re.match(r'<\s*([-+]?\d*\.?\d+)', range_str)
+        match = re.search(r'<\s*([-+]?\d*\.?\d+)', range_str)
         if match:
             try:
                 max_val = float(match.group(1))
@@ -98,7 +101,7 @@ class MedicalValidator:
                 pass
         
         # Pattern: > number (lower limit only)
-        match = re.match(r'>\s*([-+]?\d*\.?\d+)', range_str)
+        match = re.search(r'>\s*([-+]?\d*\.?\d+)', range_str)
         if match:
             try:
                 min_val = float(match.group(1))
@@ -172,25 +175,25 @@ class MedicalValidator:
         
         # If we have a numeric value, compare against ranges
         if value is not None:
+            found_valid_range = False
+            value_in_range = False
+            
+            # Check all segments to see if value fits any range
             for segment in segments:
                 range_tuple = MedicalValidator.parse_range(segment)
                 if range_tuple:
+                    found_valid_range = True
                     min_val, max_val = range_tuple
                     if min_val <= value <= max_val:
-                        return True
-                    # If we found a valid range but value is outside, it's abnormal
-                    # (but continue checking other segments in case of multiple ranges)
-                    if min_val != float('-inf') or max_val != float('inf'):
-                        # We have a valid finite range and value is outside - mark as abnormal
-                        # But first check all segments to see if it fits any
-                        pass
+                        value_in_range = True
+                        break  # Value fits at least one range, so it's normal
             
-            # After checking all segments, if we parsed at least one range and value didn't fit
-            # any of them, it's abnormal
-            for segment in segments:
-                if MedicalValidator.parse_range(segment):
-                    # Found at least one valid range but value didn't match - abnormal
-                    return False
+            # If we found valid range(s) and value fits at least one, it's normal
+            if found_valid_range and value_in_range:
+                return True
+            # If we found valid range(s) but value doesn't fit any, it's abnormal
+            elif found_valid_range and not value_in_range:
+                return False
         
         # If we have a numeric range but couldn't extract numeric value from field_value,
         # and it's not qualitative, return None (cannot determine)

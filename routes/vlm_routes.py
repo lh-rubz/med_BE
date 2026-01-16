@@ -387,23 +387,33 @@ GENERAL RULES:
 
 STEP 1: PATIENT HEADER READING
 Scan all regions (right/left, top/bottom) carefully. Look for header tables or sections.
-Handle both Arabic and English labels. Read each label-value pair precisely:
+Handle both Arabic and English labels. Read each label-value pair precisely.
 
-- Patient Name labels:
+CRITICAL: Distinguish between PATIENT information table and REQUEST/DOCTOR information table!
+- PATIENT table usually has: "اسم المريض", "رقم المريض", "الجنس", "تاريخ الميلاد", "رقم الهوية"
+- REQUEST/DOCTOR table usually has: "تاريخ الطلب", "رقم الطلب", "الطبيب", "التأمين"
+- ALWAYS extract patient_name from the PATIENT table, NOT from the doctor/request table!
+
+- Patient Name labels (LOOK ONLY IN PATIENT INFO TABLE):
   - Arabic: "اسم المريض", "المريض", "الاسم"
   - English: "Patient Name", "Name", "Patient"
-  -> Extract ONLY the actual name. Remove any labels or prefixes like "Name:", "Patient Name:".
+  -> Extract ONLY from the row that has label "اسم المريض" or "Patient Name" in the PATIENT information table.
+  -> DO NOT use "الطبيب" (Doctor) field as patient name - they are DIFFERENT!
+  -> Extract ONLY the actual name value. Remove any labels or prefixes like "Name:", "Patient Name:".
   -> Return the full name as written (Arabic or English).
   -> If name contains extra text like "Patient Name: John Doe", extract only "John Doe".
-  -> If not found, return "".
+  -> If not found in PATIENT table, return "".
 
-- Gender labels:
+- Gender labels (LOOK ONLY IN PATIENT INFO TABLE):
   - Arabic: "الجنس", "الجنسي"
   - English: "Sex", "Gender"
-  -> Return "Male" if you see: "ذكر", "Male", "M", "ذكر" in Arabic
-  -> Return "Female" if you see: "أنثى", "انثى", "Female", "F", "أنثى" in Arabic
-  -> If not found or unclear, return "".
-  -> Do NOT infer gender from names.
+  -> Extract ONLY from the row that has label "الجنس" or "Sex"/"Gender" in the PATIENT information table.
+  -> Read the VALUE cell next to "الجنس" label carefully - it should be in the SAME row.
+  -> Return "Male" if you see: "ذكر", "Male", "M" in the VALUE cell
+  -> Return "Female" if you see: "أنثى", "انثى", "Female", "F" in the VALUE cell
+  -> If the value cell is empty or unclear, return "".
+  -> Do NOT infer gender from names - ONLY read the actual value from the gender field.
+  -> Double-check: Make sure you're reading the PATIENT's gender, not someone else's.
 
 - Date of Birth / Age labels:
   - Arabic: "تاريخ الميلاد", "عمر", "العمر"
@@ -429,16 +439,22 @@ Handle both Arabic and English labels. Read each label-value pair precisely:
 
 STEP 2: SPECIAL CASE – HEADER TABLES (Palestinian/Arabic Lab Forms)
 Many reports have two side-by-side header tables:
-- RIGHT table: Patient information (Arabic labels like "رقم المريض", "اسم المريض", "الجنس", "تاريخ الميلاد", "رقم الهوية")
-- LEFT table: Request information (Arabic labels like "تاريخ الطلب", "رقم الطلب", "الطبيب")
+- RIGHT table: Patient information (PATIENT INFO - USE THIS TABLE!)
+  * Arabic labels: "رقم المريض", "اسم المريض", "الجنس", "تاريخ الميلاد", "رقم الهوية"
+  * This table contains the PATIENT's personal information
+- LEFT table: Request information (REQUEST INFO - DO NOT USE FOR PATIENT NAME/GENDER!)
+  * Arabic labels: "تاريخ الطلب", "رقم الطلب", "الطبيب", "التأمين", "نوع المريض"
+  * This table contains REQUEST and DOCTOR information - NOT patient info!
 
-READ CAREFULLY:
-- Each row has: LABEL in one cell, VALUE in adjacent cell.
-- Match each label to its correct value in the SAME row.
-- Do NOT mix values from different rows.
-- Extract patient_name from the row with "اسم المريض" label.
-- Extract patient_gender from the row with "الجنس" label.
-- Extract patient_dob or patient_age from "تاريخ الميلاد" or "عمر" row.
+READ CAREFULLY - CRITICAL RULES:
+- ALWAYS use the RIGHT table (Patient information) for patient_name, patient_gender, patient_dob, patient_age
+- NEVER use the LEFT table (Request/Doctor info) for patient personal details
+- Each row in the Patient table has: LABEL in one cell, VALUE in adjacent cell in THE SAME ROW
+- Match each label to its correct value in the SAME row - do NOT mix rows
+- Extract patient_name ONLY from the RIGHT table, row with "اسم المريض" label
+- Extract patient_gender ONLY from the RIGHT table, row with "الجنس" label - read the VALUE cell carefully
+- Extract patient_dob or patient_age ONLY from the RIGHT table, "تاريخ الميلاد" or "عمر" row
+- Extract doctor_names from the LEFT table, row with "الطبيب" label - DO NOT confuse doctor name with patient name!
 
 STEP 3: LAB TABLE EXTRACTION (CRITICAL - NO MIXING VALUES!)
 Extract test results from tables. Each ROW is one test. NEVER mix values between rows.
@@ -693,39 +709,61 @@ Return ONLY this JSON object, no markdown."""
                 current_age = str(patient_info.get('patient_age', '') or '').strip()
                 current_dob = str(patient_info.get('patient_dob', '') or '').strip()
                 
+                # Filter out common false positives for patient name
+                # Reject if name looks like a doctor title or label
+                name_reject_patterns = ['دكتور', 'doctor', 'dr.', 'طبيب', 'الطبيب', 'الموظف', 'employee']
+                if new_name:
+                    name_lower = new_name.lower()
+                    if any(pattern in name_lower for pattern in name_reject_patterns):
+                        print(f"⚠️ Rejected suspicious patient name: {new_name}")
+                        new_name = ''
+                
                 # Merge patient info: use new data if current is empty, or if new is longer/more complete
-                if not current_name and new_name:
-                    patient_info['patient_name'] = new_name
-                elif new_name and len(new_name) > len(current_name):
-                    patient_info['patient_name'] = new_name
+                # Only update if new value is actually valid (not empty, not a label)
+                if new_name and len(new_name) > 2:  # At least 3 characters
+                    if not current_name or (len(new_name) > len(current_name) and len(new_name) > 3):
+                        patient_info['patient_name'] = new_name
+                        print(f"✅ Updated patient_name: {new_name}")
                     
-                if not current_gender and new_gender:
-                    patient_info['patient_gender'] = new_gender
-                elif new_gender and not current_gender:
-                    patient_info['patient_gender'] = new_gender
+                # Gender: only accept Male/Male equivalents or Female/Female equivalents
+                valid_genders = {'male', 'female', 'ذكر', 'أنثى', 'انثى', 'm', 'f'}
+                if new_gender and new_gender.lower() in valid_genders:
+                    if not current_gender or current_gender.lower() not in valid_genders:
+                        patient_info['patient_gender'] = new_gender
+                        print(f"✅ Updated patient_gender: {new_gender}")
                     
-                if not current_age and new_age:
-                    patient_info['patient_age'] = new_age
-                elif new_age and not current_age:
-                    patient_info['patient_age'] = new_age
+                # Age: validate it's a reasonable number
+                if new_age:
+                    try:
+                        age_num = int(new_age)
+                        if 1 <= age_num <= 120:
+                            if not current_age or current_age != new_age:
+                                patient_info['patient_age'] = new_age
+                                print(f"✅ Updated patient_age: {new_age}")
+                    except (ValueError, TypeError):
+                        pass
                     
-                if not current_dob and new_dob:
-                    patient_info['patient_dob'] = new_dob
-                elif new_dob and not current_dob:
-                    patient_info['patient_dob'] = new_dob
+                # Date of birth
+                if new_dob and len(new_dob) >= 8:  # At least YYYY-MM-DD format
+                    if not current_dob:
+                        patient_info['patient_dob'] = new_dob
+                        print(f"✅ Updated patient_dob: {new_dob}")
                     
-                if new_doctor and not patient_info.get('doctor_names'):
-                    patient_info['doctor_names'] = new_doctor
-                elif new_doctor and new_doctor != patient_info.get('doctor_names'):
-                    # Append if different
-                    existing = patient_info.get('doctor_names', '')
-                    if existing:
-                        patient_info['doctor_names'] = f"{existing}, {new_doctor}"
-                    else:
+                # Doctor names - separate field, can have multiple
+                if new_doctor and len(new_doctor) > 2:
+                    if not patient_info.get('doctor_names'):
                         patient_info['doctor_names'] = new_doctor
+                    elif new_doctor != patient_info.get('doctor_names') and new_doctor.lower() not in patient_info.get('doctor_names', '').lower():
+                        # Append if different
+                        existing = patient_info.get('doctor_names', '')
+                        if existing:
+                            patient_info['doctor_names'] = f"{existing}, {new_doctor}"
+                        else:
+                            patient_info['doctor_names'] = new_doctor
                         
-                if new_report_date and not patient_info.get('report_date'):
-                    patient_info['report_date'] = new_report_date
+                if new_report_date and len(new_report_date) >= 8:
+                    if not patient_info.get('report_date'):
+                        patient_info['report_date'] = new_report_date
                     
                 # Keep report_type if not set
                 if not patient_info.get('report_type') and extracted_data.get('report_type'):
@@ -842,16 +880,30 @@ Return ONLY this JSON object, no markdown."""
                 except ValueError:
                     pass
 
-        # Clean and normalize gender
+        # Clean and normalize gender - be very strict
         raw_gender = str(patient_info.get('patient_gender', '') or '').strip()
-        gender_lower = raw_gender.lower()
+        gender_lower = raw_gender.lower().strip()
         cleaned_gender = ''
+        
+        # Very strict matching - only accept clear gender indicators
         # Arabic: ذكر = Male, أنثى/انثى = Female
         # English: Male/M = Male, Female/F = Female
-        if any(token in gender_lower for token in ['ذكر', 'male', 'm']):
-            cleaned_gender = 'ذكر'  # Store in Arabic as per original code
-        elif any(token in gender_lower for token in ['أنثى', 'انثى', 'female', 'f']):
+        male_indicators = ['ذكر', 'male']
+        female_indicators = ['أنثى', 'انثى', 'female']
+        
+        # Check for male (must start with or be exactly one of these)
+        if gender_lower in male_indicators or any(gender_lower.startswith(ind) for ind in male_indicators):
+            # Double check it's not a false positive (e.g., "Male" in "Males")
+            if not any(gender_lower.startswith(fem) for fem in female_indicators):
+                cleaned_gender = 'ذكر'
+                print(f"✅ Cleaned gender: {raw_gender} -> {cleaned_gender}")
+        # Check for female
+        elif gender_lower in female_indicators or any(gender_lower.startswith(ind) for ind in female_indicators):
             cleaned_gender = 'أنثى'
+            print(f"✅ Cleaned gender: {raw_gender} -> {cleaned_gender}")
+        elif raw_gender:
+            # If we have a gender value but it doesn't match, log it for debugging
+            print(f"⚠️ Unrecognized gender value: '{raw_gender}' (keeping empty)")
 
         raw_report_type = str(patient_info.get('report_type', '') or '').strip()
         cleaned_report_type = 'General'
