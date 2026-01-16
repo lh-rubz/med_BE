@@ -374,37 +374,46 @@ class ChatResource(Resource):
 Your task is to extract structured medical data from this image (page {idx}/{total_pages}) into JSON format.
 
 STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
-- Locate the grid/table at the top of the page.
-- CRITICAL FOR ARABIC HEADERS:
-  - Layout is usually: | VALUE | LABEL |
-  - You must look to the LEFT of each label cell to find its value.
-  
+- Locate the header section at the top of the page.
+- **CRITICAL FOR ALL HEADERS**:
+  - The header may be a single table, split into two grids (Left/Right), or just text fields.
+  - **SCAN THE ENTIRE HEADER AREA** from Left to Right. Do not stop at the first block of text.
+  - Identify where the labels are (e.g., "Patient Name", "Doctor").
+  - Determine the relationship between Label and Value:
+    - **ARABIC LAYOUT**: Often | VALUE | LABEL | (Look LEFT of label).
+    - **ENGLISH LAYOUT**: Often | LABEL | VALUE | (Look RIGHT of label).
+    - **VERTICAL LAYOUT**: Label is above the Value.
+  - Adapt to the layout you see on the page.
+
 - EXTRACT THESE FIELDS (NO GUESSING, NO SWAPPING):
   1. patient_name:
      - Find label "اسم المريض" or "Patient Name".
-     - Look to the LEFT cell and copy the FULL text exactly as written.
-     - Example layout: "| فلان الفلاني | اسم المريض |" → patient_name = "فلان الفلاني".
+     - Look for the value relative to the label (Left, Right, or Below).
+     - Extract FULL text exactly as written.
+     - Example (Arabic): "| فلان الفلاني | اسم المريض |" → patient_name = "فلان الفلاني".
      - Do NOT shorten, translate, or replace the name.
+     - Pay close attention to Arabic characters: distinguish "ة" (Ta Marbuta) from "ي" (Ya) at end of names.
      - Do NOT take the doctor name as patient_name.
      - If you cannot clearly see any name, set patient_name = "" (empty string).
      - NEVER invent generic Arabic names like "أحمد محمد", "محمد", "خالد", etc.
   2. patient_gender:
      - Find label "الجنس" or "Sex".
-     - Look to the LEFT cell. Use exactly the value you see (e.g., "انثى" or "ذكر").
+     - Extract the value near the label.
+     - Use exactly the value you see (e.g., "انثى" or "ذكر").
      - QUALITY CHECK: If the الجنس cell clearly contains a female word (like "انثى" or "أنثى"), patient_gender MUST be female ("انثى" / "أنثى" / "Female") and NEVER "ذكر".
   3. Date of Birth / Age:
      - Find label "تاريخ الميلاد" or "DOB".
-     - Look to the LEFT. Extract the date (e.g., "01/05/1975").
+     - Extract the date (e.g., "01/05/1975").
      - CALCULATE Age: report_year - birth_year (return only the number as string).
   4. doctor_names:
      - Find label "الطبيب" or "Doctor" or "Physician".
-     - Look to the LEFT cell and copy the full name exactly as printed.
-     - Example layout: "| د. خالد مثال | الطبيب |" → doctor_names MUST be "د. خالد مثال" and patient_name MUST NOT be "د. خالد مثال".
+     - Extract the full name found near this label.
+     - Example (Arabic): "| د. خالد مثال | الطبيب |" → doctor_names MUST be "د. خالد مثال" and patient_name MUST NOT be "د. خالد مثال".
      - If that cell is blank or no doctor label exists, set doctor_names = "".
      - If you can see a doctor value, doctor_names MUST NOT be empty.
   5. report_date:
      - Find label "تاريخ الطلب" or "Date".
-     - Look to the LEFT. Extract the date/time value.
+     - Extract the date/time value.
 
 STEP 2: EXTRACT MEDICAL DATA ROW-BY-ROW (STRICT ALIGNMENT)
 - Locate the main table with test results.
