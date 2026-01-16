@@ -402,17 +402,21 @@ TABLE STRUCTURE - How to read:
 - In the PATIENT table, find the row with label "الجنس" -> its VALUE column = gender
 - Match each label to its VALUE in THE SAME ROW
 
-- Patient Name (REQUIRED - MUST EXTRACT):
-  - Look for table with labels: "اسم المريض", "رقم المريض", "الجنس", "تاريخ الميلاد"
-  - Find the row where label = "اسم المريض"
-  - Read the VALUE in the same row (usually in adjacent column)
+- Patient Name (REQUIRED - MUST EXTRACT FROM RIGHT TABLE ONLY!):
+  - Look for RIGHT table with labels: "اسم المريض", "رقم المريض", "الجنس", "تاريخ الميلاد"
+  - This is the PATIENT information table (usually on the RIGHT side of the page)
+  - Find the row where label = "اسم المريض" (Patient Name)
+  - Read the VALUE in the same row (usually in adjacent column to the right)
   - Extract the VALUE only (the actual name), remove any prefixes like "Patient Name:"
-  - Examples: If you see "اسم المريض: رئيسة خضر طالب خطيب" -> extract "رئيسة خضر طالب خطيب"
-  - If you see table with two columns, left column = labels, right column = values, then:
-    * Find "اسم المريض" in left column -> read value from right column in same row
-  - DO NOT use values from "الطبيب" (Doctor) row - that's a different person!
+  - Examples: 
+    * If table shows: Left column "اسم المريض", Right column "رئيسة خضر طالب خطيب" -> extract "رئيسة خضر طالب خطيب"
+    * If you see "اسم المريض: رئيسة خضر طالب خطيب" -> extract "رئيسة خضر طالب خطيب"
+  - CRITICAL: Patient name is in the RIGHT table (with "رقم المريض", "الجنس", etc.)
+  - CRITICAL: Doctor name is in the LEFT table (with "تاريخ الطلب", "الطبيب", etc.) - DIFFERENT TABLE!
+  - DO NOT confuse "اسم المريض" (Patient Name) with "الطبيب" (Doctor) - they are in DIFFERENT tables!
+  - DO NOT extract doctor name from LEFT table as patient name!
   - Return the full name as written (can be Arabic or English).
-  - If you cannot find it, return "" but try hard to locate it!
+  - If you cannot find it, return "" but try hard to locate it in the RIGHT table!
 
 - Gender (REQUIRED - MUST EXTRACT):
   - Look in the PATIENT information table (same table as patient name)
@@ -440,12 +444,16 @@ TABLE STRUCTURE - How to read:
   -> Normalize to "YYYY-MM-DD" format when possible.
   -> If not found, return "".
 
-- Doctor labels:
-  - Arabic: "الطبيب", "طبيب"
+- Doctor labels (LOOK ONLY IN LEFT TABLE - REQUEST INFO TABLE):
+  - Arabic: "الطبيب", "طبيب" (in the LEFT table with "تاريخ الطلب", "رقم الطلب", etc.)
   - English: "Doctor", "Physician", "Ref By", "Referred By"
+  - CRITICAL: Doctor is in the LEFT table (Request information), NOT in the RIGHT table (Patient information)
+  - Find the row in LEFT table where label = "الطبيب"
+  - Read the VALUE in the same row
   -> Extract only the doctor name(s), without prefixes like "Dr.", "Doctor:".
+  -> DO NOT confuse with patient name - patient name is in RIGHT table, doctor is in LEFT table!
   -> If multiple doctors, separate with commas.
-  -> If not found, return "".
+  -> If not found or unclear, return "".
 
 STEP 2: SPECIAL CASE – HEADER TABLES (Palestinian/Arabic Lab Forms)
 Many reports have two side-by-side header tables:
@@ -810,8 +818,8 @@ Return ONLY this JSON object, no markdown."""
                 current_age = str(patient_info.get('patient_age', '') or '').strip()
                 current_dob = str(patient_info.get('patient_dob', '') or '').strip()
                 
-                # Filter out common false positives for patient name
-                # Reject if name looks like a label, doctor title, or field name
+                # SMART FIX: If patient_name is rejected as label but doctor_names looks like a real person name,
+                # swap them - this handles the common VLM mistake of mixing up patient and doctor names
                 name_reject_patterns = [
                     # Arabic labels
                     'رقم المريض', 'اسم المريض', 'المريض', 'الاسم', 
@@ -822,18 +830,38 @@ Return ONLY this JSON object, no markdown."""
                     # Partial matches
                     'patient', 'رقم', 'اسم'
                 ]
+                
+                new_name_is_label = False
                 if new_name:
                     name_lower = new_name.lower().strip()
                     # Check if name matches any reject pattern exactly or starts with it
                     for pattern in name_reject_patterns:
                         if name_lower == pattern.lower() or name_lower.startswith(pattern.lower() + ':'):
                             print(f"⚠️ Rejected suspicious patient name (label): {new_name}")
+                            new_name_is_label = True
                             new_name = ''
                             break
                     # Also reject if name is too short or looks like a number only
                     if new_name and (len(new_name) < 3 or new_name.strip().isdigit()):
                         print(f"⚠️ Rejected suspicious patient name (too short/numeric): {new_name}")
+                        new_name_is_label = True
                         new_name = ''
+                
+                # SMART CORRECTION: If patient_name was rejected but doctor_names looks like a real person name
+                # (contains multiple words, looks like Arabic/English name, not a label), swap them
+                if new_name_is_label and new_doctor:
+                    doctor_lower = new_doctor.lower().strip()
+                    # Check if doctor name looks like a real person name (not a label)
+                    is_doctor_a_label = any(pattern in doctor_lower for pattern in name_reject_patterns)
+                    # Check if it looks like a real name (has multiple words or is Arabic name with spaces)
+                    has_multiple_words = len(new_doctor.split()) >= 2
+                    looks_like_real_name = has_multiple_words and not is_doctor_a_label and len(new_doctor) > 5
+                    
+                    if looks_like_real_name:
+                        print(f"🔄 SMART FIX: Swapping - doctor_names '{new_doctor}' looks like patient name")
+                        print(f"   Moving '{new_doctor}' from doctor_names to patient_name")
+                        new_name = new_doctor  # Use doctor name as patient name
+                        new_doctor = ''  # Clear doctor name as it was probably the patient name
                 
                 # Merge patient info: use new data if current is empty, or if new is longer/more complete
                 # Only update if new value is actually valid (not empty, not a label)
