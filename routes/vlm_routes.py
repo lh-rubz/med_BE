@@ -374,51 +374,56 @@ class ChatResource(Resource):
 Your task is to extract structured medical data from this image (page {idx}/{total_pages}).
 
 DATA EXTRACTION STRATEGY:
-1. First, find the RAW TEXT for each field exactly as it appears in the image.
-2. Then, CLEAN and NORMALIZE it.
+- The Patient Info Header is split into TWO separate grids (Right & Left).
 
-STEP 1: HEADER EXTRACTION (Patient & Doctor)
-- Scan the top section. Look for Arabic and English labels.
+STEP 1: RIGHT GRID (PATIENT DETAILS)
+- Look at the table on the RIGHT side.
+- Read it Right-to-Left (Label | Value).
 
-RULES:
-  1. Patient Name:
-     - Find "اسم المريض" or "Name".
-     - Extract the FULL string found next to it (e.g., separate First, Father, Grandfather, Family names).
-     - Constraint: Must be at least 3 words long.
-     - Example: If you see "رئيسة", look right/left for "خضر طالب...".
+  1. Patient Name ("اسم المريض"):
+     - Locate "اسم المريض".
+     - Extract the text to its LEFT.
+     - Expect a full name (3-4 words).
+  
+  2. Patient Gender ("الجنس"):
+     - Locate "الجنس".
+     - Extract the text to its LEFT.
+     - If text is "انثى" -> OUTPUT "Female".
+     - If text is "ذكر" -> OUTPUT "Male".
+  
+  3. Patient Age ("تاريخ الميلاد"):
+     - Locate "تاريخ الميلاد".
+     - Extract DOB Year (e.g. 1975).
+     - Calculate Age = Current Year (2026) - 1975 = 51.
 
-  2. Patient Gender:
-     - Find "الجنس" or "Sex".
-     - Extract the RAW value (e.g. "انثى", "Female", "ذكر", "Male").
-     - Logic: 
-         - If text contains "انثى" or "Female" or "F" -> "Female".
-         - Else -> "Male".
+STEP 2: LEFT GRID (DOCTOR & DATE)
+- Look at the table on the LEFT side.
+- Read it Right-to-Left (Label | Value).
 
-  3. Patient Age:
-     - Find "DOB" / "تاريخ الميلاد". Extract the YEAR (e.g. 1975).
-     - Find Report Date. Extract the YEAR (e.g. 2026).
-     - Calculate: 2026 - 1975 = 51.
-     - If you only find "Age: 48", use "48". But PREFER calculation from DOB.
+  1. Report Date ("تاريخ الطلب"):
+     - Locate "تاريخ الطلب" or "التاريخ".
+     - Extract the date value.
+     
+  2. Doctor Name ("الطبيب"):
+     - **CRITICAL**: Locate the label "الطبيب" (usually the bottom row of this left grid).
+     - Extract the text to its LEFT.
+     - Example: "Dr. Name" or Arabic name.
+     - Do not leave this empty.
 
-  4. Doctor Name:
-     - Find "الطبيب" or "Doctor".
-     - Look carefully for the name (it might be handwritten or small).
-     - Also check the footer for signatures.
-
-STEP 2: TABLE EXTRACTION
+STEP 3: TABLE EXTRACTION
 - Extract the main lab results table.
 - Columns: Test Name | Result | Unit | Normal Range
 - Special Handling:
   - Is Normal: Use "H" / "L" flags if present. Otherwise, check if Result is inside Range.
   - Normal Range: Return "" (empty string) if the cell is empty or just text.
 
-STEP 3: JSON STRUCTURE
+STEP 4: JSON STRUCTURE
 Return a SINGLE JSON object. 
 DO NOT include "header_rows". 
 DO NOT include markdown.
 
 {{
-  "patient_name": "string (Full Name, 3-4 words)",
+  "patient_name": "string (Full Name)",
   "patient_age": "string",
   "patient_gender": "string (Male/Female)",
   "report_date": "YYYY-MM-DD",
