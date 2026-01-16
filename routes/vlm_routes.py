@@ -119,8 +119,8 @@ def compress_image(image_data, format_hint='png'):
     elif img.mode != 'RGB':
         img = img.convert('RGB')
     
-    # Resize if image is very large (3000px limit allows for ~250DPI on A4, better for OCR)
-    max_dimension = 3000
+    # Resize if image is very large (limit dimensions to keep VLM fast but text readable)
+    max_dimension = 2000
     if max(img.size) > max_dimension:
         ratio = max_dimension / max(img.size)
         new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
@@ -491,7 +491,9 @@ Return a SINGLE JSON object:
                     model=Config.OLLAMA_MODEL,
                     messages=[{'role': 'user', 'content': content}],
                     temperature=0.1,
-                    response_format={"type": "json_object"}
+                    response_format={"type": "json_object"},
+                    max_tokens=700,
+                    timeout=120.0
                 )
                 response_text = completion.choices[0].message.content.strip()
                 print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
