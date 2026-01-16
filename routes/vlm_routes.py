@@ -375,74 +375,81 @@ The report can contain both ARABIC and ENGLISH text. You fully understand both l
 
 STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
 - Locate the header section at the top of the page.
-- **CRITICAL FOR ALL HEADERS**:
-  - The header may be a single table, split into two grids (Left/Right), or just text fields.
-  - **SCAN THE ENTIRE HEADER AREA** from Left to Right. Do not stop at the first block of text.
-  - Identify where the labels are (e.g., "Patient Name", "Doctor").
-  - Determine the relationship between Label and Value:
-    - **ARABIC LAYOUT**: Often | VALUE | LABEL | (Look LEFT of label).
-    - **ENGLISH LAYOUT**: Often | LABEL | VALUE | (Look RIGHT of label).
-    - **VERTICAL LAYOUT**: Label is above the Value.
-  - Adapt to the layout you see on the page.
+- The header may be a single table, split into two grids (Left/Right), or just text fields.
+- Carefully SCAN the ENTIRE header from edge to edge before deciding the values.
+- Identify where the labels are (for example: "اسم المريض", "Patient Name", "الطبيب", "Doctor", "الجنس", "Sex").
+- Determine how each label is related to its value:
+  - ARABIC layout: "| VALUE | LABEL |" → value is on the LEFT of the label.
+  - ENGLISH layout: "| LABEL | VALUE |" → value is on the RIGHT of the label.
+  - VERTICAL layout: value is DIRECTLY BELOW the label.
 
 - EXTRACT THESE FIELDS (NO GUESSING, NO SWAPPING):
   1. patient_name:
      - Find label "اسم المريض" or "Patient Name".
-     - Look for the value relative to the label (Left, Right, or Below).
+     - The patient_name MUST be the text in the SAME ROW (or directly below) this label.
      - Extract FULL text exactly as written.
      - Example (Arabic): "| فلان الفلاني | اسم المريض |" → patient_name = "فلان الفلاني".
      - Do NOT shorten, translate, or replace the name.
      - Pay close attention to Arabic characters: distinguish "ة" (Ta Marbuta) from "ي" (Ya) at end of names.
-     - Do NOT take the doctor name as patient_name.
-     - If you cannot clearly see any name, set patient_name = "" (empty string).
+     - Do NOT take the doctor name as patient_name (doctor name is always in the row with label "الطبيب" / "Doctor").
+     - If you cannot clearly see any name next to "اسم المريض" / "Patient Name", set patient_name = "" (empty string).
      - NEVER invent generic Arabic names like "أحمد محمد", "محمد", "خالد", etc.
   2. patient_gender:
      - Find label "الجنس" or "Sex".
-     - Extract the value near the label.
-     - Use exactly the value you see (e.g., "انثى" or "ذكر").
-     - QUALITY CHECK: If the الجنس cell clearly contains a female word (like "انثى" or "أنثى"), patient_gender MUST be female ("انثى" / "أنثى" / "Female") and NEVER "ذكر".
+     - Take exactly the value in the SAME ROW as this label.
+     - Use exactly the value you see (e.g., "انثى", "أنثى", "ذكر", "Male", "Female").
+     - QUALITY CHECK: If the الجنس cell clearly contains a female word (like "انثى" or "أنثى" or "Female"), patient_gender MUST be female and NEVER "ذكر"/"Male".
   3. Date of Birth / Age:
      - Find label "تاريخ الميلاد" or "DOB".
-     - Extract the date (e.g., "01/05/1975").
+     - Extract the date from the SAME ROW (or directly below) this label (e.g., "01/05/1975").
      - CALCULATE Age: report_year - birth_year (return only the number as string).
   4. doctor_names:
      - Find label "الطبيب" or "Doctor" or "Physician".
-     - Extract the full name found near this label.
-     - Example (Arabic): "| د. خالد مثال | الطبيب |" → doctor_names MUST be "د. خالد مثال" and patient_name MUST NOT be "د. خالد مثال".
-     - If that cell is blank or no doctor label exists, set doctor_names = "".
-      - If you can see a doctor value anywhere in the report, doctor_names MUST NOT be empty.
+     - doctor_names MUST be the text in the SAME ROW as this label (or directly below it).
+     - Example (Arabic): "| د. خالد مثال | الطبيب |" → doctor_names = "د. خالد مثال" and patient_name is the name in the row of "اسم المريض", NOT this one.
+     - If that cell is blank or no doctor label exists anywhere, set doctor_names = "".
+     - If you can see a doctor value anywhere next to "الطبيب"/"Doctor"/"Physician", then doctor_names MUST NOT be empty.
   5. report_date:
      - Find label "تاريخ الطلب" or "Date".
-     - Extract the date/time value.
+     - Extract ONLY the date/time value next to that label.
 
-STEP 2: EXTRACT MEDICAL DATA ROW-BY-ROW (STRICT ALIGNMENT)
-- Locate the main table with test results.
-- For EACH row:
-  1. Extract Test Name (leftmost column usually).
-  2. Move horizontally to find Result, Unit, and Range.
-  3. VALIDATE: Value must be on the EXACT SAME LINE as the Test Name.
-  
+STEP 2: EXTRACT MEDICAL DATA TABLE (STRICT ROW + COLUMN ALIGNMENT)
+- Locate the main table that contains the medical test results.
+- First, identify the HEADER ROW of this table (the row with column names such as "الفحص", "النتيجة", "النتيجة الطبيعية", "الوحدة", "ملاحظات" or "Test", "Result", "Reference Range", "Unit", "Comments").
+- For EVERY row under that header:
+  1. Read all cells on that SAME visual line.
+  2. Map each cell by its COLUMN position:
+     - Column under "الفحص" / "Test" → field_name.
+     - Column under "النتيجة" / "Result" → field_value.
+     - Column under "النتيجة الطبيعية" / "Reference Range" → normal_range (COPY THE FULL TEXT, including separate ranges for male/female or child/adult).
+     - Column under "الوحدة" / "Unit" → field_unit.
+     - Column under "ملاحظات" / "Comments" → notes.
+  3. NEVER take numbers from the normal_range or unit columns as the main field_value.
+  4. VALIDATE: field_value must come from the SAME ROW as field_name, from the "Result" column only.
+  5. Skip empty rows or rows that clearly do not contain a test.
+
 STEP 3: MEDICAL VALIDATION (SANITY CHECKS)
-- RBC: 4.0-6.0.
-- WBC: 4.0-11.0.
-- Platelets: 150-450.
-- Hemoglobin: 12-17.
-- Hematocrit: 36-50%.
-- If values don't match these ranges (e.g., RBC=40), you are reading the wrong column/row. STOP and re-align.
+- For Complete Blood Count (CBC), typical ranges (for adults):
+  - RBC: 4.0-6.0.
+  - WBC: 4.0-11.0.
+  - Platelets: 150-450.
+  - Hemoglobin: 12-17.
+  - Hematocrit: 36-50%.
+- If a value is extremely far from any reasonable range (e.g., RBC=40, WBC=200, Platelets=5000), you are likely using the wrong column or row. In that case, RECHECK the row and use the correct number from the "Result" column.
 
 STEP 4: JSON STRUCTURE
 Return a SINGLE JSON object:
 {{
-  "patient_name": "string (copied exactly from اسم المريض row, or empty)",
+  "patient_name": "string (copied exactly from اسم المريض / Patient Name row, or empty)",
   "patient_age": "string (age number, e.g., \"50\")",
-  "patient_gender": "string (must match الجنس row value: Female/انثى or Male/ذكر)",
+  "patient_gender": "string (must match الجنس / Sex row value)",
   "report_date": "YYYY-MM-DD or full timestamp",
   "report_type": "{', '.join(REPORT_TYPES)}",
-  "doctor_names": "string (copied exactly from الطبيب/Doctor row, or empty)",
+  "doctor_names": "string (copied exactly from الطبيب / Doctor row, or empty)",
   "medical_data": [
     {{
       "field_name": "string",
-      "field_value": "number",
+      "field_value": "number or short text",
       "field_unit": "string",
       "normal_range": "string",
       "is_normal": boolean,

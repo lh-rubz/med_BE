@@ -135,21 +135,24 @@ class MedicalValidator:
         
         # Try numeric comparison
         if normal_range:
-            range_tuple = MedicalValidator.parse_range(normal_range)
-            if range_tuple:
-                try:
-                    # Extract numeric value
-                    numeric_match = re.search(r'[-+]?\d*\.?\d+', str(field_value))
-                    if numeric_match:
-                        value = float(numeric_match.group())
+            # Some ranges contain multiple sub-ranges like "Male: 13-17, Female: 12-16"
+            # Split on delimiters and evaluate against each numeric interval; if value
+            # fits ANY interval, treat as normal.
+            segments = re.split(r'[;,/]+', normal_range)
+            try:
+                numeric_match = re.search(r'[-+]?\d*\.?\d+', str(field_value))
+                value = float(numeric_match.group()) if numeric_match else None
+            except (ValueError, TypeError):
+                value = None
+
+            if value is not None:
+                for segment in segments:
+                    range_tuple = MedicalValidator.parse_range(segment)
+                    if range_tuple:
                         min_val, max_val = range_tuple
-                        
-                        # Strict within-range check
-                        is_normal = min_val <= value <= max_val
-                        return is_normal
-                except (ValueError, TypeError):
-                    pass
-        
+                        if min_val <= value <= max_val:
+                            return True
+
         # Fallback to VLM's guess or default to True
         return current_is_normal if current_is_normal is not None else True
     
@@ -273,14 +276,13 @@ class MedicalValidator:
             # Ensure key exists even if empty
             validated['field_value'] = ''
         
-        # Normalize normal_range (remove unit if duplicate)
+        # Normalize normal_range but preserve full descriptive text
         normal_range = str(validated.get('normal_range', ''))
         unit = str(validated.get('field_unit', ''))
         if unit and unit in normal_range:
-            # Remove unit and any surrounding whitespace
-            normal_range = normal_range.replace(unit, '').strip()
-            # Clean up trailing dashes/commas that might be left
-            normal_range = re.sub(r'\s*([,-])\s*$', '', normal_range)
+            # Only remove duplicated trailing unit occurrences like "mg/dl mg/dl"
+            pattern = rf'\b{re.escape(unit)}\b\s*\b{re.escape(unit)}\b'
+            normal_range = re.sub(pattern, unit, normal_range)
             validated['normal_range'] = normal_range
         
         # Recalculate is_normal deterministically
