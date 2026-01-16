@@ -534,9 +534,7 @@ Return ONLY this JSON object."""
                     response_text = completion.choices[0].message.content.strip()
                     print(f"🔍 RAW RESPONSE (retry) for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
                 
-                        # Fallback parsing for top-level fields if needed
-                        if not extracted_data.get('patient_name') and 'اسم المريض' in response_text:
-                             pass # Todo: improved regex parsing if needed
+
 
 
                 if extracted_data.get('is_medical_report') is False:
