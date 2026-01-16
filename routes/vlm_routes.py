@@ -391,7 +391,7 @@ STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
   2. patient_gender:
      - Find label "الجنس" or "Sex".
      - Look to the LEFT cell. Use exactly the value you see (e.g., "انثى" or "ذكر").
-     - If the cell contains "انثى", patient_gender MUST be female ("انثى" or "أنثى" or "Female") and NEVER "ذكر".
+     - QUALITY CHECK: If the الجنس cell clearly contains a female word (like "انثى" or "أنثى"), patient_gender MUST be female ("انثى" / "أنثى" / "Female") and NEVER "ذكر".
   3. Date of Birth / Age:
      - Find label "تاريخ الميلاد" or "DOB".
      - Look to the LEFT. Extract the date (e.g., "01/05/1975").
@@ -495,11 +495,14 @@ Return a SINGLE JSON object:
                     new_items = extracted_data['medical_data']
                     
                     unique_new_items = []
-                    existing_test_names = {item['field_name'].lower() for item in all_extracted_data}
+                    existing_test_names = {str(item.get('field_name', '')).lower() for item in all_extracted_data}
                     
                     for item in new_items:
-                        test_name = item.get('field_name', '').strip()
-                        test_val = item.get('field_value', '').strip()
+                        raw_test_name = item.get('field_name', '')
+                        raw_test_val = item.get('field_value', '')
+                        
+                        test_name = str(raw_test_name).strip() if raw_test_name is not None else ''
+                        test_val = str(raw_test_val).strip() if raw_test_val is not None else ''
                         
                         if not test_name or test_name.lower() == 'test name':
                             continue
@@ -551,7 +554,7 @@ Return a SINGLE JSON object:
         print(f"🔍 Validating aggregated data ({len(all_extracted_data)} total items)...")
         
         raw_name = patient_info.get('patient_name', '')
-        cleaned_name = raw_name
+        cleaned_name = str(raw_name) if raw_name is not None else ''
         if cleaned_name:
             cleaned_name = re.sub(r'^(Name|Patient Name|Patient|Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s*[:\-\.]?\s*', '', cleaned_name, flags=re.IGNORECASE)
             cleaned_name = re.sub(r'\s+(Age|Sex|Gender|ID|Date|Ref|Dr)\s*[:\-\.].*$', '', cleaned_name, flags=re.IGNORECASE)
@@ -609,7 +612,8 @@ Return a SINGLE JSON object:
             
             # 1. First Pass: check DB for existing synonyms
             for item in medical_data_list:
-                original_name = item.get('field_name', '').strip()
+                raw_original_name = item.get('field_name', '')
+                original_name = str(raw_original_name).strip() if raw_original_name is not None else ''
                 if not original_name or len(original_name) < 2:
                     continue
                     
