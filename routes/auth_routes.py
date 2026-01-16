@@ -1,6 +1,6 @@
 from flask import request, url_for, redirect, current_app
 from flask_restx import Resource, Namespace, fields
-from flask_jwt_extended import create_access_token, create_refresh_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from datetime import datetime, timedelta, timezone
 import secrets
 import os
@@ -90,10 +90,6 @@ google_auth_model = auth_ns.model('GoogleAuth', {
 
 facebook_auth_model = auth_ns.model('FacebookAuth', {
     'access_token': fields.String(required=True, description='Facebook Access Token from mobile app')
-})
-
-refresh_token_model = auth_ns.model('RefreshToken', {
-    'refresh_token': fields.String(required=True, description='Valid refresh token')
 })
 
 
@@ -364,13 +360,10 @@ class Login(Resource):
             user.two_factor_code_expires = None
             db.session.commit()
 
-        # Generate access token and refresh token
+        # Generate access token
         access_token = create_access_token(identity=str(user.id))
-        refresh_token = create_refresh_token(identity=str(user.id))
-        
         return {
             'access_token': access_token,
-            'refresh_token': refresh_token,
             'email_verified': True,
             'two_factor_enabled': user.two_factor_enabled
         }, 200
@@ -487,21 +480,20 @@ class GoogleCallback(Resource):
             # Determine missing fields
             missing_fields = get_missing_fields(user)
             
-            # Create access token and refresh token
+            # Create access token
             access_token = create_access_token(identity=str(user.id))
-            refresh_token = create_refresh_token(identity=str(user.id))
             
             # Return token (In a real app, you might redirect to frontend with token)
             return {
                 'message': 'Login successful',
                 'access_token': access_token,
-                'refresh_token': refresh_token,
                 'user': {
                     'email': user.email,
                     'first_name': user.first_name,
                     'last_name': user.last_name,
                     'profile_image': user.profile_image,
-                    'google_login': True
+                    'google_login': True,
+                    'biometric_allowed': getattr(user, 'biometric_allowed', True)
                 },
                 'is_new_user': is_new_user,
                 'missing_fields': missing_fields
@@ -629,18 +621,16 @@ class GoogleAuthPost(Resource):
             missing_fields = get_missing_fields(user)
                 
             access_token = create_access_token(identity=str(user.id))
-            refresh_token = create_refresh_token(identity=str(user.id))
-
             return {
                 'message': 'Login successful',
                 'access_token': access_token,
-                'refresh_token': refresh_token,
                 'user': {
                     'email': user.email,
                     'first_name': user.first_name,
                     'last_name': user.last_name,
                     'profile_image': user.profile_image,
-                    'social_login': True
+                    'social_login': True,
+                    'biometric_allowed': getattr(user, 'biometric_allowed', True)
                 },
                 'is_new_user': is_new_user,
                 'missing_fields': missing_fields
@@ -748,12 +738,9 @@ class FacebookAuthPost(Resource):
             missing_fields = get_missing_fields(user)
                 
             access_token = create_access_token(identity=str(user.id))
-            refresh_token = create_refresh_token(identity=str(user.id))
-
             return {
                 'message': 'Login successful',
                 'access_token': access_token,
-                'refresh_token': refresh_token,
                 'user': {
                     'email': user.email,
                     'first_name': user.first_name,
@@ -862,23 +849,6 @@ class ResendVerification(Resource):
         except Exception as e:
             db.session.rollback()
             return {'message': 'Failed to resend verification code', 'error': str(e)}, 400
-
-
-@auth_ns.route('/refresh-token')
-class RefreshToken(Resource):
-    @auth_ns.expect(refresh_token_model)
-    @jwt_required(refresh=True)
-    def post(self):
-        """Refresh access token using a valid refresh token"""
-        try:
-            current_user_id = get_jwt_identity()
-            new_access_token = create_access_token(identity=current_user_id)
-            
-            return {
-                'access_token': new_access_token
-            }, 200
-        except Exception as e:
-            return {'message': 'Token refresh failed', 'error': str(e)}, 401
 
 
 @auth_ns.route('/forgot-password')

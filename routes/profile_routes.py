@@ -1,7 +1,7 @@
 from flask import request
 from flask_restx import Resource, Namespace, fields
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from models import db, User, Profile, Report, ReportField, AdditionalField, ReportFile
+from models import db, User, Profile, Report, ReportField, AdditionalField, ReportFile, FamilyConnection
 from datetime import datetime
 
 profile_ns = Namespace('profiles', description='Managed Profile operations')
@@ -13,7 +13,9 @@ profile_model = profile_ns.model('Profile', {
     'date_of_birth': fields.String(description='Date of Birth (YYYY-MM-DD)'),
     'gender': fields.String(description='Gender'),
     'relationship': fields.String(required=True, description='Relationship to owner (e.g., Son, Father, Self)'),
-    'created_at': fields.String(readOnly=True, description='Profile creation date')
+    'created_at': fields.String(readOnly=True, description='Profile creation date'),
+    'creator_id': fields.Integer(description='Owner user ID'),
+    'access_level': fields.String(description='Effective access level for current user (owner, manage, upload, view)')
 })
 
 @profile_ns.route('/')
@@ -33,14 +35,10 @@ class ProfileList(Resource):
         shared_entries = ProfileShareModel.query.filter_by(shared_with_user_id=current_user_id).all()
         shared_profiles = [entry.profile for entry in shared_entries]
         
-        # Combine and remove duplicates
         all_profiles = {profile.id: profile for profile in owned_profiles + shared_profiles}.values()
         
-        # Contextualize Relationship Labels
         results = []
         for p in all_profiles:
-            # We must convert to dict to modify the relationship field for the response
-            # without modifying the database object
             p_dict = {
                 'id': p.id,
                 'first_name': p.first_name,
@@ -48,11 +46,20 @@ class ProfileList(Resource):
                 'date_of_birth': p.date_of_birth,
                 'gender': p.gender,
                 'relationship': p.relationship,
-                'created_at': p.created_at
+                'created_at': p.created_at,
+                'creator_id': p.creator_id
             }
-            
-            # If the profile is shared (not owned by current user) AND is marked as 'Self' (meaning it is the owner's profile)
-            # We change the label to 'Account Owner' to avoid confusion in the UI
+
+            if p.creator_id == current_user_id:
+                p_dict['access_level'] = 'owner'
+            else:
+                share_entry = None
+                for entry in shared_entries:
+                    if entry.profile_id == p.id:
+                        share_entry = entry
+                        break
+                p_dict['access_level'] = getattr(share_entry, 'access_level', None)
+
             if p.creator_id != current_user_id:
                 if p.relationship == 'Self':
                     p_dict['relationship'] = 'Account Owner'
@@ -229,20 +236,34 @@ class ProfileDetail(Resource):
     def delete(self, id):
         """Delete a managed profile or remove a shared profile"""
         current_user_id = int(get_jwt_identity())
-        
-        # 1. Try to find as Owned Profile
+
         profile = Profile.query.filter_by(id=id, creator_id=current_user_id).first()
-        
+
         if profile:
             if profile.relationship == 'Self':
                 return {'message': 'Cannot delete your own primary profile'}, 400
 
-            # Unlink reports before deleting
-            Report.query.filter_by(profile_id=profile.id).update({Report.profile_id: None})
-            
-            db.session.delete(profile)
-            db.session.commit()
-            return {'message': 'Profile deleted successfully'}
+            try:
+                FamilyConnection.query.filter_by(profile_id=profile.id).delete()
+                Report.query.filter_by(profile_id=profile.id).update({Report.profile_id: None})
+
+                db.session.delete(profile)
+                db.session.commit()
+                return {'message': 'Profile deleted successfully'}
+            except Exception as e:
+                db.session.rollback()
+                error_message = str(e)
+
+                if 'ForeignKeyViolation' in error_message or 'foreign key constraint' in error_message.lower():
+                    return {
+                        'message': 'Cannot delete profile because it is still linked to other records. Please remove related connections first.',
+                        'error': error_message
+                    }, 400
+
+                return {
+                    'message': 'Failed to delete profile',
+                    'error': error_message
+                }, 500
             
         # 2. Try to find as Shared Profile (Remove Access)
         from models import ProfileShare as ProfileShareModel
@@ -338,33 +359,28 @@ class ProfileTransfer(Resource):
         current_user_id = int(get_jwt_identity())
         data = request.json
         
-        # 1. Verify Ownership
-        profile = Profile.query.filter_by(id=id, creator_id=current_user_id).first()
+        profile = Profile.query.get(id)
         if not profile:
-            return {'message': 'Profile not found or you are not the owner'}, 404
+            return {'message': 'Profile not found'}, 404
+        if profile.creator_id != current_user_id:
+            return {'message': 'You are not the owner of this profile'}, 403
             
         if profile.relationship == 'Self':
             return {'message': 'Cannot transfer your own primary profile'}, 400
 
-        # 2. Verify Target User
         target_user = User.query.filter_by(email=data['email']).first()
         if not target_user:
-            return {'message': 'Target user not found'}, 404
+            return {'message': 'Target account not found for this email'}, 400
             
         if target_user.id == current_user_id:
             return {'message': 'Cannot transfer to yourself'}, 400
             
-        # 3. Execute Transfer
-        # - Update creator to new user
-        # - Set relationship to 'Self' (it becomes their main profile)
         old_owner_id = profile.creator_id
         profile.creator_id = target_user.id
         profile.relationship = 'Self'
         
-        # 4. Auto-Share back to Old Owner (so they don't lose access)
         from models import ProfileShare as ProfileShareModel
         
-        # Check if share already exists (unlikely given ownership, but safety first)
         existing_share = ProfileShareModel.query.filter_by(
             profile_id=id,
             shared_with_user_id=old_owner_id
@@ -382,7 +398,13 @@ class ProfileTransfer(Resource):
             
         db.session.commit()
         
-        return {'message': f'Profile ownership transferred to {target_user.email}. You retain manage access.'}
+        return {
+            'id': profile.id,
+            'first_name': profile.first_name,
+            'last_name': profile.last_name,
+            'creator_id': profile.creator_id,
+            'access_level': 'owner'
+        }, 200
 
 @profile_ns.route('/shared_with_me')
 class SharedProfiles(Resource):

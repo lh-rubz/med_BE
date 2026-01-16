@@ -168,6 +168,8 @@ class ChatResource(Resource):
             return {'error': 'No file part in the request. Please upload a file using form-data with key "file"', 'code': 'NO_FILE'}, 400
         
         files = request.files.getlist('file')
+        allow_duplicate_flag = request.form.get('allow_duplicate', 'false')
+        allow_duplicate = str(allow_duplicate_flag).lower() == 'true'
         profile_id = request.form.get('profile_id')
         
         print(f"DEBUG UPLOAD: User {current_user_id} attempting upload. Profile ID: {profile_id}")
@@ -211,33 +213,38 @@ class ChatResource(Resource):
         if not files or len(files) == 0:
             return {'error': 'No file selected'}, 400
 
-        # Pre-check for duplicates to return 409 Conflict immediately
-        # This prevents returning a 200 OK stream that immediately fails
-        for file in files:
-            if file.filename == '': continue
-            
-            # Read and hash to check for duplicates
-            # Note: We must seek(0) after reading to ensure the file can be read again later
-            try:
-                file_content = file.read()
-                file_hash = hashlib.sha256(file_content).hexdigest()
-                file.seek(0) # CRITICAL: Reset cursor
+        if not allow_duplicate:
+            for file in files:
+                if file.filename == '': 
+                    continue
                 
-                existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
-                if existing_file:
-                    return {
-                        'error': f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})',
-                        'code': 'DUPLICATE_FILE',
-                        'report_id': existing_file.report_id
-                    }, 409
-            except Exception as e:
-                print(f"Pre-check error: {e}")
-                file.seek(0) # Ensure reset even on error
+                try:
+                    file_content = file.read()
+                    file_hash = hashlib.sha256(file_content).hexdigest()
+                    file.seek(0)
+
+                    existing_file = None
+                    if target_profile_id:
+                        existing_file = db.session.query(ReportFile).join(Report, ReportFile.report_id == Report.id).filter(
+                            ReportFile.file_hash == file_hash,
+                            Report.profile_id == target_profile_id
+                        ).first()
+                    else:
+                        existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
+
+                    if existing_file:
+                        return {
+                            'error': f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})',
+                            'code': 'DUPLICATE_FILE',
+                            'report_id': existing_file.report_id
+                        }, 409
+                except Exception as e:
+                    print(f"Pre-check error: {e}")
+                    file.seek(0)
 
         # Create user-specific folder
         user_folder = ensure_upload_folder(f"user_{current_user_id}")
         
-        # Generator for streaming response
         def generate_progress():
             try:
                 yield f"data: {json.dumps({'percent': 2, 'message': 'Preparing your file for analysis...'})}\n\n"
@@ -252,17 +259,24 @@ class ChatResource(Resource):
                     
                     yield f"data: {json.dumps({'percent': 5 + int((i/total_files)*15), 'message': f'Wait a second, Optimizing file {i+1} of {total_files}...'})}\n\n"
                     
-                    # 1. Calculate File Hash for Duplicate Detection
                     file_content = file.read()
                     file_hash = hashlib.sha256(file_content).hexdigest()
                     file.seek(0)
                     
-                    # Check for duplicate FILE
-                    existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
-                    if existing_file:
-                        error_msg = f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})'
-                        yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_FILE', 'report_id': existing_file.report_id})}\n\n"
-                        return
+                    if not allow_duplicate:
+                        existing_file = None
+                        if profile_id:
+                            existing_file = db.session.query(ReportFile).join(Report, ReportFile.report_id == Report.id).filter(
+                                ReportFile.file_hash == file_hash,
+                                Report.profile_id == profile_id
+                            ).first()
+                        else:
+                            existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
+
+                        if existing_file:
+                            error_msg = f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})'
+                            yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_FILE', 'report_id': existing_file.report_id})}\n\n"
+                            return
 
                     # Save file
                     filename = secure_filename(file.filename)
@@ -311,8 +325,7 @@ class ChatResource(Resource):
                     yield f"data: {json.dumps({'error': 'No valid image data to process'})}\n\n"
                     return
 
-                # Process Images Generator
-                yield from self._process_multiple_images_stream(all_images_to_process, current_user_id, user, saved_files, target_profile_id)
+                yield from self._process_multiple_images_stream(all_images_to_process, current_user_id, user, saved_files, target_profile_id, allow_duplicate)
                 
             except Exception as e:
                 print(f"Stream Error: {e}")
@@ -322,11 +335,17 @@ class ChatResource(Resource):
 
         return Response(stream_with_context(generate_progress()), content_type='text/event-stream')
 
-    def _process_multiple_images_stream(self, images_list, current_user_id, user, saved_files, profile_id=None):
+    def _process_multiple_images_stream(self, images_list, current_user_id, user, saved_files, profile_id=None, allow_duplicate=False):
         """Generator that yields progress for image processing steps"""
         total_pages = len(images_list)
         all_extracted_data = []
         patient_info = {}
+        report_owner_id = current_user_id
+        if profile_id:
+            from models import Profile
+            profile = Profile.query.get(profile_id)
+            if profile:
+                report_owner_id = profile.creator_id
         
         yield f"data: {json.dumps({'percent': 20, 'message': f'Analyzing your medical report...'})}\n\n"
         
@@ -351,66 +370,233 @@ class ChatResource(Resource):
             
             # Build prompt (Reusing logic)
             # Build OPTIMIZED extraction prompt (reduced by ~40%)
-            prompt_text = f"""ACT AS AN EXPERT MEDICAL DATA DIGITIZER. 
-Your task is to extract structured medical data from this image (page {idx}/{total_pages}) into JSON format.
-
-STEP 1: ANALYZE THE IMAGE LAYOUT
-- Locate the main table containing test results.
-- Identify the columns: "Test Name", "Result/Value", "Unit", "Reference Range/Normal Range".
-- Locate the Patient Information header (Name, Age, Gender, Date).
-
-STEP 2: EXTRACT DATA ROW-BY-ROW (CRITICAL: STRICT HORIZONTAL ALIGNMENT)
-- Start from the first row of the test table.
-- For EACH row:
-  1. Extract the Test Name from the leftmost column.
-  2. Move horizontally to the right to find the Result Value.
-  3. Continue horizontally to find the Unit and Reference Range.
-  4. VALIDATE ALIGNMENT: The Value, Unit, and Range MUST be on the exact same horizontal line as the Test Name.
-  5. DO NOT look at values in the row above or below.
-
-STEP 3: APPLY MEDICAL VALIDATION RULES (DO NOT HALLUCINATE)
-- RBC: Must be 4.0-6.0 (if value is ~40, you are reading Hematocrit - STOP).
-- WBC: Must be 4.0-11.0 (if value is ~40-70, you are reading Neutrophils % - STOP).
-- Platelets: Must be 150-450 (if value is < 1.0, you are reading Monocytes - STOP).
-- Hemoglobin: Must be 12-17.
-- Hematocrit: Must be 36-50%.
-- Percentages (Neutrophils%, etc.): Value 0-100, Range 0-100, Unit "%".
-- Absolute Counts: Value 0-10, Range 0-10, Unit "10^9/L" or "cells/uL".
-
-STEP 4: HANDLE PATIENT INFO
-- Name: Extract full name. Ignore labels like "Name:", "Patient:", "اسم المريض".
-  * Arabic: "اسم المريض: أحمد" -> "أحمد".
-- Age: If explicitly stated ("Age: 50"), extract "50". 
-  * If only DOB found ("01/01/1980"), CALCULATE age (Current Year - 1980 = 45).
-- Gender: Normalize to "Male"/"Female" or "ذكر"/"أنثى".
-
-STEP 5: JSON STRUCTURE
-Return a SINGLE JSON object with this exact structure:
-{{
-  "patient_name": "string",
-  "patient_age": "string (number only)",
-  "patient_gender": "string",
-  "report_date": "YYYY-MM-DD",
-  "report_type": "{', '.join(REPORT_TYPES)}",
-  "medical_data": [
-    {{
-      "field_name": "Exact Test Name (add % if percentage)",
-      "field_value": "Number",
-      "field_unit": "Unit",
-      "normal_range": "Range",
-      "is_normal": boolean,
-      "category": "Header Name",
-      "notes": "Flags (H/L) or empty"
-    }}
-  ]
-}}
-
-CRITICAL CHECKS:
-- Did you extract the correct value for the correct test?
-- Did you confuse Monocytes % (0-10) with Monocytes Absolute (0.2-1.0)?
-- Did you confuse MCV (80-100) with MCH (27-31)?
-- Extract ALL tests in the table. Do not stop early.
-"""
+            prompt_text = f"""Extract ALL medical data from this image (page {idx}/{total_pages}). 
+ 
+ CRITICAL RULES FOR ACCURATE EXTRACTION: 
+ 
+ 1. STRICT HORIZONTAL ALIGNMENT - READ ROW BY ROW: 
+    - For EACH test row, read ALL values from the EXACT SAME HORIZONTAL LINE 
+    - Use an imaginary horizontal ruler across the page 
+    - DO NOT drift up or down to adjacent rows 
+    - The test name, value, unit, and range MUST all be horizontally aligned 
+    
+    VALIDATION AFTER EXTRACTION: 
+    - RBC: Must be 4.0-6.0 (if you got 40, you read Hematocrit) 
+    - WBC: Must be 4.0-11.0 (if you got 40-70, you read a percentage) 
+    - Platelets: Must be 150-450 (if you got 0.1-0.3, you read Monocytes or PCT) 
+    - Hemoglobin: Must be 12-17 (if you got 40, you read Hematocrit) 
+    - Hematocrit: Must be 36-50% (if you got 24 or 77, you read MCH or MCV) 
+    - Monocytes %: Must be 0-10% (if you got 0.1, that's absolute count) 
+    - Eosinophils %: Must be 0-5% (if you got 0.0, that's absolute count) 
+    - Basophils %: Must be 0-1% (if you got 0.0, that's absolute count) 
+ 
+ 2. PERCENTAGE vs ABSOLUTE COUNT DETECTION: 
+    Look at BOTH the value AND the normal range to determine if it's a percentage or absolute count: 
+    
+    PERCENTAGE TESTS (unit = "%"): 
+    - Range is typically 0-100 (e.g., 20-40, 40-75, 3-10) 
+    - Value is typically 0-100 (e.g., 57.8, 41.1, 5.2) 
+    - Test name should include "%": "Neutrophils %", "Lymphocytes %", "Monocytes %" 
+    
+    ABSOLUTE COUNT TESTS (unit = "10^9/L" or "cells/L"): 
+    - Range is typically 0-10 (e.g., 2.0-7.0, 0.2-1.0, 0.04-0.5) 
+    - Value is typically 0-10 (e.g., 4.1, 0.1, 0.0) 
+    - Test name has NO %: "Neutrophils", "Lymphocytes", "Monocytes" 
+    
+    DECISION RULE: 
+    If value is 5.2 with range 3-7: 
+    - Could be "Monocytes %" (5.2% is normal for 3-7%) 
+    - Unit = "%" 
+    
+    If value is 0.1 with range 0.2-1.0: 
+    - This is "Monocytes" absolute count (0.1 × 10^9/L) 
+    - Unit = "10^9/L" or "cells/L" 
+ 
+ 3. COMMON TEST IDENTIFICATION ERRORS - CHECK THESE: 
+    
+    a) MCV vs MCH vs MPV confusion: 
+    - MCV (Mean Cell Volume): 80-100 fL - measures red blood cell size 
+    - MCH (Mean Cell Hemoglobin): 27-31 pg - measures hemoglobin per cell 
+    - MPV (Mean Platelet Volume): 7-11 fL - measures platelet size 
+    - MCHC (Mean Cell Hemoglobin Concentration): 31-35 g/dL 
+    
+    WRONG PATTERN: 
+    {{ 
+      "field_name": "Mean Platelet Volume (MPV)", 
+      "field_value": "24.2", 
+      "normal_range": "80-100" 
+    }} 
+    → This is WRONG! MPV range is 7-11, not 80-100 
+    → 24.2 with range 27-31 = MCH 
+    → 77.3 with range 80-100 = MCV 
+    
+    b) Differential Count Percentages: 
+    Look at the section header - if it says "DIFFERENTIAL COUNT" or "DIFF": 
+    - All values in this section are PERCENTAGES 
+    - Add % to each test name 
+    - Unit is "%" 
+ 
+ 4. EXTRACT ALL TESTS - DON'T STOP EARLY: 
+    A complete CBC typically includes 15-25 tests: 
+    
+    MAIN CBC PARAMETERS: 
+    - WBC (White Blood Cells) 
+    - RBC (Red Blood Cells) 
+    - Hemoglobin (HGB) 
+    - Hematocrit (HCT) 
+    - MCV (Mean Cell Volume) 
+    - MCH (Mean Cell Hemoglobin) 
+    - MCHC (Mean Cell Hemoglobin Concentration) 
+    - RDW (Red Cell Distribution Width) 
+    - Platelets 
+    - MPV (Mean Platelet Volume) 
+    - PDW (Platelet Distribution Width) - optional 
+    - PCT (Plateletcrit) - optional 
+    
+    DIFFERENTIAL COUNT (Percentages): 
+    - Neutrophils % 
+    - Lymphocytes % 
+    - Monocytes % 
+    - Eosinophils % 
+    - Basophils % 
+    
+    ABSOLUTE COUNTS (optional): 
+    - Neutrophils (absolute) 
+    - Lymphocytes (absolute) 
+    - Monocytes (absolute) 
+    - Eosinophils (absolute) 
+    - Basophils (absolute) 
+    
+    If you only extracted 12 tests, CHECK if you missed: 
+    - MCV, MCH, MCHC (red cell indices) 
+    - Absolute counts of differential 
+    - PDW, PCT, or other platelet parameters 
+ 
+ 5. PATIENT INFORMATION EXTRACTION: 
+    
+    patient_name: 
+    - Look for: "Patient Name:", "Name:", "اسم المريض:", "اسم:", "Patient:" 
+    - Extract ONLY the actual name, EXCLUDE label words 
+    - Arabic labels to exclude: "اسم", "المريض", "المرضى", "المريضة" 
+    - Example: "اسم المريض: أحمد محمد" → extract "أحمد محمد" 
+    - Example: "Patient Name: John Smith" → extract "John Smith" 
+    - If you see "المرضى" alone, this is NOT a name (it means "the patients") 
+    
+    patient_age: 
+    - Look for: "Age:", "العمر:", "DOB:", "Date of Birth:", "تاريخ الميلاد:" 
+    - If you find a DATE (e.g., "01/05/1975"), CALCULATE the age: 
+      age = report_year - birth_year 
+    - Return ONLY the number: "50" (NOT "01/05/1975") 
+    - If age not found, return empty string "" 
+    
+    patient_gender: 
+    - Look for: "Gender:", "Sex:", "الجنس:", "M/F" 
+    - Normalize to: "Male", "Female", "ذكر", or "أنثى" 
+    - Accept: M, F, Male, Female, ذكر, أنثى 
+    
+    doctor_names: 
+    - Look for: "Dr.", "Doctor:", "Ref Dr:", "الطبيب:", "Physician:" 
+    - Extract FULL name 
+    - If not found, return empty string "" 
+ 
+ 6. TABLE ORDER PRESERVATION: 
+    - Extract tests in EXACT vertical order as they appear 
+    - Start from top row, go to bottom row 
+    - DO NOT reorder or reorganize 
+    - medical_data list order = table row order 
+ 
+ 7. NORMAL RANGE EXTRACTION: 
+    - Extract FULL range including gender-specific info: 
+      "Men: 13-17, Women: 12-16" ✓ 
+    - Keep descriptive text: "Men:", "Women:", "Male:", "Female:" 
+    - REMOVE units from normal range (already in field_unit): 
+      "13-17 g/dL" → extract as "13-17" 
+    - If range has multiple formats, keep all: 
+      "<0.05 or 0-0.5" ✓ 
+ 
+ 8. is_normal LOGIC: 
+    value = float(field_value) 
+    min_val = extract_minimum_from(normal_range) 
+    max_val = extract_maximum_from(normal_range) 
+    
+    if min_val <= value <= max_val: 
+        is_normal = true 
+    else: 
+        is_normal = false 
+    
+    Examples: 
+    - Value 41.1, Range 20-40 → is_normal = false (41.1 > 40) 
+    - Value 32, Range 35-80 → is_normal = false (32 < 35) 
+    - Value 7.1, Range 4.0-11.0 → is_normal = true 
+ 
+ 9. NOTES FIELD: 
+    - Add notes ONLY if you see a flag symbol on the SAME ROW as the test 
+    - Flags: H, L, High, Low, ↑, ↓, *, ! 
+    - "Marked as High on report" - only if H, ↑, or High visible 
+    - "Marked as Low on report" - only if L, ↓, or Low visible 
+    - Empty "" if no flag 
+ 
+ 10. QUALITY CHECKS BEFORE RETURNING JSON: 
+     ✓ Patient name is extracted (not empty, not "المرضى") 
+     ✓ Patient age is NUMBER not DATE (50 not 01/05/1975) 
+     ✓ All percentage tests have "%" in name and unit="%" 
+     ✓ All absolute counts have proper units (10^9/L or cells/L) 
+     ✓ Test values match their ranges medically: 
+       - RBC 4-6 ✓ 
+       - Platelets 150-450 ✓ 
+       - Monocytes% 0-10% ✓ 
+       - MCV 80-100 fL ✓ 
+       - MCH 27-31 pg ✓ 
+       - MPV 7-11 fL ✓ 
+     ✓ No test name mismatch (MPV with range 80-100 is WRONG) 
+     ✓ Extracted all visible tests (15-25 for CBC) 
+     ✓ Tests in same order as report 
+     ✓ No duplicate tests 
+     ✓ is_normal correctly calculated 
+ 
+ Return ONLY valid JSON: 
+ {{ 
+     "patient_name": "أحمد محمد", 
+     "patient_age": "50", 
+     "patient_gender": "ذكر", 
+     "report_date": "2025-12-31", 
+     "report_name": "Complete Blood Count", 
+     "report_type": "{', '.join(REPORT_TYPES)}", 
+     "doctor_names": "", 
+     "total_fields_in_image": <exact count>, 
+     "medical_data": [ 
+         {{ 
+             "field_name": "White Blood Cells (WBC)", 
+             "field_value": "7.1", 
+             "field_unit": "10^9/L", 
+             "normal_range": "4.0-11.0", 
+             "is_normal": true, 
+             "field_type": "measurement", 
+             "category": "HEMATOLOGY", 
+             "notes": "" 
+         }}, 
+         {{ 
+             "field_name": "Neutrophils %", 
+             "field_value": "57.8", 
+             "field_unit": "%", 
+             "normal_range": "40-75", 
+             "is_normal": true, 
+             "field_type": "measurement", 
+             "category": "DIFFERENTIAL COUNT", 
+             "notes": "" 
+         }}, 
+         {{ 
+             "field_name": "Mean Cell Volume (MCV)", 
+             "field_value": "77.3", 
+             "field_unit": "fL", 
+             "normal_range": "80-100", 
+             "is_normal": false, 
+             "field_type": "measurement", 
+             "category": "RED CELL INDICES", 
+             "notes": "" 
+         }} 
+     ] 
+ }}"""
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                 image_format = image_info['format']
@@ -462,7 +648,6 @@ CRITICAL CHECKS:
                 if extracted_data.get('medical_data'):
                     new_items = extracted_data['medical_data']
                     
-                    # --- DUPLICATE PREVENTION LOGIC ---
                     unique_new_items = []
                     existing_test_names = {item['field_name'].lower() for item in all_extracted_data}
                     
@@ -470,18 +655,27 @@ CRITICAL CHECKS:
                         test_name = item.get('field_name', '').strip()
                         test_val = item.get('field_value', '').strip()
                         
-                        # Skip empty or placeholder items
                         if not test_name or test_name.lower() == 'test name':
                             continue
                             
-                        # Check for exact name match
                         if test_name.lower() in existing_test_names:
                             print(f"⚠️ Duplicate test skipped: {test_name}")
                             continue
                             
-                        # Basic Validation
-                        if not test_val or test_val.lower() in ['n/a', 'unknown']:
-                             continue
+                        if not test_val:
+                            continue
+                        
+                        placeholder_values = {'n/a', 'na', 'n.a', 'unknown', '-', '--', '—', 'nil', 'none'}
+                        if test_val.lower() in placeholder_values:
+                            continue
+                        
+                        has_digit = any(ch.isdigit() for ch in test_val)
+                        value_lower = test_val.lower()
+                        qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
+                        is_qualitative = any(token in value_lower for token in qualitative_tokens)
+                        
+                        if not has_digit and not is_qualitative:
+                            continue
                              
                         unique_new_items.append(item)
                         existing_test_names.add(test_name.lower())
@@ -510,25 +704,47 @@ CRITICAL CHECKS:
         yield f"data: {json.dumps({'percent': 75, 'message': 'Double-checking the results...'})}\n\n"
         print(f"🔍 Validating aggregated data ({len(all_extracted_data)} total items)...")
         
-        # Clean Patient Name
         raw_name = patient_info.get('patient_name', '')
         cleaned_name = raw_name
         if cleaned_name:
-            # Remove labels like "Patient Name:", "Name:", "Mr." at start
-            # Added more patterns to catch "Name : John Doe" or "Patient: John Doe"
             cleaned_name = re.sub(r'^(Name|Patient Name|Patient|Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s*[:\-\.]?\s*', '', cleaned_name, flags=re.IGNORECASE)
-            # Remove trailing noise like "Age:...", "Sex:...", "ID:...", "Date:..."
             cleaned_name = re.sub(r'\s+(Age|Sex|Gender|ID|Date|Ref|Dr)\s*[:\-\.].*$', '', cleaned_name, flags=re.IGNORECASE)
             cleaned_name = cleaned_name.strip()
+
+        raw_age = str(patient_info.get('patient_age', '') or '').strip()
+        cleaned_age = ''
+        if raw_age:
+            age_match = re.search(r'\d{1,3}', raw_age)
+            if age_match:
+                cleaned_age = age_match.group(0)
+
+        raw_gender = str(patient_info.get('patient_gender', '') or '').strip()
+        gender_lower = raw_gender.lower()
+        cleaned_gender = ''
+        if gender_lower in ['m', 'male', 'ذكر']:
+            cleaned_gender = 'ذكر'
+        elif gender_lower in ['f', 'female', 'أنثى', 'انثى']:
+            cleaned_gender = 'أنثى'
+
+        raw_report_type = str(patient_info.get('report_type', '') or '').strip()
+        cleaned_report_type = 'General'
+        if raw_report_type:
+            t = raw_report_type.lower()
+            if 'cbc' in t or 'hematology' in t or 'complete blood count' in t:
+                cleaned_report_type = 'Complete Blood Count (CBC)'
+            elif 'chemistry' in t or 'clinical chemistry' in t:
+                cleaned_report_type = 'Clinical Chemistry'
+            else:
+                cleaned_report_type = raw_report_type
 
         # Combine data
         final_data = {
             'patient_name': cleaned_name,
-            'patient_age': patient_info.get('patient_age', ''),
-            'patient_gender': patient_info.get('patient_gender', ''),
+            'patient_age': cleaned_age,
+            'patient_gender': cleaned_gender,
             'report_date': patient_info.get('report_date', ''),
             'report_name': patient_info.get('report_name', 'Medical Report'),
-            'report_type': patient_info.get('report_type', 'General'),
+            'report_type': cleaned_report_type,
             'doctor_names': patient_info.get('doctor_names', ''),
             'medical_data': all_extracted_data
         }
@@ -646,70 +862,67 @@ CRITICAL CHECKS:
             except:
                 print(f"⚠️ Could not parse report date: {extracted_date}, using now()")
 
-        # Step 4: Duplicate Check (Semantic & Exact)
-        yield f"data: {json.dumps({'percent': 85, 'message': 'Checking for duplicates...'})}\n\n"
-        
-        try:
-            medical_data_list = final_data.get('medical_data', [])
-            if len(medical_data_list) > 0:
-                # 1. Strict Hash Check (Fastest)
-                report_hash = hashlib.sha256(json.dumps(medical_data_list, sort_keys=True).encode()).hexdigest()
-                
-                # Check if this exact report already exists for this user
-                existing_report = Report.query.filter_by(
-                    user_id=current_user_id,
-                    report_hash=report_hash
-                ).first()
-                
-                # 2. Semantic Check (Content Similarity)
-                # Handles cases like PDF vs Images where hash differs but content is identical
-                if not existing_report and date_is_valid:
-                    # Look for reports on the SAME DATE by this user
-                    candidates = Report.query.filter(
-                        Report.user_id == current_user_id,
-                        Report.report_date == report_date_obj
-                    ).all()
+        if not allow_duplicate:
+            yield f"data: {json.dumps({'percent': 85, 'message': 'Checking for duplicates...'})}\n\n"
+            
+            try:
+                medical_data_list = final_data.get('medical_data', [])
+                if len(medical_data_list) > 0:
+                    report_hash = hashlib.sha256(json.dumps(medical_data_list, sort_keys=True).encode()).hexdigest()
                     
-                    if candidates:
-                        print(f"🔍 Found {len(candidates)} reports on {report_date_obj.date()}. Checking content similarity...")
+                    existing_report = Report.query.filter_by(
+                        user_id=report_owner_id,
+                        profile_id=profile_id,
+                        report_hash=report_hash
+                    ).first()
+                    
+                    if not existing_report and date_is_valid:
+                        query = Report.query.filter(
+                            Report.user_id == report_owner_id,
+                            Report.report_date == report_date_obj
+                        )
+                        if profile_id is None:
+                            query = query.filter(Report.profile_id.is_(None))
+                        else:
+                            query = query.filter(Report.profile_id == profile_id)
+                        candidates = query.all()
                         
-                        # Prepare current report set {(name_norm, value_norm)}
-                        current_set = set()
-                        for item in medical_data_list:
-                            n = item.get('field_name', '').strip().lower()
-                            v = str(item.get('field_value', '')).strip().lower()
-                            if n and v:
-                                current_set.add((n, v))
-                        
-                        if len(current_set) > 0:
-                            for cand in candidates:
-                                # Fetch candidate fields
-                                cand_fields = ReportField.query.filter_by(report_id=cand.id).all()
-                                cand_set = set()
-                                for f in cand_fields:
-                                    n = f.field_name.strip().lower()
-                                    v = f.field_value.strip().lower()
-                                    cand_set.add((n, v))
-                                
-                                # Calculate Overlap
-                                intersection = current_set.intersection(cand_set)
-                                overlap_ratio = len(intersection) / len(current_set) if len(current_set) > 0 else 0
-                                
-                                print(f"   - Candidate #{cand.id}: {len(intersection)}/{len(current_set)} matches ({overlap_ratio:.2f})")
-                                
-                                # Threshold: if > 75% of extracted fields match -> DUPLICATE
-                                if overlap_ratio > 0.75:
-                                    existing_report = cand
-                                    print(f"❌ DETECTED SEMANTIC DUPLICATE of Report #{cand.id}")
-                                    break
-
-                if existing_report:
-                    error_msg = f'Duplicate Detected: This report content matches an existing report (#{existing_report.id}) from {existing_report.report_date.strftime("%Y-%m-%d")}'
-                    yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_REPORT', 'report_id': existing_report.id})}\n\n"
-                    return
-                
-        except Exception as e:
-             print(f"Duplicate Check Error: {e}")
+                        if candidates:
+                            print(f"🔍 Found {len(candidates)} reports on {report_date_obj.date()}. Checking content similarity...")
+                            
+                            current_set = set()
+                            for item in medical_data_list:
+                                n = item.get('field_name', '').strip().lower()
+                                v = str(item.get('field_value', '')).strip().lower()
+                                if n and v:
+                                    current_set.add((n, v))
+                            
+                            if len(current_set) > 0:
+                                for cand in candidates:
+                                    cand_fields = ReportField.query.filter_by(report_id=cand.id).all()
+                                    cand_set = set()
+                                    for f in cand_fields:
+                                        n = f.field_name.strip().lower()
+                                        v = f.field_value.strip().lower()
+                                        cand_set.add((n, v))
+                                    
+                                    intersection = current_set.intersection(cand_set)
+                                    overlap_ratio = len(intersection) / len(current_set) if len(current_set) > 0 else 0
+                                    
+                                    print(f"   - Candidate #{cand.id}: {len(intersection)}/{len(current_set)} matches ({overlap_ratio:.2f})")
+                                    
+                                    if overlap_ratio > 0.75:
+                                        existing_report = cand
+                                        print(f"❌ DETECTED SEMANTIC DUPLICATE of Report #{cand.id}")
+                                        break
+            
+                    if existing_report:
+                        error_msg = f'Duplicate Detected: This report content matches an existing report (#{existing_report.id}) from {existing_report.report_date.strftime("%Y-%m-%d")}'
+                        yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_REPORT', 'report_id': existing_report.id})}\n\n"
+                        return
+                    
+            except Exception as e:
+                print(f"Duplicate Check Error: {e}")
 
         # Step 5: Saving
         yield f"data: {json.dumps({'percent': 90, 'message': 'Saving your report...'})}\n\n"
@@ -717,22 +930,27 @@ CRITICAL CHECKS:
         
         new_report_id = None
         try:
-            # Calculate report hash
             report_hash = hashlib.sha256(json.dumps(final_data['medical_data'], sort_keys=True).encode()).hexdigest()
-            
-            # report_date_obj is already parsed above
 
-            # Categorize report
             from utils.medical_mappings import categorize_report_type
             report_category = categorize_report_type(final_data.get('report_type'))
 
+            raw_report_type = final_data.get('report_type')
+            safe_report_type = None
+            if isinstance(raw_report_type, str):
+                raw_report_type = raw_report_type.strip()
+                if len(raw_report_type) > 100:
+                    safe_report_type = raw_report_type[:97] + '...'
+                else:
+                    safe_report_type = raw_report_type
+
             new_report = Report(
-                user_id=current_user_id,
+                user_id=report_owner_id,
                 profile_id=profile_id,
                 report_date=report_date_obj,
                 report_hash=report_hash,
                 report_name=final_data.get('report_name'),
-                report_type=final_data.get('report_type'),
+                report_type=safe_report_type,
                 report_category=report_category,
                 patient_name=final_data.get('patient_name'),
                 patient_age=final_data.get('patient_age'),
@@ -746,13 +964,13 @@ CRITICAL CHECKS:
             
             # Save files
             for f in saved_files:
-                rf = ReportFile(report_id=new_report.id, user_id=current_user_id, **{k:v for k,v in f.items() if k!='is_pdf'})
+                rf = ReportFile(report_id=new_report.id, user_id=report_owner_id, **{k:v for k,v in f.items() if k!='is_pdf'})
                 if f['is_pdf']:
                      # Find associated pages for PDF
                      pdf_pages = [img for img in images_list if img['source_filename'] == f['original_filename']]
                      for p in pdf_pages:
                          rf_page = ReportFile(
-                             report_id=new_report.id, user_id=current_user_id, 
+                             report_id=new_report.id, user_id=report_owner_id, 
                              original_filename=f['original_filename'], stored_filename=f['stored_filename'],
                              file_path=f['file_path'], file_type=f['file_type'], file_size=f['file_size'],
                              file_hash=f['file_hash'], page_number=p.get('page_number')
@@ -767,7 +985,7 @@ CRITICAL CHECKS:
                 if isinstance(item, dict):
                     field = ReportField(
                         report_id=new_report.id,
-                        user_id=current_user_id,
+                        user_id=report_owner_id,
                         field_name=item.get('field_name', 'Unknown'),
                         field_value=str(item.get('field_value', '')),
                         field_unit=str(item.get('field_unit', '')),

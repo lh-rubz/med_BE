@@ -34,56 +34,71 @@ def send_push_notification(user_id, title, body, data=None):
             return False
 
         tokens = [device.fcm_token for device in devices]
-        
-        # Create message with platform-specific config for Heads-up notifications
-        message = messaging.MulticastMessage(
-            notification=messaging.Notification(
-                title=title,
-                body=body,
-            ),
-            data=data or {},
-            # Android Config for High Priority Heads-up Notification
-            android=messaging.AndroidConfig(
-                priority='high',
-                notification=messaging.AndroidNotification(
-                    channel_id='high_importance_channel',
-                    priority='high',
-                    default_sound=True,
-                    default_vibrate_timings=True
-                )
-            ),
-            # APNs Config for iOS
-            apns=messaging.APNSConfig(
-                payload=messaging.APNSPayload(
-                    aps=messaging.Aps(
-                        sound='default',
-                        content_available=True
-                    )
-                )
-            ),
-            tokens=tokens,
+
+        notification = messaging.Notification(
+            title=title,
+            body=body,
         )
 
-        # Send message
-        response = messaging.send_each_for_multicast(message)
-        print(f"✅ Sent push notification to {response.success_count} devices for user {user_id}")
-        
-        # Handle invalid tokens (cleanup)
-        if response.failure_count > 0:
-            responses = response.responses
-            failed_tokens = []
-            for idx, resp in enumerate(responses):
-                if not resp.success:
-                    # The order of responses corresponds to the order of the registration tokens.
-                    failed_tokens.append(tokens[idx])
-                    print(f"❌ Failed to send to token {tokens[idx]}: {resp.exception}")
-            
-            # Remove failed tokens from DB
-            if failed_tokens:
-                UserDevice.query.filter(UserDevice.fcm_token.in_(failed_tokens)).delete(synchronize_session=False)
-                from models import db
-                db.session.commit()
-                
+        android_config = messaging.AndroidConfig(
+            priority='high',
+            notification=messaging.AndroidNotification(
+                channel_id='high_importance_channel',
+                priority='high',
+                default_sound=True,
+                default_vibrate_timings=True
+            )
+        )
+
+        apns_config = messaging.APNSConfig(
+            payload=messaging.APNSPayload(
+                aps=messaging.Aps(
+                    sound='default',
+                    content_available=True
+                )
+            )
+        )
+
+        if hasattr(messaging, 'send_multicast') and hasattr(messaging, 'MulticastMessage'):
+            message = messaging.MulticastMessage(
+                notification=notification,
+                data=data or {},
+                android=android_config,
+                apns=apns_config,
+                tokens=tokens,
+            )
+
+            response = messaging.send_multicast(message)
+            print(f"✅ Sent push notification to {response.success_count} devices for user {user_id}")
+
+            if response.failure_count > 0:
+                responses = response.responses
+                failed_tokens = []
+                for idx, resp in enumerate(responses):
+                    if not resp.success:
+                        failed_tokens.append(tokens[idx])
+                        print(f"❌ Failed to send to token {tokens[idx]}: {resp.exception}")
+
+                if failed_tokens:
+                    UserDevice.query.filter(UserDevice.fcm_token.in_(failed_tokens)).delete(synchronize_session=False)
+                    from models import db
+                    db.session.commit()
+        else:
+            print("⚠️ firebase_admin.messaging.send_multicast not available, falling back to per-token send()")
+            for token in tokens:
+                try:
+                    message = messaging.Message(
+                        notification=notification,
+                        data=data or {},
+                        android=android_config,
+                        apns=apns_config,
+                        token=token,
+                    )
+                    messaging.send(message)
+                    print(f"✅ Sent push notification to token {token} for user {user_id}")
+                except Exception as token_error:
+                    print(f"❌ Failed to send to token {token}: {token_error}")
+
         return True
     except Exception as e:
         print(f"❌ Error sending push notification: {str(e)}")

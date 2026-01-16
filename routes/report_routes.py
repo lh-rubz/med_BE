@@ -131,29 +131,27 @@ class UserReports(Resource):
             """
                 # إذا كان Profile مشترك أو تم إنشاؤه عبر connection، لا حاجة للتحقق
         
-        # Determine report owner
         report_owner_id = current_user_id
 
         if profile_id:
-            # Profile object is already fetched in the validation block above
-            # Check for ProfileShare explicitly as requested
             share = ProfileShare.query.filter_by(
                 profile_id=profile_id,
                 shared_with_user_id=current_user_id
             ).first()
 
-            if share:
-                # If shared via ProfileShare, owner is the profile creator
+            if share or profile.creator_id != current_user_id:
                 report_owner_id = profile.creator_id
-            elif profile.creator_id != current_user_id:
-                # Shared Profile fallback (in case checked via ownership logic directly)
-                report_owner_id = profile.creator_id
-        
-        # Build query
-        query = Report.query.filter_by(user_id=report_owner_id)
         
         if profile_id:
-            query = query.filter_by(profile_id=profile_id)
+            if report_owner_id != current_user_id:
+                query = Report.query.filter(
+                    Report.profile_id == profile_id,
+                    or_(Report.user_id == report_owner_id, Report.user_id == current_user_id)
+                )
+            else:
+                query = Report.query.filter_by(user_id=current_user_id, profile_id=profile_id)
+        else:
+            query = Report.query.filter_by(user_id=current_user_id)
         
         reports = query.order_by(Report.created_at.desc()).all()
         
@@ -262,24 +260,29 @@ class Timeline(Resource):
         # Check for profile_id filter
         profile_id = request.args.get('profile_id')
         
-        # Build query
+        report_owner_id = current_user_id
         if profile_id:
-            # Verify user owns this profile or has shared access
+            profile_id = int(profile_id)
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
-            
             if not profile:
                 from models import ProfileShare
                 share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
                 if share:
                     profile = Profile.query.get(profile_id)
-            
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
-            
-            # For shared profiles, we just filter by profile_id (reports belong to creator, not current_user)
-            query = Report.query.filter_by(profile_id=profile_id)
+            if profile.creator_id != current_user_id:
+                report_owner_id = profile.creator_id
+        
+        if profile_id:
+            if report_owner_id != current_user_id:
+                query = Report.query.filter(
+                    Report.profile_id == profile_id,
+                    or_(Report.user_id == report_owner_id, Report.user_id == current_user_id)
+                )
+            else:
+                query = Report.query.filter_by(user_id=current_user_id, profile_id=profile_id)
         else:
-            # Default: Show all reports for the current user
             query = Report.query.filter_by(user_id=current_user_id)
             
         # Get reports ordered by date
@@ -326,8 +329,9 @@ class HealthTrends(Resource):
         field_names = request.args.get('field_name', '').split(',')
         profile_id = request.args.get('profile_id')
         
+        owner_id = current_user_id
         if profile_id:
-            # Verify user owns this profile or has shared access
+            profile_id = int(profile_id)
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
             
             if not profile:
@@ -338,6 +342,8 @@ class HealthTrends(Resource):
 
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
+            if profile.creator_id != current_user_id:
+                owner_id = profile.creator_id
         
         if not field_names or field_names == ['']:
             return {'message': 'Please provide field_name parameter'}, 400
@@ -354,18 +360,22 @@ class HealthTrends(Resource):
             # Build query with OR condition for all aliases
             filters = [ReportField.field_name.ilike(f"%{term}%") for term in search_terms]
             
-            if profile_id:
-                # Use profile_id filter for shared/specific profiles
+            if profile_id and owner_id != current_user_id:
                 query = db.session.query(ReportField, Report.report_date).join(Report).filter(
-                    Report.profile_id == profile_id,
+                    or_(
+                        ReportField.user_id == owner_id,
+                        ReportField.user_id == current_user_id
+                    ),
                     or_(*filters)
                 )
             else:
-                # Default: Filter by current user
                 query = db.session.query(ReportField, Report.report_date).join(Report).filter(
-                    ReportField.user_id == current_user_id,
+                    ReportField.user_id == owner_id,
                     or_(*filters)
                 )
+            
+            if profile_id:
+                query = query.filter(Report.profile_id == profile_id)
                 
             fields = query.order_by(Report.report_date).all()
             
@@ -406,14 +416,14 @@ class TimelineStats(Resource):
     def get(self):
         """Get high-level statistics for the timeline header (optionally filtered by profile)"""
         current_user_id = int(get_jwt_identity())
-        
-        # Check for profile_id filter
         profile_id = request.args.get('profile_id')
         
+        report_owner_id = current_user_id
+        query = Report.query
+        
         if profile_id:
-            # Verify user owns this profile or has shared access
+            profile_id = int(profile_id)
             profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
-            
             if not profile:
                 from models import ProfileShare
                 share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
@@ -422,10 +432,18 @@ class TimelineStats(Resource):
 
             if not profile:
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
-            
-            query = Report.query.filter_by(profile_id=profile_id)
+            if profile.creator_id != current_user_id:
+                report_owner_id = profile.creator_id
+
+            if report_owner_id != current_user_id:
+                query = query.filter(
+                    Report.profile_id == profile_id,
+                    or_(Report.user_id == report_owner_id, Report.user_id == current_user_id)
+                )
+            else:
+                query = query.filter_by(user_id=current_user_id, profile_id=profile_id)
         else:
-            query = Report.query.filter_by(user_id=current_user_id)
+            query = query.filter_by(user_id=current_user_id)
             
         total_reports = query.count()
         last_report = query.order_by(Report.report_date.desc()).first()
@@ -548,10 +566,10 @@ class UserReportDetail(Resource):
             }
         }, 200
 
-    @reports_ns.doc(security='Bearer Auth', description='DELETE endpoint')
+    @reports_ns.doc(security='Bearer Auth', description='DELETE endpoint - FOR TESTING ONLY')
     @jwt_required()
     def delete(self, report_id):
-        """Delete a specific report by ID"""
+        """Delete a specific report by ID - FOR TESTING PURPOSES ONLY"""
         current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         
@@ -559,32 +577,33 @@ class UserReportDetail(Resource):
             return {'message': 'User not found'}, 404
         
         report = Report.query.get(report_id)
-        
         if not report:
             return {'message': 'Report not found'}, 404
-        
-        # Check permissions
-        # 1. Report Owner (Uploader)
-        is_authorized = (report.user_id == current_user_id)
-        
-        # 2. Profile Owner (if report is linked to a profile)
-        if not is_authorized and report.profile_id:
-            profile = Profile.query.get(report.profile_id)
-            if profile and profile.creator_id == current_user_id:
-                is_authorized = True
-            
-            # 3. Shared Profile Manager
-            if not is_authorized:
-                from models import ProfileShare
+
+        profile_id = request.args.get('profile_id')
+
+        if profile_id:
+            try:
+                profile_id = int(profile_id)
+            except ValueError:
+                return {'message': 'Invalid profile_id'}, 400
+
+            if report.profile_id != profile_id:
+                return {'message': 'Report not found'}, 404
+
+            from models import ProfileShare
+
+            profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+            if not profile:
                 share = ProfileShare.query.filter_by(
-                    profile_id=report.profile_id, 
+                    profile_id=profile_id,
                     shared_with_user_id=current_user_id
                 ).first()
-                if share and share.access_level == 'manage':
-                    is_authorized = True
-        
-        if not is_authorized:
-             return {'message': 'Unauthorized: You do not have permission to delete this report'}, 403
+                if not share:
+                    return {'message': 'Report not found or unauthorized access'}, 404
+        else:
+            if report.user_id != current_user_id:
+                return {'message': 'Report not found or unauthorized access'}, 404
         
         try:
             ReportField.query.filter_by(report_id=report_id).delete()
@@ -593,7 +612,7 @@ class UserReportDetail(Resource):
             db.session.commit()
             
             return {
-                'message': 'Report deleted successfully',
+                'message': 'Report deleted successfully (TESTING MODE)',
                 'deleted_report_id': report_id
             }, 200
         except Exception as e:

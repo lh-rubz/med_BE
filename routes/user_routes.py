@@ -93,6 +93,7 @@ class UserProfile(Resource):
 
         return {
             'email': user.email,
+            'biometric_allowed': getattr(user, 'biometric_allowed', True),
             'first_name': user.first_name,
             'last_name': user.last_name,
             'date_of_birth': user.date_of_birth.strftime('%Y-%m-%d') if user.date_of_birth else None,

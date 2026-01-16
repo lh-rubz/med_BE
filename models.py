@@ -19,6 +19,7 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     is_active = db.Column(db.Boolean, default=True)
     email_verified = db.Column(db.Boolean, default=False)
+    biometric_allowed = db.Column(db.Boolean, default=True)
     verification_code = db.Column(db.String(6), nullable=True)
     verification_code_expires = db.Column(db.DateTime, nullable=True)
     reset_code = db.Column(db.String(255), nullable=True)  # Increased to support secure tokens
