@@ -822,13 +822,13 @@ Return ONLY this JSON object, no markdown."""
                 # swap them - this handles the common VLM mistake of mixing up patient and doctor names
                 name_reject_patterns = [
                     # Arabic labels
-                    'رقم المريض', 'اسم المريض', 'المريض', 'الاسم', 
+                    'رقم المريض', 'اسم المريض', 'المريض', 'المرضى', 'الاسم', 
                     'دكتور', 'طبيب', 'الطبيب', 'الموظف',
                     # English labels
                     'doctor', 'dr.', 'employee', 'patient name', 'patient id', 'patient number',
                     'name', 'id number', 'gender', 'sex', 'date of birth', 'dob',
                     # Partial matches
-                    'patient', 'رقم', 'اسم'
+                    'patient', 'patients', 'رقم', 'اسم'
                 ]
                 
                 new_name_is_label = False
@@ -964,7 +964,7 @@ Return ONLY this JSON object, no markdown."""
                 name_lower = cleaned_name.replace(':', '').replace('-', '').strip().lower()
                 
                 # Reject if name is actually a label or too short/numeric
-                if name_lower in ['اسم المريض', 'patient name', 'name', 'المريض', 'الاسم', 'رقم المريض', 'رقم', 'اسم', '']:
+                if name_lower in ['اسم المريض', 'patient name', 'name', 'المريض', 'المرضى', 'الاسم', 'رقم المريض', 'رقم', 'اسم', 'patient', 'patients', '']:
                     cleaned_name = ''
                 elif len(cleaned_name) < 3 or cleaned_name.strip().isdigit():
                     cleaned_name = ''
