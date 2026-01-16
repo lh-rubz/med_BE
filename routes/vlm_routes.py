@@ -380,45 +380,53 @@ STEP 1: DETECT LANGUAGE & LAYOUT
 
 STEP 2: EXTRACT HEADER INFO (Rules)
   1. patient_gender (HIGHEST PRIORITY):
-     - SEARCH the header for: "انثى", "أنثى", "Female", "F".
-     - IF FOUND: OUTPUT "Female". (Even if it says "Mr" or looks like a male name).
-     - IF NOT FOUND: Check for "ذكر", "Male", "M". If found -> "Male".
-     - CRITICAL: "انثى" = "Female". Do not hallucinate "Male".
+     - SEARCH the header for: "انثى", "أنثى", "Female", "F", "Mrs", "Ms", "Smt".
+     - IF FOUND: OUTPUT "Female".
+     - IF NOT FOUND: Check for "ذكر", "Male", "M", "Mr". If found -> "Male".
+     - DEFAULT: If ambiguous, do NOT default to Male. output "Unknown" or just the text you see.
+     - Note: "انثى" is definitely Female.
 
   2. patient_name:
      - Find "اسم المريض" or "Patient Name".
      - Look at the text NEXT to it (Left for Arabic, Right for English).
-     - EXTRACT EXACTLY AS WRITTEN.
-     - Do NOT autocorrect names.
-     - Example: If text is "رئيسة", do NOT change to "رئيسي".
-     - Example: If text is "هبة", do NOT change to "هبا".
-     - ERROR CHECK: Value cannot be "اسم المريض".
+     - EXTRACT EXACTLY AS WRITTEN (e.g. "رئيسة" -> "رئيسة").
 
-  3. patient_age (CALCULATE IT):
-     - Find "تاريخ الميلاد" (DOB) -> Extract Year (YYYY).
-     - Find Report Date -> Extract Year (YYYY).
+  3. patient_age:
+     - Find "تاريخ الميلاد" (DOB) -> Year.
+     - Find Report Date -> Year.
      - CALCULATE: Report Year - Birth Year.
-     - If DOB is 1975 and Report is 2025 -> Age is 50.
-     - Do NOT output "48" if the math is clearly 50.
 
   4. doctor_names:
-     - Find "الطبيب" or "Doctor".
-     - Look for the name nearby (often Left side in Arabic tables).
+     - Find "الطبيب" or "Doctor" or "Ref By".
+     - Look for the name nearby.
+     - ALSO CHECK: Bottom of the page for "Signature" or "Signed by".
+     - Examples: "Dr. Jihad", "د. محمد".
 
   5. report_date:
      - Find "التاريخ" or "Date".
 
 STEP 3: EXTRACT MEDICAL DATA TABLE
 - Find the main results table.
-- Map columns dynamically:
-  - Test Name: "Test", "Assay", "الفحص".
-  - Result: "Result", "Value", "النتيجة".
-  - Unit: "Unit", "الوحدة".
-  - Ref Range: "Reference", "Range", "المعدل الطبيعي".
+- Map columns: Test Name | Result | Unit | Normal Range
   
-- CRITICAL:
-  - If a test has English (e.g. "FBS") and Arabic, use the English name.
-  - "field_value" must be the result column.
+- CRITICAL EXTRACTION RULES:
+  1. **Normal Range (Ref Range)**: 
+     - If the cell is EMPTY, return "".
+     - If the cell contains text like "variation of..." or descriptions, return "".
+     - DO NOT propagate the range from the row above.
+     - DO NOT invent a range.
+
+  2. **is_normal**:
+     - LOOK FOR FLAGS: "H" (High), "L" (Low), "*", "Bold text".
+     - If Flag exists -> is_normal = false.
+     - Else -> is_normal = true.
+     - (Only calculate if you are 100% sure of the numeric range).
+
+  3. **field_value**:
+     - Extract the numeric result.
+  
+  4. **field_name**: 
+     - Prefer English.
 
 STEP 4: JSON STRUCTURE
 Return a SINGLE JSON object. 
