@@ -88,7 +88,7 @@ def ensure_upload_folder(user_identifier):
 
 
 def pdf_to_images(pdf_path):
-    """Convert PDF pages to images using PyMuPDF without extra compression"""
+    """Convert PDF pages to images using PyMuPDF with light compression for VLM"""
     images = []
     pdf_document = fitz.open(pdf_path)
     
@@ -97,7 +97,9 @@ def pdf_to_images(pdf_path):
         # Render page to an image with 2.5x zoom (High quality ~180 DPI for better OCR)
         pix = page.get_pixmap(matrix=fitz.Matrix(2.5, 2.5))
         img_data = pix.tobytes("png")
-        images.append(img_data)
+        # Compress copy for VLM (original PDF stays unchanged on disk)
+        compressed = compress_image(img_data, 'png')
+        images.append(compressed)
     
     pdf_document.close()
     return images
@@ -301,7 +303,7 @@ class ChatResource(Resource):
                         for page_num, img_data in enumerate(images, 1):
                             all_images_to_process.append({
                                 'data': img_data,
-                                'format': 'png',
+                                'format': 'jpeg',
                                 'source_filename': filename,
                                 'page_number': page_num,
                                 'total_pages': len(images)
@@ -309,12 +311,11 @@ class ChatResource(Resource):
                     else:
                         with open(file_path, 'rb') as f:
                             image_data = f.read()
-                            image_format = file_extension.lower()
-                            if image_format == 'jpg':
-                                image_format = 'jpeg'
+                            # Compress copy for VLM (stored file remains original)
+                            compressed_data = compress_image(image_data, file_extension)
                             all_images_to_process.append({
-                                'data': image_data,
-                                'format': image_format,
+                                'data': compressed_data,
+                                'format': 'jpeg',
                                 'source_filename': filename,
                                 'page_number': None,
                                 'total_pages': 1
