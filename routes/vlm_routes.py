@@ -421,18 +421,20 @@ STEP 2: EXTRACT MEDICAL DATA TABLE
   - IGNORE section headers that are just category titles (e.g. "HEMATOLOGY") if they have no result.
 
 STEP 3: JSON STRUCTURE
-Return a SINGLE JSON object:
+Return a SINGLE JSON object. 
+DO NOT include "header_rows" or any extra fields. 
+DO NOT include markdown formatting (```json).
+
 {{
-  "header_rows": [],
-  "patient_name": "string",
+  "patient_name": "string (The extracted name)",
   "patient_age": "string",
-  "patient_gender": "string",
+  "patient_gender": "string (Male/Female)",
   "report_date": "YYYY-MM-DD",
   "report_type": "{', '.join(REPORT_TYPES)}",
   "doctor_names": "string",
   "medical_data": [
     {{
-      "field_name": "string (prefer English)",
+      "field_name": "string (Prefer English)",
       "field_value": "string or number",
       "field_unit": "string",
       "normal_range": "string",
@@ -460,7 +462,7 @@ Return a SINGLE JSON object:
                     messages=[{'role': 'user', 'content': content}],
                     temperature=0.1,
                     response_format={"type": "json_object"},
-                    max_tokens=700,
+                    max_tokens=2500,
                     timeout=120.0
                 )
                 response_text = completion.choices[0].message.content.strip()
@@ -526,33 +528,16 @@ Return ONLY this JSON object."""
                         messages=[{'role': 'user', 'content': content}],
                         temperature=0.1,
                         response_format={"type": "json_object"},
-                        max_tokens=600,
+                        max_tokens=2500,
                         timeout=90.0
                     )
                     response_text = completion.choices[0].message.content.strip()
                     print(f"🔍 RAW RESPONSE (retry) for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
                 
-                header_rows = extracted_data.get('header_rows') or []
-                if isinstance(header_rows, list):
-                    for row in header_rows:
-                        try:
-                            label = str(row.get('label', '')).strip()
-                            value = str(row.get('value', '')).strip()
-                        except Exception:
-                            continue
-                        if not label or not value:
-                            continue
-                        label_lower = label.lower()
-                        if 'اسم المريض' in label or 'patient name' in label_lower:
-                            extracted_data['patient_name'] = value
-                        elif 'الجنس' in label or 'sex' in label_lower:
-                            extracted_data['patient_gender'] = value
-                        elif 'تاريخ الميلاد' in label or 'dob' in label_lower or 'date of birth' in label_lower:
-                            extracted_data['patient_dob'] = value
-                        elif 'الطبيب' in label or 'doctor' in label_lower or 'physician' in label_lower:
-                            extracted_data['doctor_names'] = value
-                        elif 'تاريخ الطلب' in label or 'order date' in label_lower or 'request date' in label_lower:
-                            extracted_data['report_date'] = value
+                        # Fallback parsing for top-level fields if needed
+                        if not extracted_data.get('patient_name') and 'اسم المريض' in response_text:
+                             pass # Todo: improved regex parsing if needed
+
 
                 if extracted_data.get('is_medical_report') is False:
                      error_msg = extracted_data.get('reason', 'The uploaded file does not appear to be a valid medical report.')
