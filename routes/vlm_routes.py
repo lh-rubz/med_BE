@@ -687,10 +687,8 @@ Return ONLY this JSON object."""
                     If not a valid medical test, map to "UNKNOWN".
                     Return ONLY the JSON."""
                     
-                    # Using the larger model as requested by user, but batched for speed
-                    # Use the existing OpenAI-compatible client to avoid URL/Proxy issues
                     response = ollama_client.chat.completions.create(
-                        model='gemma3:12b', 
+                        model=Config.OLLAMA_MODEL, 
                         messages=[
                             {'role': 'user', 'content': learning_prompt}
                         ]
