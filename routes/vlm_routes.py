@@ -373,68 +373,52 @@ class ChatResource(Resource):
             prompt_text = f"""ACT AS AN EXPERT MEDICAL DATA DIGITIZER. 
 Your task is to extract structured medical data from this image (page {idx}/{total_pages}).
 
-STEP 1: DETECT LANGUAGE & LAYOUT
-- Scan the header.
-- IF ARABIC (RTL): Expect "Value | Label" (Value is to the LEFT of Label).
-- IF ENGLISH (LTR): Expect "Label: Value" (Value is to the RIGHT of Label).
+DATA EXTRACTION STRATEGY:
+1. First, find the RAW TEXT for each field exactly as it appears in the image.
+2. Then, CLEAN and NORMALIZE it.
 
-STEP 2: EXTRACT HEADER INFO (Rules)
-  1. patient_gender (HIGHEST PRIORITY):
-     - SEARCH the header for: "انثى", "أنثى", "Female", "F", "Mrs", "Ms", "Smt".
-     - IF FOUND: OUTPUT "Female".
-     - IF NOT FOUND: Check for "ذكر", "Male", "M", "Mr". If found -> "Male".
-     - DEFAULT: If ambiguous, do NOT default to Male. output "Unknown" or just the text you see.
-     - Note: "انثى" is definitely Female.
+STEP 1: HEADER EXTRACTION (Patient & Doctor)
+- Scan the top section. Look for Arabic and English labels.
 
-  2. patient_name:
-     - Find "اسم المريض" or "Patient Name".
-     - Look at the text NEXT to it (Left for Arabic, Right for English).
-     - EXTRACT EXACTLY AS WRITTEN (e.g. "رئيسة" -> "رئيسة").
+RULES:
+  1. Patient Name:
+     - Find "اسم المريض" or "Name".
+     - Extract the FULL string found next to it (e.g., separate First, Father, Grandfather, Family names).
+     - Constraint: Must be at least 3 words long.
+     - Example: If you see "رئيسة", look right/left for "خضر طالب...".
 
-  3. patient_age:
-     - Find "تاريخ الميلاد" (DOB) -> Year.
-     - Find Report Date -> Year.
-     - CALCULATE: Report Year - Birth Year.
+  2. Patient Gender:
+     - Find "الجنس" or "Sex".
+     - Extract the RAW value (e.g. "انثى", "Female", "ذكر", "Male").
+     - Logic: 
+         - If text contains "انثى" or "Female" or "F" -> "Female".
+         - Else -> "Male".
 
-  4. doctor_names:
-     - Find "الطبيب" or "Doctor" or "Ref By".
-     - Look for the name nearby.
-     - ALSO CHECK: Bottom of the page for "Signature" or "Signed by".
-     - Examples: "Dr. Jihad", "د. محمد".
+  3. Patient Age:
+     - Find "DOB" / "تاريخ الميلاد". Extract the YEAR (e.g. 1975).
+     - Find Report Date. Extract the YEAR (e.g. 2026).
+     - Calculate: 2026 - 1975 = 51.
+     - If you only find "Age: 48", use "48". But PREFER calculation from DOB.
 
-  5. report_date:
-     - Find "التاريخ" or "Date".
+  4. Doctor Name:
+     - Find "الطبيب" or "Doctor".
+     - Look carefully for the name (it might be handwritten or small).
+     - Also check the footer for signatures.
 
-STEP 3: EXTRACT MEDICAL DATA TABLE
-- Find the main results table.
-- Map columns: Test Name | Result | Unit | Normal Range
-  
-- CRITICAL EXTRACTION RULES:
-  1. **Normal Range (Ref Range)**: 
-     - If the cell is EMPTY, return "".
-     - If the cell contains text like "variation of..." or descriptions, return "".
-     - DO NOT propagate the range from the row above.
-     - DO NOT invent a range.
+STEP 2: TABLE EXTRACTION
+- Extract the main lab results table.
+- Columns: Test Name | Result | Unit | Normal Range
+- Special Handling:
+  - Is Normal: Use "H" / "L" flags if present. Otherwise, check if Result is inside Range.
+  - Normal Range: Return "" (empty string) if the cell is empty or just text.
 
-  2. **is_normal**:
-     - LOOK FOR FLAGS: "H" (High), "L" (Low), "*", "Bold text".
-     - If Flag exists -> is_normal = false.
-     - Else -> is_normal = true.
-     - (Only calculate if you are 100% sure of the numeric range).
-
-  3. **field_value**:
-     - Extract the numeric result.
-  
-  4. **field_name**: 
-     - Prefer English.
-
-STEP 4: JSON STRUCTURE
+STEP 3: JSON STRUCTURE
 Return a SINGLE JSON object. 
-DO NOT include "header_rows" or any extra fields. 
-DO NOT include markdown formatting (```json).
+DO NOT include "header_rows". 
+DO NOT include markdown.
 
 {{
-  "patient_name": "string",
+  "patient_name": "string (Full Name, 3-4 words)",
   "patient_age": "string",
   "patient_gender": "string (Male/Female)",
   "report_date": "YYYY-MM-DD",
