@@ -88,7 +88,7 @@ def ensure_upload_folder(user_identifier):
 
 
 def pdf_to_images(pdf_path):
-    """Convert PDF to images using PyMuPDF with compression"""
+    """Convert PDF pages to images using PyMuPDF without extra compression"""
     images = []
     pdf_document = fitz.open(pdf_path)
     
@@ -97,9 +97,6 @@ def pdf_to_images(pdf_path):
         # Render page to an image with 2.5x zoom (High quality ~180 DPI for better OCR)
         pix = page.get_pixmap(matrix=fitz.Matrix(2.5, 2.5))
         img_data = pix.tobytes("png")
-        
-        # Compress the image to reduce size
-        img_data = compress_image(img_data, 'png')
         images.append(img_data)
     
     pdf_document.close()
@@ -304,7 +301,7 @@ class ChatResource(Resource):
                         for page_num, img_data in enumerate(images, 1):
                             all_images_to_process.append({
                                 'data': img_data,
-                                'format': 'jpeg',
+                                'format': 'png',
                                 'source_filename': filename,
                                 'page_number': page_num,
                                 'total_pages': len(images)
@@ -312,10 +309,12 @@ class ChatResource(Resource):
                     else:
                         with open(file_path, 'rb') as f:
                             image_data = f.read()
-                            compressed_data = compress_image(image_data, file_extension)
+                            image_format = file_extension.lower()
+                            if image_format == 'jpg':
+                                image_format = 'jpeg'
                             all_images_to_process.append({
-                                'data': compressed_data,
-                                'format': 'jpeg',
+                                'data': image_data,
+                                'format': image_format,
                                 'source_filename': filename,
                                 'page_number': None,
                                 'total_pages': 1
