@@ -385,44 +385,54 @@ GENERAL RULES:
 - Do not copy label words as values (for example: "اسم المريض", "Patient Name").
 - CRITICAL: Each test result row is independent. NEVER mix values from different rows or columns.
 
-STEP 1: PATIENT HEADER READING
-Scan all regions (right/left, top/bottom) carefully. Look for header tables or sections.
-Handle both Arabic and English labels. Read each label-value pair precisely.
+STEP 1: PATIENT HEADER READING (MANDATORY - MUST EXTRACT!)
+You MUST extract patient information from the header tables. This is the FIRST priority!
+
+SCAN THE ENTIRE IMAGE for header tables. Look at the TOP of the report first, then check sides.
 
 CRITICAL: Distinguish between PATIENT information table and REQUEST/DOCTOR information table!
-- PATIENT table usually has: "اسم المريض", "رقم المريض", "الجنس", "تاريخ الميلاد", "رقم الهوية"
-- REQUEST/DOCTOR table usually has: "تاريخ الطلب", "رقم الطلب", "الطبيب", "التأمين"
-- ALWAYS extract patient_name from the PATIENT table, NOT from the doctor/request table!
+- PATIENT table (RIGHT side usually): Contains "اسم المريض", "رقم المريض", "الجنس", "تاريخ الميلاد", "رقم الهوية"
+- REQUEST/DOCTOR table (LEFT side usually): Contains "تاريخ الطلب", "رقم الطلب", "الطبيب", "التأمين"
+- These are TWO SEPARATE TABLES! Do NOT mix them!
 
-- Patient Name labels (LOOK ONLY IN PATIENT INFO TABLE):
-  - Arabic: "اسم المريض", "المريض", "الاسم"
-  - English: "Patient Name", "Name", "Patient"
-  -> Extract ONLY from the row that has label "اسم المريض" or "Patient Name" in the PATIENT information table.
-  -> DO NOT use "الطبيب" (Doctor) field as patient name - they are DIFFERENT!
-  -> Extract ONLY the actual name value. Remove any labels or prefixes like "Name:", "Patient Name:".
-  -> Return the full name as written (Arabic or English).
-  -> If name contains extra text like "Patient Name: John Doe", extract only "John Doe".
-  -> If not found in PATIENT table, return "".
+TABLE STRUCTURE - How to read:
+- Tables have rows and columns
+- Each row has: LABEL column + VALUE column
+- In the PATIENT table, find the row with label "اسم المريض" -> its VALUE column = patient name
+- In the PATIENT table, find the row with label "الجنس" -> its VALUE column = gender
+- Match each label to its VALUE in THE SAME ROW
 
-- Gender labels (LOOK ONLY IN PATIENT INFO TABLE):
-  - Arabic: "الجنس", "الجنسي"
-  - English: "Sex", "Gender"
-  -> Extract ONLY from the row that has label "الجنس" or "Sex"/"Gender" in the PATIENT information table.
-  -> Read the VALUE cell next to "الجنس" label carefully - it should be in the SAME row.
-  -> Return "Male" if you see: "ذكر", "Male", "M" in the VALUE cell
-  -> Return "Female" if you see: "أنثى", "انثى", "Female", "F" in the VALUE cell
-  -> If the value cell is empty or unclear, return "".
-  -> Do NOT infer gender from names - ONLY read the actual value from the gender field.
-  -> Double-check: Make sure you're reading the PATIENT's gender, not someone else's.
+- Patient Name (REQUIRED - MUST EXTRACT):
+  - Look for table with labels: "اسم المريض", "رقم المريض", "الجنس", "تاريخ الميلاد"
+  - Find the row where label = "اسم المريض"
+  - Read the VALUE in the same row (usually in adjacent column)
+  - Extract the VALUE only (the actual name), remove any prefixes like "Patient Name:"
+  - Examples: If you see "اسم المريض: رئيسة خضر طالب خطيب" -> extract "رئيسة خضر طالب خطيب"
+  - If you see table with two columns, left column = labels, right column = values, then:
+    * Find "اسم المريض" in left column -> read value from right column in same row
+  - DO NOT use values from "الطبيب" (Doctor) row - that's a different person!
+  - Return the full name as written (can be Arabic or English).
+  - If you cannot find it, return "" but try hard to locate it!
 
-- Date of Birth / Age labels:
-  - Arabic: "تاريخ الميلاد", "عمر", "العمر"
-  - English: "DOB", "Date of Birth", "Birth Date", "Age"
-  -> If DATE OF BIRTH is found, extract and normalize to "YYYY-MM-DD" format.
-  -> If only AGE is found (e.g., "50 years", "50 Y", "50"), extract the number only (e.g., "50").
-  -> If both are found, prefer date of birth for patient_dob and calculate/use age for patient_age.
-  -> Date formats to recognize: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD-MM-YYYY
-  -> If not found, return "" for both.
+- Gender (REQUIRED - MUST EXTRACT):
+  - Look in the PATIENT information table (same table as patient name)
+  - Find the row where label = "الجنس" or "الجنسي" or "Sex" or "Gender"
+  - Read the VALUE in the same row (the cell next to the label in the same row)
+  - Return "Male" if value contains: "ذكر", "Male", "M" (case insensitive)
+  - Return "Female" if value contains: "أنثى", "انثى", "Female", "F" (case insensitive)
+  - Do NOT guess - only return if you clearly see the value
+  - Do NOT infer from name - read the actual gender field value
+  - Examples: If table has "الجنس" in left column and "انثى" in right column same row -> return "Female"
+  - If you cannot find it clearly, return ""
+
+- Date of Birth / Age (IMPORTANT - EXTRACT IF AVAILABLE):
+  - Look in the PATIENT information table for "تاريخ الميلاد" (Date of Birth) or "عمر" (Age)
+  - Find the row with label "تاريخ الميلاد" -> read value from same row
+  - Date formats to recognize: DD/MM/YYYY (e.g., "01/05/1975"), MM/DD/YYYY, YYYY-MM-DD
+  - If you see DD/MM/YYYY format like "01/05/1975", convert to "YYYY-MM-DD" = "1975-05-01"
+  - If DATE OF BIRTH found: put in patient_dob as "YYYY-MM-DD", calculate age and put in patient_age
+  - If only AGE found (number like "50"): put in patient_age only, leave patient_dob empty
+  - If neither found, return "" for both
 
 - Report Date labels:
   - Arabic: "تاريخ الطلب", "التاريخ", "تاريخ الفحص"
@@ -485,14 +495,25 @@ ROW-BY-ROW EXTRACTION RULES:
    - Placeholders: "N/A", "n/a", "NA", "N.A", "nil", "none", "unknown"
    - Do NOT fill empty values with values from other rows or cells
 
-3. is_normal calculation:
-   - ONLY set is_normal if normal_range contains numeric range (e.g., "(12-16)", "0-200")
-   - If normal_range is empty, missing, or non-numeric (e.g., "-", "*", empty string), set is_normal to null
+3. normal_range - CRITICAL RULES:
+   - Read normal_range EXACTLY as written in the table
+   - If the cell is empty, blank, "-", "*", "(-)", or contains no numbers, return "" (empty string)
+   - DO NOT invent or guess normal_range values
+   - DO NOT copy normal_range from another row
+   - If you cannot read it clearly, return "" (empty string)
+   - Examples of valid ranges: "(74-110)", "(0-200)", "12-16", "(12.0-16.0)"
+   - Examples of empty: "-", "(-)", "*", blank cell, "N/A"
+
+4. is_normal calculation:
+   - ONLY set is_normal if BOTH conditions are true:
+     a) field_value is not empty and contains a number
+     b) normal_range is not empty and contains a numeric range like "(12-16)" or "0-200"
+   - If normal_range is empty ("") or missing, set is_normal to null (DO NOT guess!)
    - If field_value is empty or non-numeric, set is_normal to null
    - Compare numeric field_value against numeric normal_range:
      * If value is within range: is_normal = true
      * If value is outside range: is_normal = false
-   - If normal_range exists but you cannot parse it or compare, set is_normal to null
+   - If normal_range exists but you cannot parse it, set is_normal to null
 
 4. COMPLEX TABLES:
    - Handle tables with multiple sections (e.g., "HEMATOLOGY", "CLINICAL CHEMISTRY")
@@ -704,6 +725,13 @@ Return ONLY this JSON object, no markdown."""
                 new_doctor = str(extracted_data.get('doctor_names', '') or '').strip()
                 new_report_date = str(extracted_data.get('report_date', '') or '').strip()
                 
+                # Debug: Print what we extracted from this page
+                print(f"📋 Page {idx} - Extracted patient info:")
+                print(f"   Name: '{new_name}' (length: {len(new_name)})")
+                print(f"   Gender: '{new_gender}'")
+                print(f"   Age: '{new_age}', DOB: '{new_dob}'")
+                print(f"   Doctor: '{new_doctor}'")
+                
                 current_name = str(patient_info.get('patient_name', '') or '').strip()
                 current_gender = str(patient_info.get('patient_gender', '') or '').strip()
                 current_age = str(patient_info.get('patient_age', '') or '').strip()
@@ -783,6 +811,15 @@ Return ONLY this JSON object, no markdown."""
         # Step 3: Validation
         yield f"data: {json.dumps({'percent': 75, 'message': 'Double-checking the results...'})}\n\n"
         print(f"🔍 Validating aggregated data ({len(all_extracted_data)} total items)...")
+        
+        # Debug: Print final patient_info before cleaning
+        print(f"\n{'='*80}")
+        print(f"📊 FINAL PATIENT INFO BEFORE CLEANING:")
+        print(f"   Name: '{patient_info.get('patient_name', '')}'")
+        print(f"   Gender: '{patient_info.get('patient_gender', '')}'")
+        print(f"   Age: '{patient_info.get('patient_age', '')}'")
+        print(f"   DOB: '{patient_info.get('patient_dob', '')}'")
+        print(f"{'='*80}\n")
         
         # Clean and extract patient name
         raw_name = patient_info.get('patient_name', '')
@@ -928,6 +965,15 @@ Return ONLY this JSON object, no markdown."""
             'doctor_names': patient_info.get('doctor_names', ''),
             'medical_data': all_extracted_data
         }
+        
+        # Debug: Print final cleaned patient data
+        print(f"\n{'='*80}")
+        print(f"✅ FINAL CLEANED PATIENT DATA:")
+        print(f"   Name: '{cleaned_name}'")
+        print(f"   Gender: '{cleaned_gender}'")
+        print(f"   Age: '{cleaned_age}'")
+        print(f"   DOB: '{cleaned_dob}'")
+        print(f"{'='*80}\n")
         
         # Validation Logic (Call utils)
         try:

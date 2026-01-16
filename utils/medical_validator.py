@@ -327,13 +327,26 @@ class MedicalValidator:
             field_value = normalized
         
         # Normalize normal_range but preserve full descriptive text
+        # CRITICAL: Do NOT invent or create normal_range if it's missing/empty
         normal_range = str(validated.get('normal_range', ''))
-        unit = str(validated.get('field_unit', ''))
-        if unit and unit in normal_range:
-            # Only remove duplicated trailing unit occurrences like "mg/dl mg/dl"
-            pattern = rf'\b{re.escape(unit)}\b\s*\b{re.escape(unit)}\b'
-            normal_range = re.sub(pattern, unit, normal_range)
-            validated['normal_range'] = normal_range
+        
+        # Check if normal_range is actually empty (not just whitespace)
+        empty_range_indicators = {'', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
+                                 'nil', 'none', 'unknown', 'null', 'غير متوفر', '(-)', '('}
+        normal_range_clean = normal_range.strip()
+        
+        # If normal_range is an empty indicator, set to empty string (do NOT invent values)
+        if not normal_range_clean or normal_range_clean.lower() in empty_range_indicators:
+            validated['normal_range'] = ''
+            normal_range = ''
+        else:
+            # Only process non-empty ranges
+            unit = str(validated.get('field_unit', ''))
+            if unit and unit in normal_range:
+                # Only remove duplicated trailing unit occurrences like "mg/dl mg/dl"
+                pattern = rf'\b{re.escape(unit)}\b\s*\b{re.escape(unit)}\b'
+                normal_range = re.sub(pattern, unit, normal_range)
+                validated['normal_range'] = normal_range
         
         # Recalculate is_normal deterministically (will return None for empty values or missing ranges)
         normal_range = validated.get('normal_range', '')
