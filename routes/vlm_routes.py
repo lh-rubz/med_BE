@@ -379,23 +379,27 @@ STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
   - Layout is usually: | VALUE | LABEL |
   - You must look to the LEFT of each label cell to find its value.
   
-- EXTRACT THESE FIELDS (NO GUESSING):
+- EXTRACT THESE FIELDS (NO GUESSING, NO SWAPPING):
   1. patient_name:
      - Find label "اسم المريض" or "Patient Name".
      - Look to the LEFT cell and copy the FULL text exactly as written.
+     - Example layout: "| فلان الفلاني | اسم المريض |" → patient_name = "فلان الفلاني".
      - Do NOT shorten, translate, or replace the name.
+     - Do NOT take the doctor name as patient_name.
      - If you cannot clearly see any name, set patient_name = "" (empty string).
      - NEVER invent generic Arabic names like "أحمد محمد", "محمد", "خالد", etc.
   2. patient_gender:
      - Find label "الجنس" or "Sex".
-     - Look to the LEFT. Extract exactly "انثى" or "ذكر" or their English forms.
+     - Look to the LEFT cell. Use exactly the value you see (e.g., "انثى" or "ذكر").
+     - If the cell contains "انثى", patient_gender MUST be female ("انثى" or "أنثى" or "Female") and NEVER "ذكر".
   3. Date of Birth / Age:
      - Find label "تاريخ الميلاد" or "DOB".
      - Look to the LEFT. Extract the date (e.g., "01/05/1975").
      - CALCULATE Age: report_year - birth_year (return only the number as string).
   4. doctor_names:
-     - Find label "الطبيب" or "Doctor".
-     - Look to the LEFT. Copy the full name exactly as printed (e.g., "جهاد العملة").
+     - Find label "الطبيب" or "Doctor" or "Physician".
+     - Look to the LEFT cell and copy the full name exactly as printed.
+     - Example layout: "| د. خالد مثال | الطبيب |" → doctor_names MUST be "د. خالد مثال" and patient_name MUST NOT be "د. خالد مثال".
      - If that cell is blank or no doctor label exists, set doctor_names = "".
      - If you can see a doctor value, doctor_names MUST NOT be empty.
   5. report_date:
@@ -420,12 +424,12 @@ STEP 3: MEDICAL VALIDATION (SANITY CHECKS)
 STEP 4: JSON STRUCTURE
 Return a SINGLE JSON object:
 {{
-  "patient_name": "string (copied exactly from header or empty)",
+  "patient_name": "string (copied exactly from اسم المريض row, or empty)",
   "patient_age": "string (age number, e.g., \"50\")",
-  "patient_gender": "string (Male/Female/ذكر/أنثى)",
+  "patient_gender": "string (must match الجنس row value: Female/انثى or Male/ذكر)",
   "report_date": "YYYY-MM-DD or full timestamp",
   "report_type": "{', '.join(REPORT_TYPES)}",
-  "doctor_names": "string (exact doctor name or empty)",
+  "doctor_names": "string (copied exactly from الطبيب/Doctor row, or empty)",
   "medical_data": [
     {{
       "field_name": "string",
