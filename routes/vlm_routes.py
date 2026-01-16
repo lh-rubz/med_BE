@@ -371,54 +371,48 @@ class ChatResource(Resource):
             # Build prompt (Reusing logic)
             # Build OPTIMIZED extraction prompt (reduced by ~40%)
             prompt_text = f"""ACT AS AN EXPERT MEDICAL DATA DIGITIZER. 
-Your task is to extract structured medical data from this image (page {idx}/{total_pages}) into JSON format.
-The report can contain ARABIC, ENGLISH, or BOTH languages.
-- You typically encounter keys and values.
-- In ENGLISH (LTR), it is "KEY: VALUE".
-- In ARABIC (RTL), it might visually appear as "VALUE :KEY" or "KEY: VALUE" depending on layout.
-- Use VISUAL PROXIMITY. If a value is right next to "Patient Name", it is the name.
+Your task is to extract structured medical data from this image (page {idx}/{total_pages}).
+The report is likely in ARABIC and ENGLISH.
 
 STEP 1: ANALYZE THE HEADER (PATIENT & DOCTOR INFO)
-- Scan the top section for patient details.
-- LABELS to look for:
-  - Name: "اسم المريض", "Patient Name", "Name", "المريض".
-  - Age/DOB: "العمر", "Age", "تاريخ الميلاد", "DOB", "Birth Date".
-  - Sex: "الجنس", "Sex", "Gender", "النوع".
-  - Date: "التاريخ", "Date", "Reporting Date".
-  - Doctor: "الطبيب", "Doctor", "Dr", "Ref By", "المحول".
+- Locate the header section.
+- LABELS: "اسم المريض" (Patient Name), "العمر" (Age), "تاريخ الميلاد" (DOB), "الجنس" (Sex), "التاريخ" (Date), "الطبيب" (Doctor).
 
-- EXTRACT RULES:
+- STRICT EXTRACTION RULES:
   1. patient_name:
-     - Look for the label first.
-     - If found, extract the text immediately next to it.
-     - If NO label found, look for a 3-4 word name (Arabic or English) in the top center/left/right.
-     - Arabic names often look like "محمد أحمد علي" (3+ words).
-     - CLEAN THE RESULT: Remove the label itself if caught (e.g. if you see "Name: Ahmed", return "Ahmed").
+     - Find "اسم المريض". Value is usually NEXT to it or BELOW it.
+     - Extract the FULL Arabic name (e.g., "رئيسة خضر طالب خطيب").
+     - Do NOT change "رئيسة" to "رئيسي". Read exactly what is written.
+  
   2. patient_gender:
-     - Look for "Male", "Female", "M", "F", "ذكر", "أنثى", "انثى".
-     - Normalize to: "Male" (for ذكر/Male) or "Female" (for أنثى/Female).
-  3. patient_age:
-     - Look for "Age: 30" or "30 Years". Returns just the number "30".
-     - Or calculate from DOB.
-  4. doctor_names:
-     - Look for labels like "Dr.", "د.", "Doctor".
-  5. report_date:
-     - Look for the date the report was printed or collected.
+     - Find "الجنس" or "Sex".
+     - Value is "ذكر" (Male) or "انثى" / "أنثى" (Female).
+     - CRITICAL: If you see "انثى", output "Female". If you see "ذكر", output "Male".
+
+  3. patient_age (CALCULATE IT):
+     - Find "تاريخ الميلاد" (DOB) -> e.g., "01/05/1975".
+     - Find "التاريخ" (Report Date) -> e.g., "2025" or "2026".
+     - CALCULATE: Report Year ({datetime.now().year}) - Birth Year.
+     - Example: 2025 - 1975 = 50.
+     - NEVER return "01" or "05" if the DOB is 01/05/... -> That is the day/month, NOT age.
+     - If you find an explicit "Age" field (e.g. "Age: 50"), use it. Otherwise, CALCULATE.
+
+  4. report_date:
+     - Find "تاريخ الطلب" or "Date".
+  
+  5. doctor_names:
+     - Find "الطبيب" or "Doctor".
 
 STEP 2: EXTRACT MEDICAL DATA TABLE
-- Find the main table with results.
-- Columns might be in Arabic or English. Map them generally to:
-  - Test Name ("الفحص", "Test", "Analyses") -> field_name
-  - Result ("النتيجة", "Result", "Observed Value") -> field_value
-  - Unit ("الوحدة", "Unit") -> field_unit
-  - Reference ("المعدل الطبيعي", "Reference", "Normal Range") -> normal_range
-  - Notes ("ملاحظات", "Notes") -> notes
-
+- Find the main table. Map columns:
+  - "الفحص" / "Test" -> field_name (PREFER ENGLISH KEY IF AVAILABLE)
+  - "النتيجة" / "Result" -> field_value
+  - "الوحدة" / "Unit" -> field_unit
+  - "المعدل الطبيعي" / "Ref Range" -> normal_range
+  
 - CRITICAL:
-  - If a row has an Arabic test name (e.g. "هيموجلوبين") AND an English abbreviation (e.g. "Hb" or "Hemoglobin"), PREFER THE ENGLISH NAME for 'field_name'.
-  - If ONLY Arabic is present, use the Arabic name.
-  - 'field_value' MUST be the actual result number/text from the specific row.
-  - IGNORE section headers that are just category titles (e.g. "HEMATOLOGY") if they have no result.
+  - If a test has English (e.g. "FBS") and Arabic, use the English name.
+  - "field_value" must be the result column.
 
 STEP 3: JSON STRUCTURE
 Return a SINGLE JSON object. 
@@ -426,7 +420,7 @@ DO NOT include "header_rows" or any extra fields.
 DO NOT include markdown formatting (```json).
 
 {{
-  "patient_name": "string (The extracted name)",
+  "patient_name": "string",
   "patient_age": "string",
   "patient_gender": "string (Male/Female)",
   "report_date": "YYYY-MM-DD",
