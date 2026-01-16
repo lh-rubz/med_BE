@@ -449,12 +449,18 @@ STEP 3: MEDICAL VALIDATION (SANITY CHECKS)
 STEP 4: JSON STRUCTURE
 Return a SINGLE JSON object:
 {{
-  "patient_name": "string (copied exactly from اسم المريض / Patient Name row, or empty)",
+  "header_rows": [
+    {{
+      "label": "string (header label exactly as seen, e.g. \"اسم المريض\")",
+      "value": "string (full text in the corresponding value cell)"
+    }}
+  ],
+  "patient_name": "string (copied from the row derived for patient name)",
   "patient_age": "string (age number, e.g., \"50\")",
   "patient_gender": "string (must match الجنس / Sex row value)",
   "report_date": "YYYY-MM-DD or full timestamp",
   "report_type": "{', '.join(REPORT_TYPES)}",
-  "doctor_names": "string (copied exactly from الطبيب / Doctor row, or empty)",
+  "doctor_names": "string (copied from the row derived for doctor name, or empty)",
   "medical_data": [
     {{
       "field_name": "string",
@@ -508,12 +514,31 @@ Return a SINGLE JSON object:
                     print(f"⚠️ JSON Parsing Failed for Image {idx}: {json_err}")
                     print(f"RAW RESPONSE: {response_text}")
                 
-                # Check for Non-Medical Report Flag
+                header_rows = extracted_data.get('header_rows') or []
+                if isinstance(header_rows, list):
+                    for row in header_rows:
+                        try:
+                            label = str(row.get('label', '')).strip()
+                            value = str(row.get('value', '')).strip()
+                        except Exception:
+                            continue
+                        if not label or not value:
+                            continue
+                        label_lower = label.lower()
+                        if 'اسم المريض' in label or 'patient name' in label_lower:
+                            extracted_data['patient_name'] = value
+                        elif 'الجنس' in label or 'sex' in label_lower:
+                            extracted_data['patient_gender'] = value
+                        elif 'تاريخ الميلاد' in label or 'dob' in label_lower or 'date of birth' in label_lower:
+                            extracted_data['patient_dob'] = value
+                        elif 'الطبيب' in label or 'doctor' in label_lower or 'physician' in label_lower:
+                            extracted_data['doctor_names'] = value
+                        elif 'تاريخ الطلب' in label or 'order date' in label_lower or 'request date' in label_lower:
+                            extracted_data['report_date'] = value
+
                 if extracted_data.get('is_medical_report') is False:
                      error_msg = extracted_data.get('reason', 'The uploaded file does not appear to be a valid medical report.')
                      print(f"⛔ Rejected as non-medical: {error_msg}")
-                     # yield f"data: {json.dumps({'error': error_msg, 'code': 'INVALID_DOCUMENT_TYPE'})}\n\n"
-                     # SKIP this page instead of aborting the whole process
                      continue
                 
                 if extracted_data.get('medical_data'):
