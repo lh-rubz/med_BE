@@ -25,6 +25,28 @@ from ollama import Client
 # Create namespace
 vlm_ns = Namespace('vlm', description='VLM and Report operations')
 
+# Helper function to normalize gender values
+def normalize_gender(gender_value):
+    """Convert any gender representation to English Male/Female."""
+    if not gender_value:
+        return ''
+    gender_str = str(gender_value).strip()
+    gender_lower = gender_str.lower()
+    
+    # Male variations
+    if gender_lower in ['male', 'm', 'ذكر', 'ذكر ', ' ذكر']:
+        return 'Male'
+    # Female variations
+    elif gender_lower in ['female', 'f', 'أنثى', 'انثى', 'أنثي', 'انثي']:
+        return 'Female'
+    # If it's already correct, return it
+    elif gender_str in ['Male', 'Female']:
+        return gender_str
+    # Unknown format
+    else:
+        print(f"⚠️ Unknown gender format: '{gender_str}' - clearing")
+        return ''
+
 # Standardized Report Types
 REPORT_TYPES = [
     "Complete Blood Count (CBC)",
@@ -476,18 +498,13 @@ class ChatResource(Resource):
                             json_str = response_text[start_idx:end_idx+1]
                             personal_data = json.loads(json_str)
                             
-                            # POST-PROCESSING: Fix gender if model returned Arabic text
-                            gender = personal_data.get('patient_gender', '')
-                            if gender:
-                                if gender in ['ذكر', 'ذكر ', ' ذكر', 'male', 'm', 'M']:
-                                    personal_data['patient_gender'] = 'Male'
-                                    print(f"🔧 Fixed gender: '{gender}' -> 'Male'")
-                                elif gender in ['أنثى', 'انثى', 'أنثي', 'انثي', 'female', 'f', 'F']:
-                                    personal_data['patient_gender'] = 'Female'
-                                    print(f"🔧 Fixed gender: '{gender}' -> 'Female'")
-                                elif gender not in ['Male', 'Female']:
-                                    print(f"⚠️ Invalid gender value: '{gender}' - clearing")
-                                    personal_data['patient_gender'] = ''
+                            # POST-PROCESSING: Normalize gender
+                            original_gender = personal_data.get('patient_gender', '')
+                            if original_gender:
+                                normalized_gender = normalize_gender(original_gender)
+                                if normalized_gender != original_gender:
+                                    print(f"🔧 Normalized gender: '{original_gender}' -> '{normalized_gender}'")
+                                personal_data['patient_gender'] = normalized_gender
                             
                             print(f"✅ Personal info extracted for Page {idx} (Pass {correction_pass})")
                     except Exception as json_err:
@@ -610,7 +627,14 @@ class ChatResource(Resource):
                         if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
                             json_str = response_text[start_idx:end_idx+1]
                             medical_extracted = json.loads(json_str)
-                            print(f"✅ Medical JSON parsed (Pass {medical_correction_pass})")
+                            
+                            # Debug: Count items
+                            item_count = len(medical_extracted.get('medical_data', []))
+                            print(f"✅ Medical JSON parsed (Pass {medical_correction_pass}): {item_count} items")
+                            
+                            # If very few items and not last pass, force analysis
+                            if item_count > 0 and item_count < 5 and medical_correction_pass < max_medical_corrections:
+                                print(f"⚠️ WARNING: Only {item_count} medical items extracted - this seems low")
                         else:
                             print(f"⚠️ No JSON found (Pass {medical_correction_pass})")
                     except Exception as json_err:
@@ -775,7 +799,7 @@ class ChatResource(Resource):
             # Merge personal info: Use the dedicated personal_info extraction (Step 1)
             # This is more accurate than trying to extract it with medical data
             personal_name = str(personal_data.get('patient_name', '') or '').strip()
-            personal_gender = str(personal_data.get('patient_gender', '') or '').strip()
+            personal_gender = normalize_gender(personal_data.get('patient_gender', ''))
             personal_age = str(personal_data.get('patient_age', '') or '').strip()
             personal_dob = str(personal_data.get('patient_dob', '') or '').strip()
             personal_doctor = str(personal_data.get('doctor_names', '') or '').strip()
@@ -783,7 +807,7 @@ class ChatResource(Resource):
             
             # Also extract from medical_data prompt as fallback
             fallback_name = str(extracted_data.get('patient_name', '') or '').strip()
-            fallback_gender = str(extracted_data.get('patient_gender', '') or '').strip()
+            fallback_gender = normalize_gender(extracted_data.get('patient_gender', ''))
             fallback_age = str(extracted_data.get('patient_age', '') or '').strip()
             fallback_dob = str(extracted_data.get('patient_dob', '') or '').strip()
             fallback_doctor = str(extracted_data.get('doctor_names', '') or '').strip()
@@ -821,15 +845,11 @@ class ChatResource(Resource):
                     patient_info['patient_name'] = new_name
                     print(f"✅ Updated patient_name: {new_name}")
                 
-            # Gender: only accept "Male" or "Female" as normalized
-            if new_gender:
-                gender_lower = new_gender.lower()
-                if gender_lower in ['male', 'ذكر', 'm'] and (not current_gender or current_gender != 'Male'):
-                    patient_info['patient_gender'] = 'Male'
-                    print(f"✅ Updated patient_gender: Male")
-                elif gender_lower in ['female', 'أنثى', 'انثى', 'f'] and (not current_gender or current_gender != 'Female'):
-                    patient_info['patient_gender'] = 'Female'
-                    print(f"✅ Updated patient_gender: Female")
+            # Gender: At this point new_gender should already be normalized to "Male" or "Female"
+            if new_gender in ['Male', 'Female']:
+                if not current_gender or current_gender != new_gender:
+                    patient_info['patient_gender'] = new_gender
+                    print(f"✅ Updated patient_gender: {new_gender}")
                 
             # Age: validate it's a reasonable number
             if new_age:

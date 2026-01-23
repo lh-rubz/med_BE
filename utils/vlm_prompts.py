@@ -120,16 +120,22 @@ You receive a medical report IMAGE (page {idx}/{total_pages}).
 Primary goal: Extract LAB DATA with PERFECT ROW ALIGNMENT. Do NOT extract patient info.
 Return exactly one JSON object (no markdown) with medical_data array.
 
-⚠️ CRITICAL: Medical reports typically contain 10-50 test rows. Extract EVERY SINGLE ROW.
-If you only extract 2-5 rows, you are MISSING DATA. Scan the ENTIRE table from top to bottom.
+🚨 CRITICAL EXTRACTION REQUIREMENT 🚨
+Medical lab reports contain 15-50 test rows. You MUST extract EVERY SINGLE ROW.
+DO NOT STOP after 2-5 rows - this is a CRITICAL ERROR.
+
+BEFORE RETURNING, COUNT YOUR EXTRACTED ROWS:
+- If you have < 10 rows, you FAILED. Go back and extract more.
+- Look at the table in the image: How many rows do you see? 20? 30? 40?
+- Your medical_data array MUST have that many entries.
 
 CRITICAL RULES
 1) Row independence: All values in one entry come from the SAME row. Never mix rows.
 2) Empty is better than wrong: If uncertain, use "".
 3) Language: Handle Arabic (RTL) and English (LTR). Use the clearer test name.
 4) Units must be medical abbreviations, not symbols (*, -, .).
-5) Duplicate range red flag: If two different tests share the EXACT same range, re-check alignment.
-6) EXTRACT EVERY ROW: Don't stop after a few rows. Continue until you reach the end of the table.
+5) Normal ranges: Read EXACTLY what's in the image. Do NOT invent or guess ranges.
+6) EXTRACT EVERY ROW: Start at row 1, go to row 2, row 3... until you reach the LAST row at the bottom of the table.
 
 HOW TO READ TABLES
 - Typical headers Arabic: "الفحص", "النتيجة", "الوحدة", "المعدل الطبيعي".
@@ -162,10 +168,14 @@ RED FLAGS that indicate misalignment (REDO the row if found):
 - Units don't match the test type (e.g., "%" for RBC which should be M/uL or cells/L)
 
 VALIDATION BEFORE RETURN
+- COUNT YOUR ROWS: How many items are in your medical_data array? Is it at least 15-20? If not, you missed data!
 - Every row has field_name (no empty field_names).
 - Every row has field_value (skip rows with empty/blank values).
 - Units are not symbols and not numbers.
-- If range present, it contains numbers (if range truly absent, leave empty; never invent).
+- CRITICAL NORMAL RANGES: Read the EXACT range from the image. Do NOT guess or invent ranges.
+  * Example: If image shows "(10-15)", your normal_range MUST be "(10-15)"
+  * Do NOT use ranges from your knowledge (like "(0-0.75)" for platelet width)
+  * If you cannot read the range clearly, use "" - NEVER invent a range
 - CRITICAL: Normal_range must NOT look like a value, and field_value must NOT look like a unit or range.
 - Duplicate ranges allowed when units differ or the source shows the same range; re-check only if same unit and the range clearly belongs to another row.
 - Common sense: WBC ~4-11 K/uL; RBC ~4-5.5 M/uL; Hgb ~12-16 g/dL. If wildly off, re-check.

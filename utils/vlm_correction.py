@@ -117,12 +117,12 @@ def analyze_extraction_issues(extracted_data: Dict[str, Any], original_image_con
     if 'medical_data' in extracted_data and isinstance(extracted_data['medical_data'], list):
         # Check if very few items extracted (likely missing data)
         item_count = len(extracted_data['medical_data'])
-        if item_count > 0 and item_count < 5:
+        if item_count > 0 and item_count < 10:
             issues.append({
-                'type': 'possibly_incomplete_extraction',
+                'type': 'incomplete_extraction_critical',
                 'field': 'medical_data',
                 'value': f'{item_count} items',
-                'reason': f'Only {item_count} medical test(s) extracted. Medical reports typically have 10-30 tests. Scan the ENTIRE table carefully - you may have missed rows.'
+                'reason': f'CRITICAL: Only {item_count} medical test(s) extracted! Medical reports typically have 15-50 tests. You are missing most of the data. COUNT the rows in the table image - there are likely 20+ rows. Extract EVERY SINGLE ROW from top to bottom.'
             })
         
         for idx, item in enumerate(extracted_data['medical_data']):
@@ -187,6 +187,31 @@ def analyze_extraction_issues(extracted_data: Dict[str, Any], original_image_con
                             })
                 except:
                     pass
+            
+            # Check for suspicious normal ranges that look hallucinated
+            # Common real ranges: (4-11), (12-16), (0-130), (150-450)
+            # Suspicious: (0-0.75), (0.1-0.5), very small decimals that don't match test type
+            if test_range:
+                # Extract numbers from range
+                range_numbers = re.findall(r'[\d.]+', test_range)
+                if len(range_numbers) >= 2:
+                    try:
+                        range_min = float(range_numbers[0])
+                        range_max = float(range_numbers[1])
+                        # Check for suspicious very small ranges (< 1) when value is much larger
+                        if test_val and range_max < 1:
+                            val_match = re.search(r'[\d.]+', test_val)
+                            if val_match:
+                                val_num = float(val_match.group())
+                                if val_num > 10:  # Value is 10+ but range max is < 1
+                                    issues.append({
+                                        'type': 'suspicious_normal_range',
+                                        'field': f'medical_data[{idx}].normal_range',
+                                        'value': f"{test_name}: value={test_val}, range={test_range}",
+                                        'reason': f'Suspicious: {test_name} has value={test_val} but tiny range={test_range}. This range looks wrong/hallucinated. Re-read the ACTUAL range from the report image.'
+                                    })
+                    except (ValueError, IndexError):
+                        pass
             
             # Check for misalignment patterns
             if '%' in test_val and test_unit and test_unit not in ['%']:
@@ -253,15 +278,21 @@ ISSUES DETECTED:
 
 YOUR JOB:
 1. Look at the actual report image layout, structure, and language
-2. Identify WHERE exactly the correct information appears in THIS specific report
-3. Enhance the original prompt by adding SPECIFIC INSTRUCTIONS for THIS report, including:
+2. COUNT THE TOTAL NUMBER OF ROWS in the medical data table (very important!)
+3. Identify WHERE exactly the correct information appears in THIS specific report
+4. Enhance the original prompt by adding SPECIFIC INSTRUCTIONS for THIS report, including:
+   - HOW MANY ROWS are in the table (count them carefully: 15? 20? 30? 40?)
+   - Where the table starts and ends
    - Exact locations where patient name appears (e.g., "top-right corner after 'اسم المريض:'")
    - Exact locations where doctor name appears (e.g., "bottom-left signature block", "footer after 'Dr.'")
    - Report language (Arabic/English/bilingual) and which side has which language
    - Specific table structure and column positions for medical data
+   - Where normal ranges appear (which column, are they in parentheses?)
    - Any unique formatting patterns in THIS report
-4. Add specific corrections for each detected issue
-5. Make the prompt PERSONALIZED for THIS specific report's layout and structure
+5. Add specific corrections for each detected issue:
+   - If only 2-5 rows extracted but you see 20+ rows, emphasize: "This table has X rows, extract ALL X rows"
+   - If normal ranges were wrong, specify: "Normal ranges are in column Y, read them carefully"
+6. Make the prompt PERSONALIZED for THIS specific report's layout and structure
 
 Return a JSON object with:
 {{
@@ -309,18 +340,30 @@ Extract the data again using the enhanced instructions. Return the complete JSON
     # Fallback to original correction approach
     return f"""You are correcting a PREVIOUS EXTRACTION ATTEMPT from this report image (page {idx}/{total_pages}).
 
-CRITICAL: The previous extraction had these ERRORS that must be FIXED:
+🚨 CRITICAL: The previous extraction had these ERRORS that must be FIXED:
 
 {issues_text}
 
-YOUR TASK: Extract the SAME fields again, but CORRECTLY this time.
+YOUR TASK: Extract the data again, CORRECTLY this time.
+
+🚨 CRITICAL REQUIREMENTS:
+1) ROW COUNT: Medical reports have 15-50 rows. COUNT how many rows you see in the table. Extract ALL of them.
+   - If you previously extracted only 2-5 rows, you FAILED. 
+   - Start from the FIRST row and go row by row until the LAST row at the bottom.
+   - Your medical_data array must have at least 15-20 items.
+
+2) NORMAL RANGES: Read the EXACT range from the image. DO NOT INVENT ranges from your knowledge.
+   - If image shows "(10-15)", return "(10-15)" - not "(0-0.75)" or any other value.
+   - If you cannot see the range clearly, use "" - NEVER guess or use memorized ranges.
+
+3) ROW ALIGNMENT: Each entry must use values from the SAME row only.
 
 COMMON MISTAKES TO AVOID:
 1) Patient name: Do NOT extract device names, facility names, or labels. Extract the PERSON'S actual name.
 2) Doctor name: Search signature blocks, footer, header - extract the actual physician name, not a label.
 3) Units: Do NOT use symbols like "*" or "-". Use proper medical abbreviations (mg/dl, g/dL, %, etc.).
 4) Values: Check that values are reasonable for the test. If value is 10x smaller/larger than range, re-check alignment.
-5) When value is outside range: Re-read that row carefully - you likely mixed columns from different rows.
+5) Normal ranges: Use EXACTLY what's in the image - do not use ranges from your training data.
 
 BEFORE RETURNING YOUR ANSWER, VALIDATE:
 1) patient_name: Must be an actual person's name (3+ chars), not a device/facility/label
