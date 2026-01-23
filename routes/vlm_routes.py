@@ -475,6 +475,20 @@ class ChatResource(Resource):
                         if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
                             json_str = response_text[start_idx:end_idx+1]
                             personal_data = json.loads(json_str)
+                            
+                            # POST-PROCESSING: Fix gender if model returned Arabic text
+                            gender = personal_data.get('patient_gender', '')
+                            if gender:
+                                if gender in ['ذكر', 'ذكر ', ' ذكر', 'male', 'm', 'M']:
+                                    personal_data['patient_gender'] = 'Male'
+                                    print(f"🔧 Fixed gender: '{gender}' -> 'Male'")
+                                elif gender in ['أنثى', 'انثى', 'أنثي', 'انثي', 'female', 'f', 'F']:
+                                    personal_data['patient_gender'] = 'Female'
+                                    print(f"🔧 Fixed gender: '{gender}' -> 'Female'")
+                                elif gender not in ['Male', 'Female']:
+                                    print(f"⚠️ Invalid gender value: '{gender}' - clearing")
+                                    personal_data['patient_gender'] = ''
+                            
                             print(f"✅ Personal info extracted for Page {idx} (Pass {correction_pass})")
                     except Exception as json_err:
                         print(f"⚠️ JSON Parsing Failed (Pass {correction_pass}): {json_err}")
@@ -491,7 +505,7 @@ class ChatResource(Resource):
                 print(f"⚠️ Personal info extraction error (Page {idx}): {str(e)}")
                 personal_data = {}
             
-            print(f"📋 Final Personal Info: Name='{personal_data.get('patient_name')}', Doctor='{personal_data.get('doctor_names')}'")
+            print(f"📋 Final Personal Info: Name='{personal_data.get('patient_name')}', Gender='{personal_data.get('patient_gender')}', Doctor='{personal_data.get('doctor_names')}'")
             
             # Step 2: VLM Processing for Medical Data (Native Vision)
             print(f"🤖 Step 2: Extracting medical lab data...")

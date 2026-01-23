@@ -41,9 +41,16 @@ PATIENT NAME (CRITICAL - MUST FIND)
 
 GENDER
 - Arabic labels: "الجنس", "جنس", "النوع", "Gender", "Sex"
-- Arabic values: "ذكر" -> "Male"; "أنثى" -> "Female"
-- English values: normalize to exactly "Male" or "Female"
-- Return: Only "Male", "Female", or ""
+- Arabic values to convert:
+  * "ذكر" (male in Arabic) -> return "Male"
+  * "أنثى" (female in Arabic) -> return "Female"
+  * Any variation like "انثى", "انثي" -> return "Female"
+- English values: 
+  * "Male", "M", "male" -> return "Male"
+  * "Female", "F", "female" -> return "Female"
+- CRITICAL: Your output MUST be ONLY "Male" or "Female" in English, never Arabic text
+- If you see "ذكر" anywhere in the report, check carefully - is this REALLY the patient's gender or is it a label/header?
+- Return: Only "Male", "Female", or "" (if truly not found)
 
 AGE / DOB
 - DOB Arabic labels: "تاريخ الميلاد", "تاريخ الولادة"
@@ -84,7 +91,10 @@ DOCTOR / PHYSICIAN (CRITICAL - SEARCH THOROUGHLY AND AGGRESSIVELY)
 
 SELF-VALIDATION BEFORE RETURNING
 - patient_name: Real person name (3+ chars, not ID/number/facility). Return "" if doubt.
-- patient_gender: Exactly "Male", "Female", or "".
+- patient_gender: Exactly "Male", "Female", or "". NEVER return Arabic text like "ذكر" or "أنثى".
+  * If you extracted "ذكر" convert it to "Male"
+  * If you extracted "أنثى" convert it to "Female"
+  * Check your output - does it say "Male" or "Female" in English? If not, fix it!
 - patient_age: Numeric 1-120 or "".
 - patient_dob: YYYY-MM-DD or "".
 - report_date: YYYY-MM-DD ONLY (no time/timestamp). This field is CRITICAL.
@@ -110,12 +120,16 @@ You receive a medical report IMAGE (page {idx}/{total_pages}).
 Primary goal: Extract LAB DATA with PERFECT ROW ALIGNMENT. Do NOT extract patient info.
 Return exactly one JSON object (no markdown) with medical_data array.
 
+⚠️ CRITICAL: Medical reports typically contain 10-50 test rows. Extract EVERY SINGLE ROW.
+If you only extract 2-5 rows, you are MISSING DATA. Scan the ENTIRE table from top to bottom.
+
 CRITICAL RULES
 1) Row independence: All values in one entry come from the SAME row. Never mix rows.
 2) Empty is better than wrong: If uncertain, use "".
 3) Language: Handle Arabic (RTL) and English (LTR). Use the clearer test name.
 4) Units must be medical abbreviations, not symbols (*, -, .).
 5) Duplicate range red flag: If two different tests share the EXACT same range, re-check alignment.
+6) EXTRACT EVERY ROW: Don't stop after a few rows. Continue until you reach the end of the table.
 
 HOW TO READ TABLES
 - Typical headers Arabic: "الفحص", "النتيجة", "الوحدة", "المعدل الطبيعي".

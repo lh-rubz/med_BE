@@ -52,6 +52,18 @@ def analyze_extraction_issues(extracted_data: Dict[str, Any], original_image_con
                 'reason': f'Extracted value appears to be a device/facility name ("{name}"), not a patient name. Search for actual person name in header.'
             })
     
+    # Check gender issues
+    if 'patient_gender' in extracted_data:
+        gender = str(extracted_data.get('patient_gender', '')).strip()
+        # Gender should ONLY be "Male" or "Female" in English
+        if gender and gender not in ['Male', 'Female', '']:
+            issues.append({
+                'type': 'incorrect_gender_format',
+                'field': 'patient_gender',
+                'value': gender,
+                'reason': f'Gender must be "Male" or "Female" in English, got "{gender}". Convert Arabic: ذكر->Male, أنثى->Female'
+            })
+    
     if 'doctor_names' in extracted_data:
         doctor = str(extracted_data.get('doctor_names', '')).strip()
         if not doctor:
@@ -103,6 +115,16 @@ def analyze_extraction_issues(extracted_data: Dict[str, Any], original_image_con
     
     # Check medical data issues
     if 'medical_data' in extracted_data and isinstance(extracted_data['medical_data'], list):
+        # Check if very few items extracted (likely missing data)
+        item_count = len(extracted_data['medical_data'])
+        if item_count > 0 and item_count < 5:
+            issues.append({
+                'type': 'possibly_incomplete_extraction',
+                'field': 'medical_data',
+                'value': f'{item_count} items',
+                'reason': f'Only {item_count} medical test(s) extracted. Medical reports typically have 10-30 tests. Scan the ENTIRE table carefully - you may have missed rows.'
+            })
+        
         for idx, item in enumerate(extracted_data['medical_data']):
             test_name = str(item.get('field_name', '')).strip()
             test_val = str(item.get('field_value', '')).strip()
