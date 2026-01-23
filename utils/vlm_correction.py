@@ -202,16 +202,89 @@ def analyze_extraction_issues(extracted_data: Dict[str, Any], original_image_con
     }
 
 
-def generate_corrective_prompt(extracted_data: Dict[str, Any], analysis: Dict[str, Any], idx: int, total_pages: int) -> str:
+def generate_prompt_enhancement_request(original_prompt: str, extracted_data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    """
+    Ask the model to enhance and personalize the extraction prompt based on what it saw in the report
+    and what went wrong.
+    """
+    issues_text = "\n".join([
+        f"- {issue['type']}: {issue['reason']}"
+        for issue in analysis.get('issues', [])[:10]
+    ])
+    
+    extracted_summary = json.dumps(extracted_data, indent=2, ensure_ascii=False)[:1000]
+    
+    return f"""You are a prompt engineering expert for medical report extraction.
+
+TASK: Analyze the medical report image you just processed and enhance the extraction prompt to fix specific issues.
+
+ORIGINAL PROMPT:
+{'-'*60}
+{original_prompt[:1500]}...
+{'-'*60}
+
+PREVIOUS EXTRACTION (had errors):
+{extracted_summary}
+
+ISSUES DETECTED:
+{issues_text}
+
+YOUR JOB:
+1. Look at the actual report image layout, structure, and language
+2. Identify WHERE exactly the correct information appears in THIS specific report
+3. Enhance the original prompt by adding SPECIFIC INSTRUCTIONS for THIS report, including:
+   - Exact locations where patient name appears (e.g., "top-right corner after 'اسم المريض:'")
+   - Exact locations where doctor name appears (e.g., "bottom-left signature block", "footer after 'Dr.'")
+   - Report language (Arabic/English/bilingual) and which side has which language
+   - Specific table structure and column positions for medical data
+   - Any unique formatting patterns in THIS report
+4. Add specific corrections for each detected issue
+5. Make the prompt PERSONALIZED for THIS specific report's layout and structure
+
+Return a JSON object with:
+{{
+  "enhanced_prompt": "The complete enhanced extraction prompt with specific instructions for THIS report",
+  "key_observations": [
+    "observation 1 about this report's layout",
+    "observation 2 about where patient name is located",
+    "observation 3 about doctor signature location",
+    "etc."
+  ]
+}}
+
+Be specific about physical locations (top/bottom, left/right, header/footer, margins, signature blocks).
+"""
+
+
+def generate_corrective_prompt(extracted_data: Dict[str, Any], analysis: Dict[str, Any], 
+                               idx: int, total_pages: int, enhanced_prompt: str = None,
+                               original_prompt: str = None) -> str:
     """
     Generate a corrective prompt that highlights what went wrong and tells the model how to fix it.
-    This prompt is used for a second extraction pass to correct errors.
+    Uses enhanced prompt if available, otherwise uses default correction approach.
     """
     issues_text = "\n".join([
         f"- {issue['type'].upper()}: {issue['reason']}"
-        for issue in analysis.get('issues', [])[:10]  # Show first 10 issues
+        for issue in analysis.get('issues', [])[:10]
     ])
     
+    # If we have an enhanced prompt, use it with issue context
+    if enhanced_prompt:
+        return f"""You are re-extracting data from this medical report (page {idx}/{total_pages}) with ENHANCED INSTRUCTIONS.
+
+CRITICAL: The previous extraction had these ERRORS:
+{issues_text}
+
+ENHANCED EXTRACTION INSTRUCTIONS (personalized for THIS report):
+{'-'*60}
+{enhanced_prompt}
+{'-'*60}
+
+FOLLOW THE ENHANCED INSTRUCTIONS CAREFULLY. They are specifically tailored to THIS report's layout and structure.
+
+Extract the data again using the enhanced instructions. Return the complete JSON object with corrected values."""
+    
+    # Fallback to original correction approach
     return f"""You are correcting a PREVIOUS EXTRACTION ATTEMPT from this report image (page {idx}/{total_pages}).
 
 CRITICAL: The previous extraction had these ERRORS that must be FIXED:

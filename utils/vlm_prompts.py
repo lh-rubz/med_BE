@@ -32,6 +32,11 @@ PATIENT NAME (CRITICAL - MUST FIND)
 - Clean: Remove titles like Dr., Mr., Mrs., Prof., د., دكتور, السيد, السيدة, أ.د
 - If TWO names found (one Arabic, one English), use the LONGER/MORE COMPLETE one
 - Validate: 3+ characters, looks like a person's name (NOT: "Patient", "N/A", numbers, facility names)
+- CRITICAL FILTERS - SKIP these (they are NOT patient names):
+  * Any text containing: "facility", "جهاز" (device), "مختبر" (lab), "مرفق", "مستشفى" (hospital), "clinic", "equipment", "laboratory", "centre", "center"
+  * Single words that are place/thing names: "Ramallah", "PHC", "مختبر رمالله", facility codes/IDs
+  * Abbreviations like "PHC", "Lab", "CDC", "WHO" - these are facilities, not patient names
+  * If header shows "Laboratory(Ramallah PHC)" or similar - skip it, find the ACTUAL patient name nearby
 - Return: Original language text or "" if uncertain
 
 GENDER

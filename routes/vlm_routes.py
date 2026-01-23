@@ -19,7 +19,7 @@ from config import ollama_client, Config
 from utils.medical_validator import validate_medical_data, MedicalValidator
 from utils.medical_mappings import add_new_alias
 from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_personal_info_prompt
-from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt
+from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt, generate_prompt_enhancement_request
 from ollama import Client
 
 # Create namespace
@@ -379,6 +379,10 @@ class ChatResource(Resource):
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                 image_format = image_info['format']
                 
+                # Variables for enhanced prompt
+                enhanced_prompt = None
+                key_observations = []
+                
                 # ITERATIVE CORRECTION LOOP: Keep fixing until no errors
                 while correction_pass < max_correction_passes:
                     correction_pass += 1
@@ -388,17 +392,63 @@ class ChatResource(Resource):
                         # First pass: Use main prompt
                         prompt_to_use = personal_info_prompt
                     else:
-                        # Subsequent passes: Use corrective prompt
+                        # Subsequent passes: Analyze and enhance
                         analysis = analyze_extraction_issues(personal_data)
                         if not analysis['has_issues']:
                             print(f"✅ No issues found in personal info - extraction complete!")
                             break
                         
-                        print(f"⚠️ Found {analysis['issue_count']} issue(s), running corrective pass...")
+                        print(f"⚠️ Found {analysis['issue_count']} issue(s), generating enhanced prompt...")
                         for issue in analysis['issues'][:5]:
                             print(f"   - {issue['type']}: {issue['reason']}")
                         
-                        prompt_to_use = generate_corrective_prompt(personal_data, analysis, idx, total_pages)
+                        # On second pass, ask model to enhance the prompt for this specific report
+                        if correction_pass == 2 and not enhanced_prompt:
+                            print(f"🧠 Generating report-specific enhanced prompt...")
+                            enhancement_request = generate_prompt_enhancement_request(
+                                personal_info_prompt, personal_data, analysis
+                            )
+                            
+                            enhancement_content = [
+                                {'type': 'text', 'text': enhancement_request},
+                                {
+                                    'type': 'image_url',
+                                    'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                                }
+                            ]
+                            
+                            try:
+                                enhancement_completion = ollama_client.chat.completions.create(
+                                    model=Config.OLLAMA_MODEL,
+                                    messages=[{'role': 'user', 'content': enhancement_content}],
+                                    temperature=0.2,
+                                    response_format={"type": "json_object"},
+                                    max_tokens=1500,
+                                    timeout=60.0
+                                )
+                                enhancement_response = enhancement_completion.choices[0].message.content.strip()
+                                
+                                # Parse enhancement response
+                                start_idx = enhancement_response.find('{')
+                                end_idx = enhancement_response.rfind('}')
+                                if start_idx != -1 and end_idx != -1:
+                                    enhancement_data = json.loads(enhancement_response[start_idx:end_idx+1])
+                                    enhanced_prompt = enhancement_data.get('enhanced_prompt', '')
+                                    key_observations = enhancement_data.get('key_observations', [])
+                                    
+                                    print(f"✅ Enhanced prompt generated!")
+                                    print(f"📝 Key observations:")
+                                    for obs in key_observations[:3]:
+                                        print(f"   - {obs}")
+                            except Exception as enh_err:
+                                print(f"⚠️ Prompt enhancement failed: {enh_err}, using standard correction")
+                        
+                        # Generate corrective prompt (uses enhanced prompt if available)
+                        prompt_to_use = generate_corrective_prompt(
+                            personal_data, analysis, idx, total_pages, 
+                            enhanced_prompt=enhanced_prompt,
+                            original_prompt=personal_info_prompt
+                        )
                     
                     content = [
                         {'type': 'text', 'text': prompt_to_use},
@@ -447,70 +497,144 @@ class ChatResource(Resource):
             print(f"🤖 Step 2: Extracting medical lab data...")
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Extracting medical values from page {idx}...'})}\n\n"
             
-            prompt_text = get_main_vlm_prompt(idx, total_pages)
+            # Medical data correction variables
+            medical_correction_pass = 0
+            max_medical_corrections = 3
+            medical_enhanced_prompt = None
+            medical_extracted = {}
+            
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                 image_format = image_info['format']
                 
-                content = [
-                    {'type': 'text', 'text': prompt_text},
-                    {
-                        'type': 'image_url',
-                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                    }
-                ]
-                
-                completion = ollama_client.chat.completions.create(
-                    model=Config.OLLAMA_MODEL,
-                    messages=[{'role': 'user', 'content': content}],
-                    temperature=0.1,
-                    response_format={"type": "json_object"},
-                    max_tokens=2500,
-                    timeout=120.0
-                )
-                response_text = completion.choices[0].message.content.strip()
-                print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
-                
-                extracted_data = {}
-                for attempt in range(2):
-                    try:
-                        import re
-                        start_idx = response_text.find('{')
-                        end_idx = response_text.rfind('}')
-                        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                            json_str = response_text[start_idx:end_idx+1]
-                            extracted_data = json.loads(json_str)
-                            print(f"✅ JSON extracted for Image {idx} (attempt {attempt+1})")
-                        else:
-                            print(f"⚠️ No JSON brackets found in response for Image {idx} (attempt {attempt+1})")
-                            print(f"RAW: {response_text[:200]}...")
-                    except Exception as json_err:
-                        print(f"⚠️ JSON Parsing Failed for Image {idx} (attempt {attempt+1}): {json_err}")
-                        print(f"RAW RESPONSE: {response_text}")
+                # Medical data correction loop
+                while medical_correction_pass < max_medical_corrections:
+                    medical_correction_pass += 1
+                    print(f"\n🔄 Medical Data Extraction Pass {medical_correction_pass}/{max_medical_corrections}")
                     
-                    if extracted_data.get('medical_data') or attempt == 1:
-                        break
+                    if medical_correction_pass == 1:
+                        # First pass: Use main prompt
+                        prompt_text = get_main_vlm_prompt(idx, total_pages)
+                    else:
+                        # Analyze extracted medical data
+                        analysis = analyze_extraction_issues(medical_extracted)
+                        if not analysis['has_issues']:
+                            print(f"✅ No issues in medical data - extraction complete!")
+                            break
+                        
+                        print(f"⚠️ Found {analysis['issue_count']} issue(s) in medical data...")
+                        for issue in analysis['issues'][:5]:
+                            print(f"   - {issue['type']}: {issue['reason']}")
+                        
+                        # On second pass, generate enhanced prompt
+                        if medical_correction_pass == 2 and not medical_enhanced_prompt:
+                            print(f"🧠 Generating enhanced medical extraction prompt...")
+                            original_medical_prompt = get_main_vlm_prompt(idx, total_pages)
+                            enhancement_request = generate_prompt_enhancement_request(
+                                original_medical_prompt, medical_extracted, analysis
+                            )
+                            
+                            enhancement_content = [
+                                {'type': 'text', 'text': enhancement_request},
+                                {
+                                    'type': 'image_url',
+                                    'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                                }
+                            ]
+                            
+                            try:
+                                enhancement_completion = ollama_client.chat.completions.create(
+                                    model=Config.OLLAMA_MODEL,
+                                    messages=[{'role': 'user', 'content': enhancement_content}],
+                                    temperature=0.2,
+                                    response_format={"type": "json_object"},
+                                    max_tokens=1500,
+                                    timeout=60.0
+                                )
+                                enhancement_response = enhancement_completion.choices[0].message.content.strip()
+                                
+                                start_idx = enhancement_response.find('{')
+                                end_idx = enhancement_response.rfind('}')
+                                if start_idx != -1 and end_idx != -1:
+                                    enhancement_data = json.loads(enhancement_response[start_idx:end_idx+1])
+                                    medical_enhanced_prompt = enhancement_data.get('enhanced_prompt', '')
+                                    print(f"✅ Medical enhanced prompt generated!")
+                            except Exception as enh_err:
+                                print(f"⚠️ Medical prompt enhancement failed: {enh_err}")
+                        
+                        # Generate corrective prompt
+                        prompt_text = generate_corrective_prompt(
+                            medical_extracted, analysis, idx, total_pages,
+                            enhanced_prompt=medical_enhanced_prompt,
+                            original_prompt=get_main_vlm_prompt(idx, total_pages)
+                        )
                     
-                    print(f"🔁 Retrying extraction for Image {idx} with table-focused prompt...")
-                    table_only_prompt = get_table_retry_prompt(idx, total_pages)
+                    # Execute extraction with current prompt
                     content = [
-                        {'type': 'text', 'text': table_only_prompt},
+                        {'type': 'text', 'text': prompt_text},
                         {
                             'type': 'image_url',
                             'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
                         }
                     ]
+                    
                     completion = ollama_client.chat.completions.create(
                         model=Config.OLLAMA_MODEL,
                         messages=[{'role': 'user', 'content': content}],
                         temperature=0.1,
                         response_format={"type": "json_object"},
                         max_tokens=2500,
-                        timeout=90.0
+                        timeout=120.0
                     )
                     response_text = completion.choices[0].message.content.strip()
-                    print(f"🔍 RAW RESPONSE (retry) for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
+                    print(f"🔍 RAW RESPONSE (Pass {medical_correction_pass}):\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
+                    
+                    # Parse response
+                    try:
+                        start_idx = response_text.find('{')
+                        end_idx = response_text.rfind('}')
+                        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                            json_str = response_text[start_idx:end_idx+1]
+                            medical_extracted = json.loads(json_str)
+                            print(f"✅ Medical JSON parsed (Pass {medical_correction_pass})")
+                        else:
+                            print(f"⚠️ No JSON found (Pass {medical_correction_pass})")
+                    except Exception as json_err:
+                        print(f"⚠️ JSON parsing failed (Pass {medical_correction_pass}): {json_err}")
+                        if medical_correction_pass == 1:
+                            # Retry with table-focused prompt
+                            print(f"🔁 Retrying with table-focused prompt...")
+                            prompt_text = get_table_retry_prompt(idx, total_pages)
+                            content = [
+                                {'type': 'text', 'text': prompt_text},
+                                {
+                                    'type': 'image_url',
+                                    'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                                }
+                            ]
+                            completion = ollama_client.chat.completions.create(
+                                model=Config.OLLAMA_MODEL,
+                                messages=[{'role': 'user', 'content': content}],
+                                temperature=0.1,
+                                response_format={"type": "json_object"},
+                                max_tokens=2500,
+                                timeout=90.0
+                            )
+                            response_text = completion.choices[0].message.content.strip()
+                            try:
+                                start_idx = response_text.find('{')
+                                end_idx = response_text.rfind('}')
+                                if start_idx != -1 and end_idx != -1:
+                                    medical_extracted = json.loads(response_text[start_idx:end_idx+1])
+                            except:
+                                pass
                 
+                # Use the final extracted medical data
+                extracted_data = medical_extracted
+                
+            except Exception as e:
+                print(f"⚠️ Medical data extraction error (Page {idx}): {str(e)}")
+                extracted_data = {}
 
 
 
