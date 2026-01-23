@@ -675,7 +675,7 @@ STEP F: Calculate is_normal (ONLY when you have BOTH value AND range)
 2. normal_range is NOT empty AND contains a numeric range
 
 Decision tree:
-"""
+            """
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                 image_format = image_info['format']
