@@ -387,29 +387,30 @@ class ChatResource(Resource):
             patient_prompt = f"""You are a specialized Medical Record Clerk. Your ONLY task is to extract Patient Demographics and Header Info from this page ({idx}/{total_pages}).
 Do NOT extract medical test results yet.
 
-⚠️ CRITICAL RULES FOR ACCURACY:
+⚠️ **HEADER STRUCTURE ANALYSIS**:
+- Look at the **Top of the Page**.
+- Medical reports often have **Two Header Boxes** (Left & Right) or a Grid.
+- **Left Side/Box**: Often contains **Doctor Name** (Dr., Physician, Referred By, Name of Clinic).
+- **Right Side/Box**: Often contains **Patient Details** (Name, Age, ID).
+
+⚠️ CRITICAL RULES:
 1. **Patient Name (اسم المريض)**:
-   - Look for "Patient Name", "Name", "المريض", "اسم المريض".
-   - **ARABIC NAMES**: If the name is in Arabic (e.g., "رئيسة"), transcribe it EXACTLY. Do NOT change it to a similar looking name (like "نزيهة").
-   - If both Arabic and English are present, prefer the one that is clearer.
-2. **Gender (الجنس)**:
-   - "أنثى" / "انثى" = "Female".
-   - "ذكر" = "Male".
-   - **VERIFY**: Look at the text. Do not guess.
+   - Extract "Patient Name", "Name", "المريض".
+   - **Arabic Names**: Transcribe EXACTLY (e.g., "رئيسة" not "نزيهة").
+2. **Doctor Name (الطبيب/المحول)**:
+   - **SEARCH THE LEFT HEADER BOX**.
+   - Look for: "Dr.", "Doctor", "Physician", "Referred By", "الطبيب", "المحول", "اسم الطبيب".
+   - Example: "Jihad Al-Amleh", "Dr. Ahmad".
 3. **DOB vs Age**:
-   - Extract "Date of Birth" / "تاريخ الميلاد" exactly (e.g., "01/05/1975").
-   - **Priority**: Trust DOB over Age. If DOB is 1975, Age is ~50.
-4. **Doctor (الطبيب)**:
-   - Look for "Doctor", "Dr.", "الطبيب", "المحول".
-   - It is often in the LEFT table or Header.
+   - Priority: **DOB** (Date of Birth). Calculate Age from DOB if needed.
 
 OUTPUT JSON ONLY:
 {{
-  "patient_name": "Exact Name Found",
+  "patient_name": "Exact Name",
   "patient_gender": "Male/Female",
   "patient_dob": "DD/MM/YYYY",
   "patient_age": "Number",
-  "doctor_names": "Doctor Name",
+  "doctor_names": "Doctor Name Found in Header",
   "report_date": "YYYY-MM-DD",
   "report_type": "Lab Report"
 }}
@@ -450,31 +451,35 @@ OUTPUT JSON ONLY:
             print(f"🧪 Step 1.2: Extracting Medical Table Data (Page {idx})...")
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Extracting test results from page {idx}...'})}\n\n"
             
-            table_prompt = f"""You are a genius Medical AI specializing in analyzing complex, handwritten, or skewed lab reports.
-Your task is to extract the MEDICAL RESULTS TABLE from Page {idx}/{total_pages} with 100% precision.
+            table_prompt = f"""You are a "Smart Scanner" Medical AI. Your goal is 100% VISUAL ACCURACY.
+Scan the MEDICAL RESULTS TABLE on Page {idx}/{total_pages} line-by-line.
 
-⚠️ ROW-BY-ROW EXTRACTION PROTOCOL (Prevent Swapping):
-1. **Visualize Rows**: Draw an invisible line across each row.
-2. **Strict Alignment**: For every "Test Name", read the value strictly to its RIGHT in the same row.
-   - **NEVER** take a value from the row above or below.
-3. **Empty/Symbol Handling**:
-   - If a Result cell contains "*", "-", "--", "—", or is blank -> Output "" (Empty String).
-4. **Ranges**:
-   - Extract the Normal Range exactly as written for that row.
-   - If the cell is empty or has '*', output "".
+⚠️ **STRICT SCANNING PROTOCOL (Line-by-Line)**:
+1. **Identify the Grid**: Locate the main table with Test Name, Result, Unit, Range.
+2. **Read Row by Row**:
+   - Start at the FIRST test. Read horizontally.
+   - **DO NOT JUMP ROWS**.
+   - **DO NOT GUESS**.
+3. **Empty / Star (*) Handling**:
+   - Look at the "Result" column for the current row.
+   - If it is BLANK, contains `*`, `-`, or just whitespace: **VALUE IS EMPTY ("")**.
+   - **CRITICAL**: Do NOT take the number from the row above or below. If it's empty, IT IS EMPTY.
+4. **Normal Range**:
+   - Extract the text EXACTLY as printed (e.g., "13.0-17.0").
+   - Do NOT invent numbers. If it's "-", return "".
 
-⚠️ IMPORTANT: Replace placeholders with ACTUAL text from the image.
-- Do NOT output "Test Name" or "Result".
-- Extract the real values (e.g., "Hemoglobin", "14.5").
+⚠️ **DATA CLEANING**:
+- If a row has NO result and NO range (just a header or empty line), **SKIP IT**.
+- Only return rows that contain actual medical test data.
 
 OUTPUT JSON ONLY:
 {{
   "medical_data": [
     {{
-      "field_name": "Actual Test Name (e.g. Hemoglobin)",
-      "field_value": "Actual Result (e.g. 13.5 or \"\")",
-      "field_unit": "Unit (e.g. g/dL)",
-      "normal_range": "Range (e.g. 12-16 or \"\")",
+      "field_name": "Exact Test Name (e.g. WBC)",
+      "field_value": "Exact Result (e.g. 5.2) or \"\"",
+      "field_unit": "Unit",
+      "normal_range": "Range or \"\"",
       "is_normal": true/false/null,
       "category": "Section Name"
     }}
