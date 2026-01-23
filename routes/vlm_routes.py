@@ -368,251 +368,313 @@ class ChatResource(Resource):
             print(f"🤖 Step 1: Structuring data with Qwen2-VL (native vision)...")
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Extracting medical values from page {idx}...'})}\n\n"
             
-            prompt_text = f"""You are an expert medical data digitizer.
+        prompt_text = f"""You are an expert medical data digitizer specializing in Arabic and English medical reports.
 
 You receive a medical report IMAGE (page {idx}/{total_pages}). The report may be:
-- Arabic, English, or mixed
+- Arabic, English, or mixed language
 - Printed, scanned, rotated, or low quality
 - With header tables, main tables, lines, or free text
+- From various labs/hospitals with different formats
 
-Your job is to read the WHOLE image carefully and return a single JSON object with strictly correct values.
+Your job is to read the ENTIRE image carefully and return a single JSON object with strictly correct values.
 
-GENERAL RULES:
-- Always read values exactly from the report; never guess or correct.
-- If a field is missing, blurred, or not clearly present, return an empty string "" for it.
-- Never invent a name, date, gender, age, doctor, or result.
-- If multiple candidates exist, choose the one closest to the main patient header.
-- Do not copy label words as values (for example: "اسم المريض", "Patient Name").
-- CRITICAL: Each test result row is independent. NEVER mix values from different rows or columns.
+═══════════════════════════════════════════════════════════════════
+CRITICAL FOUNDATION RULES (READ FIRST!)
+═══════════════════════════════════════════════════════════════════
 
-STEP 1: PATIENT HEADER READING (MANDATORY - MUST EXTRACT!)
-You MUST extract patient information from the header tables. This is the FIRST priority!
+1. ACCURACY OVER COMPLETION:
+   - Read values EXACTLY as written - never guess, assume, or auto-correct
+   - If ANY field is missing, blurred, or unclear → return empty string ""
+   - Never invent: names, dates, genders, ages, doctors, or test results
+   - Empty/uncertain is ALWAYS better than wrong
 
-SCAN THE ENTIRE IMAGE for header tables. Look at the TOP of the report first, then check sides.
+2. LANGUAGE HANDLING:
+   - Names: Keep in original language (Arabic names in Arabic, English in English)
+   - Test names: Prefer English if available, otherwise use Arabic
+   - Values: Always use numbers and standard units (numeric values only)
+   - Gender: Always normalize to "Male" or "Female" (English)
 
-CRITICAL: Distinguish between PATIENT information table and REQUEST/DOCTOR information table!
-- PATIENT table (RIGHT side usually): Contains "اسم المريض", "رقم المريض", "الجنس", "تاريخ الميلاد", "رقم الهوية"
-- REQUEST/DOCTOR table (LEFT side usually): Contains "تاريخ الطلب", "رقم الطلب", "الطبيب", "التأمين"
-- These are TWO SEPARATE TABLES! Do NOT mix them!
+3. TABLE READING DISCIPLINE:
+   - Each row is INDEPENDENT - never mix values between rows
+   - Each cell belongs to ONE specific row - trace horizontal lines
+   - Empty cells stay empty - don't borrow from other rows/columns
+   - If unsure which column a value belongs to, mark as ""
 
-TABLE STRUCTURE - How to read:
-- Tables have rows and columns
-- Each row has: LABEL column + VALUE column
-- In the PATIENT table, find the row with label "اسم المريض" -> its VALUE column = patient name
-- In the PATIENT table, find the row with label "الجنس" -> its VALUE column = gender
-- Match each label to its VALUE in THE SAME ROW
+═══════════════════════════════════════════════════════════════════
+STEP 1: UNDERSTAND THE REPORT LAYOUT
+═══════════════════════════════════════════════════════════════════
 
-- Patient Name (REQUIRED - MUST EXTRACT FROM RIGHT TABLE ONLY!):
-  - Look for RIGHT table with labels: "اسم المريض", "رقم المريض", "الجنس", "تاريخ الميلاد"
-  - This is the PATIENT information table (usually on the RIGHT side of the page)
-  - Find the row where label = "اسم المريض" (Patient Name)
-  - Read the VALUE in the same row (usually in adjacent column to the right)
-  - Extract the VALUE only (the actual name), remove any prefixes like "Patient Name:"
-  - Examples: 
-    * If table shows: Left column "اسم المريض", Right column "رئيسة خضر طالب خطيب" -> extract "رئيسة خضر طالب خطيب"
-    * If you see "اسم المريض: رئيسة خضر طالب خطيب" -> extract "رئيسة خضر طالب خطيب"
-  - CRITICAL: Patient name is in the RIGHT table (with "رقم المريض", "الجنس", etc.)
-  - CRITICAL: Doctor name is in the LEFT table (with "تاريخ الطلب", "الطبيب", etc.) - DIFFERENT TABLE!
-  - DO NOT confuse "اسم المريض" (Patient Name) with "الطبيب" (Doctor) - they are in DIFFERENT tables!
-  - DO NOT extract doctor name from LEFT table as patient name!
-  - Return the full name as written (can be Arabic or English).
-  - If you cannot find it, return "" but try hard to locate it in the RIGHT table!
+Before extracting data, SCAN THE ENTIRE IMAGE to identify:
 
-- Gender (REQUIRED - MUST EXTRACT):
-  - Look in the PATIENT information table (same table as patient name)
-  - Find the row where label = "الجنس" or "الجنسي" or "Sex" or "Gender"
-  - Read the VALUE in the same row (the cell next to the label in the same row)
-  - Return "Male" if value contains: "ذكر", "Male", "M" (case insensitive)
-  - Return "Female" if value contains: "أنثى", "انثى", "Female", "F" (case insensitive)
-  - Do NOT guess - only return if you clearly see the value
-  - Do NOT infer from name - read the actual gender field value
-  - Examples: If table has "الجنس" in left column and "انثى" in right column same row -> return "Female"
-  - If you cannot find it clearly, return ""
+A. HEADER SECTION (Usually top 1/4 of page):
+   - Look for patient information table/section
+   - Look for request/doctor information table/section
+   - Identify which side has patient vs doctor info
+   - Note if it's one combined table or two separate tables
 
-- Date of Birth / Age (IMPORTANT - EXTRACT IF AVAILABLE):
-  - Look in the PATIENT information table for "تاريخ الميلاد" (Date of Birth) or "عمر" (Age)
-  - Find the row with label "تاريخ الميلاد" -> read value from same row
-  - Date formats to recognize: DD/MM/YYYY (e.g., "01/05/1975"), MM/DD/YYYY, YYYY-MM-DD
-  - If you see DD/MM/YYYY format like "01/05/1975", convert to "YYYY-MM-DD" = "1975-05-01"
-  - If DATE OF BIRTH found: put in patient_dob as "YYYY-MM-DD", calculate age and put in patient_age
-  - If only AGE found (number like "50"): put in patient_age only, leave patient_dob empty
-  - If neither found, return "" for both
+B. COMMON LAYOUTS:
 
-- Report Date labels:
-  - Arabic: "تاريخ الطلب", "التاريخ", "تاريخ الفحص"
-  - English: "Report Date", "Date", "Test Date"
-  -> Normalize to "YYYY-MM-DD" format when possible.
-  -> If not found, return "".
-
-- Doctor labels (LOOK ONLY IN LEFT TABLE - REQUEST INFO TABLE):
-  - Arabic: "الطبيب", "طبيب" (in the LEFT table with "تاريخ الطلب", "رقم الطلب", etc.)
-  - English: "Doctor", "Physician", "Ref By", "Referred By"
-  - CRITICAL: Doctor is in the LEFT table (Request information), NOT in the RIGHT table (Patient information)
-  - Find the row in LEFT table where label = "الطبيب"
-  - Read the VALUE in the same row
-  -> Extract only the doctor name(s), without prefixes like "Dr.", "Doctor:".
-  -> DO NOT confuse with patient name - patient name is in RIGHT table, doctor is in LEFT table!
-  -> If multiple doctors, separate with commas.
-  -> If not found or unclear, return "".
-
-STEP 2: SPECIAL CASE – HEADER TABLES (Palestinian/Arabic Lab Forms)
-Many reports have two side-by-side header tables:
-- RIGHT table: Patient information (PATIENT INFO - USE THIS TABLE!)
-  * Arabic labels: "رقم المريض", "اسم المريض", "الجنس", "تاريخ الميلاد", "رقم الهوية"
-  * This table contains the PATIENT's personal information
-- LEFT table: Request information (REQUEST INFO - DO NOT USE FOR PATIENT NAME/GENDER!)
-  * Arabic labels: "تاريخ الطلب", "رقم الطلب", "الطبيب", "التأمين", "نوع المريض"
-  * This table contains REQUEST and DOCTOR information - NOT patient info!
-
-READ CAREFULLY - CRITICAL RULES:
-- ALWAYS use the RIGHT table (Patient information) for patient_name, patient_gender, patient_dob, patient_age
-- NEVER use the LEFT table (Request/Doctor info) for patient personal details
-- Each row in the Patient table has: LABEL in one cell, VALUE in adjacent cell in THE SAME ROW
-- Match each label to its correct value in the SAME row - do NOT mix rows
-- Extract patient_name ONLY from the RIGHT table, row with "اسم المريض" label
-- Extract patient_gender ONLY from the RIGHT table, row with "الجنس" label - read the VALUE cell carefully
-- Extract patient_dob or patient_age ONLY from the RIGHT table, "تاريخ الميلاد" or "عمر" row
-- Extract doctor_names from the LEFT table, row with "الطبيب" label - DO NOT confuse doctor name with patient name!
-
-STEP 3: LAB TABLE EXTRACTION (CRITICAL - BE EXTREMELY CAREFUL!)
-Extract test results from tables. This is the MOST IMPORTANT and ERROR-PRONE step.
-Work SLOWLY and METHODICALLY. Read each row INDEPENDENTLY.
-
-⚠️ COMMON ERRORS TO AVOID:
-- DO NOT take values from the row above or below when current row is empty
-- DO NOT mix columns when lines are slanted or handwritten
-- DO NOT invent normal_range values - if it's empty, it's EMPTY
-- DO NOT guess values - if you can't read it clearly, mark as empty
-
-HOW TO READ TABLES CORRECTLY:
-1. Identify table structure FIRST:
-   - Find column headers (usually in first row): "الفحص", "النتيجة", "الوحدة", "المعدل الطبيعي"
-   - OR English headers: "Test", "Result", "Unit", "Normal Range"
-   - Count how many columns there are
-   - Note if lines are straight, slanted, or handwritten
-
-2. Map column headers to their purpose:
-   - Arabic: "الفحص"/"الاختبار" -> field_name
-   - Arabic: "النتيجة"/"القيمة" -> field_value  
-   - Arabic: "الوحدة" -> field_unit
-   - Arabic: "المعدل الطبيعي"/"النتيجة الطبيعية" -> normal_range
-   - English: "Test"/"Examination" -> field_name
-   - English: "Result"/"Value" -> field_value
-   - English: "Unit" -> field_unit
-   - English: "Normal Range"/"Reference Range" -> normal_range
-
-ROW-BY-ROW EXTRACTION (READ EACH ROW ISOLATED):
-Process ONE row at a time. For each row:
-1. Locate the row boundaries - follow horizontal lines (even if slanted)
-2. Identify which column is which BY POSITION (not by guessing)
-3. Read field_name from the test name column in THIS SPECIFIC ROW
-4. Read field_value from the result column in THIS SPECIFIC ROW (same row as field_name)
-5. Read field_unit from the unit column in THIS SPECIFIC ROW (same row)
-6. Read normal_range from the range column in THIS SPECIFIC ROW (same row)
-
-CRITICAL RULES FOR ALIGNMENT:
-- If lines are slanted/handwritten, trace the horizontal line of THIS row
-- If a cell appears empty in THIS row, it is EMPTY - do NOT look at other rows
-- Each test row is INDEPENDENT - values belong ONLY to their row
-- If you're unsure which value belongs to which row, follow the horizontal line carefully
-
-EMPTY VALUE DETECTION (STRICT):
-If field_value cell in THIS ROW contains ANY of these, treat as EMPTY and return "":
-- Empty cell / completely blank
-- Only dashes: "-", "--", "—" (even one dash means empty!)
-- Only asterisks: "*", "**", "***"
-- Only dots: ".", ".."
-- Placeholders: "N/A", "n/a", "NA", "N.A", "nil", "none", "unknown", "غير متوفر"
-- If cell looks suspicious or unclear, treat as EMPTY
-- NEVER fill empty values with values from:
-  * The row above
-  * The row below  
-  * A different column
-  * Your own assumptions
-
-3. normal_range - ABSOLUTE CRITICAL RULES (DO NOT INVENT VALUES!):
-   This is where MOST ERRORS happen. Be EXTREMELY careful.
+   Layout Type 1: TWO SIDE-BY-SIDE TABLES (Most Arabic labs)
+   ┌─────────────────────┬─────────────────────┐
+   │  REQUEST INFO (L)   │  PATIENT INFO (R)   │
+   ├─────────────────────┼─────────────────────┤
+   │ تاريخ الطلب: XX    │ اسم المريض: YY     │
+   │ رقم الطلب: XX      │ رقم المريض: YY     │
+   │ الطبيب: XX         │ الجنس: YY          │
+   │ التأمين: XX        │ تاريخ الميلاد: YY  │
+   └─────────────────────┴─────────────────────┘
    
-   - Read normal_range EXACTLY as written in THIS ROW's range column
-   - Follow the horizontal line of THIS ROW to find the correct range cell
-   - If the cell is empty, blank, or unclear → return "" (empty string)
-   - If you see ONLY these symbols (no numbers), return "":
-     * "-" (dash)
-     * "--" (double dash)
-     * "—" (em dash)
-     * "*" (asterisk)
-     * "**", "***"
-     * "(-)" (dash in parentheses)
-     * "." (dot)
-     * "N/A", "n/a", "NA"
-     * Any symbol without numbers = EMPTY
-   
-   - DO NOT invent normal_range values - EVER!
-   - DO NOT copy normal_range from:
-     * The row above
-     * The row below
-     * A different test
-     * Your memory of similar tests
-   
-   - DO NOT assume a range even if the test name is familiar
-   - If you cannot read it clearly or it looks empty, return "" (empty string)
-   - When in doubt, return "" - empty is better than wrong
-   
-   - Examples of VALID ranges (must have numbers): "(74-110)", "(0-200)", "12-16", "(12.0-16.0)", "0-130"
-   - Examples of EMPTY (return ""): "-", "(-)", "*", blank cell, "N/A", any symbol without numbers
+   **CRITICAL**: Patient info is on RIGHT, Doctor info is on LEFT
+   **DO NOT mix these two tables!**
 
-4. is_normal calculation (ONLY when you have BOTH value AND range):
-   ⚠️ NEVER set is_normal to true/false if you're missing data!
-   
-   - Set is_normal ONLY if ALL these are true:
-     a) field_value is NOT empty ("")
-     b) field_value contains a valid number
-     c) normal_range is NOT empty ("")
-     d) normal_range contains a numeric range like "(12-16)" or "0-200"
-   
-   - If normal_range is empty ("") or missing → set is_normal to null (NOT true, NOT false!)
-   - If field_value is empty or non-numeric → set is_normal to null
-   - If you're not 100% sure about the comparison → set is_normal to null
-   
-   - To compare (only if both exist):
-     * Extract numbers from field_value (e.g., "109" from "109 mg/dl")
-     * Extract min/max from normal_range (e.g., 74 and 110 from "(74-110)")
-     * If value >= min AND value <= max: is_normal = true
-     * If value < min OR value > max: is_normal = false
-   
-   - If normal_range exists but you cannot parse the numbers from it → set is_normal to null
+   Layout Type 2: SINGLE COMBINED TABLE (Some English labs)
+   ┌──────────────────────────────────────────┐
+   │ Patient Name: XX    Date: YY             │
+   │ DOB: XX             Gender: YY           │
+   │ Doctor: XX          Report Date: YY      │
+   └──────────────────────────────────────────┘
 
-4. COMPLEX TABLES:
-   - Handle tables with multiple sections (e.g., "HEMATOLOGY", "CLINICAL CHEMISTRY")
-   - Each section may have its own column structure
-   - Read each section's headers carefully
-   - Maintain row alignment - each field_value must come from the same row as its field_name
+   Layout Type 3: VERTICAL SECTIONS
+   Patient Information:
+   - Name: XX
+   - DOB: YY
+   - Gender: ZZ
+   
+   Test Information:
+   - Date: XX
+   - Doctor: YY
 
-STEP 4: JSON OUTPUT FORMAT
-Return exactly one JSON object, no markdown, no explanations.
+C. LAB RESULTS TABLE (Usually middle/bottom):
+   - Identify column headers row
+   - Count number of columns (typically 4-6)
+   - Note if table has sections/categories
+   - Check if lines are straight, slanted, or handwritten
 
-Use this schema:
+═══════════════════════════════════════════════════════════════════
+STEP 2: EXTRACT PATIENT HEADER INFORMATION
+═══════════════════════════════════════════════════════════════════
 
-{{
-  "patient_name": "string (full name only, no labels or prefixes)",
-  "patient_age": "string (age in years as number only, e.g. \"50\" or \"\" if unknown)",
-  "patient_dob": "string (date YYYY-MM-DD or \"\" if unknown)",
-  "patient_gender": "string (\"Male\" or \"Female\" or \"\")",
-  "report_date": "string (YYYY-MM-DD or \"\")",
-  "report_type": "{', '.join(REPORT_TYPES)} or free text",
-  "doctor_names": "string (doctor names comma-separated, or \"\")",
-  "medical_data": [
-    {{
-      "field_name": "string (test name, prefer English if available)",
-      "field_value": "string (numeric value as text, or \"\" if empty/missing)",
-      "field_unit": "string (unit like mg/dl, g/dL, etc., or \"\")",
-      "normal_range": "string (reference range like \"(12-16)\", or \"\" if missing)",
-      "is_normal": true or false or null (null if no normal_range or empty value),
-      "category": "string (section name like \"HEMATOLOGY\" or \"\")",
-      "notes": "string (any notes or \"\")"
-    }}
-  ]
-}}
+PRIORITY: Patient info is MANDATORY - try your best to extract it!
+
+2.1 PATIENT NAME (HIGHEST PRIORITY!)
+────────────────────────────────────
+Search for these labels:
+- Arabic: "اسم المريض", "المريض", "الاسم"
+- English: "Patient Name", "Name", "Patient"
+
+Rules:
+✓ Extract the FULL NAME as written (keep language as-is)
+✓ In two-table layout: Use RIGHT table only (with "رقم المريض", "الجنس")
+✓ Remove label prefixes: "اسم المريض:" → just extract the name part
+✓ Remove titles: "Mr.", "Mrs.", "Dr." from patient names
+✗ DO NOT use doctor name as patient name
+✗ DO NOT use values from LEFT table (that's request info!)
+✗ DO NOT translate the name to English
+
+Examples:
+- "اسم المريض: رئيسة خضر طالب خطيب" → "رئيسة خضر طالب خطيب"
+- "Patient Name: John Smith" → "John Smith"
+- "Mr. Ahmed Ali" → "Ahmed Ali"
+
+If not found clearly: ""
+
+2.2 GENDER
+──────────
+Search for these labels in PATIENT table:
+- Arabic: "الجنس", "الجنسي", "جنس"
+- English: "Gender", "Sex"
+
+Read the VALUE in the same row as the gender label.
+
+Normalization (return in English):
+- Arabic male: "ذكر" → "Male"
+- Arabic female: "أنثى", "انثى" → "Female"  
+- English: "M", "Male", "MALE" → "Male"
+- English: "F", "Female", "FEMALE" → "Female"
+
+Rules:
+✓ Only return if you clearly see the value in the gender field
+✗ DO NOT guess from name
+✗ DO NOT infer from other information
+✗ DO NOT use doctor's gender
+
+If not found clearly: ""
+
+2.3 DATE OF BIRTH / AGE
+───────────────────────
+Search for these labels in PATIENT table:
+- Arabic DOB: "تاريخ الميلاد", "تاريخ ميلاد", "الميلاد"
+- English DOB: "Date of Birth", "DOB", "Birth Date"
+- Arabic Age: "العمر", "عمر"
+- English Age: "Age"
+
+Processing:
+1. If DATE OF BIRTH found:
+   - Common formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD
+   - Convert to: "YYYY-MM-DD"
+   - Example: "15/03/1980" → "1980-03-15" (if DD/MM format)
+   - Set patient_dob = "YYYY-MM-DD"
+   - Calculate age from DOB and set patient_age = "50" (number only)
+
+2. If only AGE found (no DOB):
+   - Extract number only: "50 years" → "50"
+   - Set patient_age = "50"
+   - Set patient_dob = ""
+
+3. If neither found:
+   - patient_dob = ""
+   - patient_age = ""
+
+2.4 REPORT DATE
+───────────────
+Search for these labels (may be in request/doctor table):
+- Arabic: "تاريخ الطلب", "تاريخ الفحص", "التاريخ", "تاريخ"
+- English: "Report Date", "Date", "Test Date", "Collection Date"
+
+Convert to: "YYYY-MM-DD" format if possible
+If not found: ""
+
+2.5 DOCTOR NAME(S)
+──────────────────
+⚠️ CRITICAL: Doctor is in REQUEST/DOCTOR table (LEFT side), NOT patient table!
+
+Search for these labels in REQUEST/DOCTOR table:
+- Arabic: "الطبيب", "طبيب", "الطبيب المعالج"
+- English: "Doctor", "Physician", "Ref By", "Referred By", "Requesting Doctor"
+
+Rules:
+✓ Extract name(s) only - remove "Dr.", "Doctor:", etc.
+✓ If multiple doctors: separate with commas
+✗ DO NOT confuse with patient name
+✗ DO NOT use patient table for doctor name
+
+If not found: ""
+
+═══════════════════════════════════════════════════════════════════
+STEP 3: EXTRACT LAB RESULTS TABLE (MOST CRITICAL!)
+═══════════════════════════════════════════════════════════════════
+
+This is where MOST ERRORS occur. Work SLOWLY and METHODICALLY.
+
+3.1 IDENTIFY TABLE STRUCTURE FIRST
+───────────────────────────────────
+1. Find the header row (usually has labels in bold or different style)
+2. Identify columns by position - common structures:
+
+   Structure A (4 columns):
+   | Test Name | Result | Unit | Normal Range |
+   
+   Structure B (5+ columns):
+   | Test Name | Result | Unit | Normal Range | Status | Notes |
+   
+   Structure C (Arabic):
+   | الفحص | النتيجة | الوحدة | المعدل الطبيعي |
+
+3. Map column headers:
+   - Column 1 (Test): "الفحص", "الاختبار", "Test", "Examination", "Parameter"
+   - Column 2 (Result): "النتيجة", "القيمة", "Result", "Value"
+   - Column 3 (Unit): "الوحدة", "Unit", "Units"
+   - Column 4 (Range): "المعدل الطبيعي", "النطاق", "Normal Range", "Reference Range", "Ref. Range"
+
+4. Note if table has category sections (e.g., "HEMATOLOGY", "CHEMISTRY")
+
+3.2 ROW-BY-ROW EXTRACTION (PROCESS EACH ROW INDEPENDENTLY!)
+────────────────────────────────────────────────────────────
+
+For EACH test row, follow this process:
+
+STEP A: Identify row boundaries
+- Follow the horizontal line (even if slanted/handwritten)
+- This row is ISOLATED from all other rows
+
+STEP B: Extract field_name (Test Name)
+- Read from Column 1 of THIS row only
+- Prefer English name if bilingual report
+- Keep exactly as written
+- Examples: "Haemoglobin (HGB)", "White blood cells", "فحص الدم"
+
+STEP C: Extract field_value (Result) ⚠️ CRITICAL
+- Read from Column 2 of THIS row only (follow horizontal line!)
+- Must be in SAME row as field_name
+
+EMPTY VALUE DETECTION (STRICT - RETURN "" FOR ANY OF THESE):
+✗ Completely blank/empty cell
+✗ Only dashes: "-", "--", "—", "−"
+✗ Only asterisks: "*", "**", "***"  
+✗ Only dots: ".", "..", "..."
+✗ Placeholders: "N/A", "n/a", "NA", "nil", "none", "not done"
+✗ Arabic: "غير متوفر", "لا يوجد"
+✗ Symbols without numbers: "(-)", "(.)", "(*)"
+✗ If unclear or suspicious
+
+VALID VALUES:
+✓ Numbers only: "109", "12.6", "5.2"
+✓ Numbers with text: "109 mg/dl" (you'll extract "109" for field_value)
+✓ Positive: "Positive", "موجب"
+✓ Negative: "Negative", "سالب"
+
+**CRITICAL RULE**: If field_value cell is empty/contains placeholder:
+- Return field_value = ""
+- DO NOT take value from row above
+- DO NOT take value from row below
+- DO NOT take value from different column
+- DO NOT guess or assume
+
+STEP D: Extract field_unit (Unit)
+- Read from Column 3 of THIS row only
+- Common units: "mg/dl", "g/dL", "%", "K/uL", "M/uL", "fL", "pg", "U/L", "cells/L"
+- Keep exactly as written
+- If empty in this row: ""
+
+STEP E: Extract normal_range (Reference Range) ⚠️ ULTRA CRITICAL!
+──────────────────────────────────────────────────────────────────
+THIS IS THE #1 SOURCE OF ERRORS - BE EXTREMELY CAREFUL!
+
+Read from Column 4 (Normal Range) of THIS row only.
+
+EMPTY RANGE DETECTION (RETURN "" FOR ANY OF THESE):
+✗ Completely blank/empty cell
+✗ Only dashes: "-", "--", "—", "−"
+✗ Only asterisks: "*", "**", "***"
+✗ Only dots: ".", "..", "..."
+✗ Placeholders: "N/A", "n/a", "NA"
+✗ Symbols in parentheses without numbers: "(-)", "(.)", "(*)"
+✗ Any symbol WITHOUT numbers
+
+VALID RANGES (must contain numbers):
+✓ With parentheses: "(74-110)", "(0-200)", "(12-16)", "(27-31.2)"
+✓ Without parentheses: "74-110", "0-200", "12-16"
+✓ With decimals: "(12.0-16.0)", "(0.5-0.9)"
+✓ With units: "74-110 mg/dl" (keep as-is)
+✓ With text: "Up to 200", "<100", ">50"
+
+**ABSOLUTE RULES FOR NORMAL_RANGE**:
+1. Read ONLY from THIS row's range column
+2. If cell is empty → return ""
+3. If cell has only symbols (-, *, .) → return ""
+4. If unclear or suspicious → return ""
+5. DO NOT invent ranges
+6. DO NOT copy from other rows
+7. DO NOT use your knowledge of typical ranges
+8. DO NOT assume based on test name
+9. When in doubt → return ""
+
+Examples:
+- Cell shows "(74-110)" → normal_range = "(74-110)" ✓
+- Cell shows "-" → normal_range = "" ✓
+- Cell is blank → normal_range = "" ✓
+- Cell shows "(-)" → normal_range = "" ✓
+- Cell shows "N/A" → normal_range = "" ✓
+- Cannot read clearly → normal_range = "" ✓
+
+STEP F: Calculate is_normal (ONLY when you have BOTH value AND range)
+──────────────────────────────────────────────────────────────────────
+
+**CRITICAL**: is_normal can ONLY be true/false when BOTH conditions met:
+1. field_value is NOT empty AND contains a number
+2. normal_range is NOT empty AND contains a numeric range
+
+Decision tree:
 """
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
