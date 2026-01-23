@@ -25,6 +25,10 @@ from utils.vlm_extraction_validator import (
     normalize_units,
     validate_page_2_extraction
 )
+from utils.vlm_line_by_line_verifier import (
+    verify_extracted_fields_against_image,
+    generate_verification_summary_for_user
+)
 from ollama import Client
 
 # Create namespace
@@ -977,6 +981,64 @@ OUTPUT JSON ONLY:
         print(f"   Removed (invalid ranges): {validation_result['validation_report']['items_removed_hallucinated_range']}")
         print(f"   Removed (other issues): {validation_result['validation_report']['items_removed_symbol_unit'] + validation_result['validation_report']['items_removed_copied_from_neighbor']}")
         print(f"   Final output: {len(final_data.get('medical_data', []))} items\n")
+        
+        # ========================================
+        # LINE-BY-LINE VERIFICATION AGAINST ORIGINAL IMAGE
+        # ========================================
+        # This is the smart scanner pass - verifies each field against the original image
+        print(f"🔍 Starting line-by-line verification (Smart Scanner Mode)...")
+        
+        try:
+            yield f"data: {json.dumps({'percent': 75, 'message': 'Verifying extracted data against original image (line-by-line)...'})}\n\n"
+            
+            # Perform verification for each page's extracted data
+            for page_idx, image_info in enumerate(images_data):
+                page_num = image_info.get('page_number', page_idx + 1)
+                image_base64 = image_info.get('image_base64')
+                page_medical_data = [
+                    item for item in final_data['medical_data']
+                    if item.get('page_number', 1) == page_num
+                ]
+                
+                if not page_medical_data or not image_base64:
+                    continue
+                
+                print(f"\n📋 Page {page_num} verification:")
+                print(f"   Fields to verify: {len(page_medical_data)}")
+                
+                # Run line-by-line verification
+                verified_fields, verification_report = verify_extracted_fields_against_image(
+                    extracted_fields=page_medical_data,
+                    image_base64=image_base64,
+                    vlm_client=ollama_client,
+                    page_num=page_num,
+                    total_pages=total_pages,
+                    run_detailed_check=True  # Enable detailed field-by-field verification
+                )
+                
+                # Update fields with verified versions
+                for idx, field in enumerate(verified_fields):
+                    original_idx = final_data['medical_data'].index(
+                        next((f for f in final_data['medical_data']
+                              if f.get('field_name') == field.get('field_name') and
+                                 f.get('page_number', 1) == page_num), None)
+                    ) if field in final_data['medical_data'] else -1
+                    if original_idx >= 0:
+                        final_data['medical_data'][original_idx] = field
+                
+                # Log verification report
+                print(f"✅ Verification Report for Page {page_num}:")
+                print(f"   Status: {verification_report.get('verification_status', 'UNKNOWN')}")
+                print(f"   Verified: {verification_report.get('summary', {}).get('fields_correct', 0)}")
+                print(f"   Issues found: {verification_report.get('summary', {}).get('fields_with_issues', 0)}")
+                if verification_report.get('critical_issues'):
+                    print(f"   🚨 Critical issues:")
+                    for issue in verification_report['critical_issues']:
+                        print(f"      - {issue}")
+                
+        except Exception as e:
+            print(f"⚠️ Verification step encountered issue (continuing): {str(e)}")
+            # Don't fail the whole process if verification has issues
         
         # Validation Logic (Call utils)
         try:
