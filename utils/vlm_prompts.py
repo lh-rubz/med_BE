@@ -16,6 +16,7 @@ WHERE TO LOOK (in order):
 3) Center-top header
 4) Side header panels
 5) Anywhere in top 40% of the page
+6) Near signature/footer blocks for doctor/referring physician
 
 PATIENT NAME (MANDATORY)
 - Labels: "اسم المريض", "المريض", "الاسم", "مريض", "اسم", "Patient Name", "Name", "Patient", "Pt Name"
@@ -37,12 +38,14 @@ REPORT DATE
 DOCTOR / PHYSICIAN
 - Labels: "الطبيب", "طبيب", "الطبيب المعالج", "Doctor", "Physician", "Ref By".
 - Remove titles (Dr., د.). Keep name only.
+- If multiple doctors, join with comma in the same string.
 
 SELF-VALIDATION BEFORE RETURNING
 - patient_name looks like a real name (not a label/ID/doctor). If doubtful, set to "".
 - patient_gender is exactly "Male", "Female", or "".
 - patient_age numeric 1-120 or "".
 - Dates formatted YYYY-MM-DD or "".
+- doctor_names not empty if a doctor/referrer name is visible anywhere.
 
 JSON OUTPUT (exactly this object, no extra text):
 {{
@@ -69,7 +72,7 @@ CRITICAL RULES
 2) Empty is better than wrong: If uncertain, use "".
 3) Language: Handle Arabic (RTL) and English (LTR). Use the clearer test name.
 4) Units must be medical abbreviations, not symbols (*, -, .).
-5) Duplicate range red flag: If two different tests share the EXACT same range, re-check alignment.
+5) Duplicate range note: If two tests share the EXACT same range but have different units (e.g., value vs %), keep both as-is. Re-check only if same unit and clearly mismatched with the row text.
 
 HOW TO READ TABLES
 - Typical headers Arabic: "الفحص", "النتيجة", "الوحدة", "المعدل الطبيعي".
@@ -81,7 +84,7 @@ ROW-BY-ROW PROTOCOL (for EACH row)
 2) field_name: Read column 1 of THIS row.
 3) field_value: Follow same line to column 2. If blank / -, --, —, *, ., N/A -> "".
 4) field_unit: Column 3. If symbol or blank -> "".
-5) normal_range: Column 4. If blank / -, --, —, (-), *, symbols without numbers -> "".
+5) normal_range: Column 4. If blank / -, --, —, (-), *, symbols without numbers -> "" (do NOT invent a range).
 6) is_normal: null if value or range empty/non-numeric. Else true/false by comparing numeric value to range.
 7) category: Section header if present, else "".
 8) notes: Any flags/notes in the row, else "".
@@ -89,8 +92,8 @@ ROW-BY-ROW PROTOCOL (for EACH row)
 VALIDATION BEFORE RETURN
 - Every row has field_name.
 - Units are not symbols.
-- If range present, it contains numbers.
-- Check duplicate ranges across different tests; if found, re-check alignment.
+- If range present, it contains numbers (if range truly absent, leave empty; never invent).
+- Duplicate ranges allowed when units differ or the source shows the same range; re-check only if same unit and the range clearly belongs to another row.
 - Common sense: WBC ~4-11 K/uL; RBC ~4-5.5 M/uL; Hgb ~12-16 g/dL. If wildly off, re-check.
 
 JSON OUTPUT (exactly this structure, no extra text):
@@ -119,13 +122,14 @@ RULES
 1) One row at a time. Follow the horizontal line even if slanted.
 2) If a cell in THIS row is empty or a symbol (-, *, .), return "" for that cell.
 3) Do NOT copy values/ranges from other rows. Never invent values.
-4) Before returning, check if any two different tests share the EXACT same range -> if yes, re-check alignment.
+4) Before returning, check if any two different tests share the EXACT same range AND same unit -> only re-check alignment in that case. If units differ (e.g., value vs %), keep both.
 
 READING STEPS PER ROW
 - field_name: test column in THIS row.
 - field_value: result column same row; if empty/-/*/blank -> "".
 - field_unit: unit column same row.
 - normal_range: range column same row; if empty/-/(-)/*/symbol-only -> "".
+  (If the report shows an empty range, leave it empty. Do NOT invent ranges.)
 - is_normal: null if value or range empty; else true/false only if numbers present.
 
 JSON OUTPUT ONLY:
