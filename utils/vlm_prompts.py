@@ -45,14 +45,14 @@ SELF-VALIDATION BEFORE RETURNING
 - Dates formatted YYYY-MM-DD or "".
 
 JSON OUTPUT (exactly this object, no extra text):
-{
+{{
   "patient_name": "",
   "patient_age": "",
   "patient_dob": "",
   "patient_gender": "",
   "report_date": "",
   "doctor_names": ""
-}
+}}
 """
 
 
@@ -94,9 +94,9 @@ VALIDATION BEFORE RETURN
 - Common sense: WBC ~4-11 K/uL; RBC ~4-5.5 M/uL; Hgb ~12-16 g/dL. If wildly off, re-check.
 
 JSON OUTPUT (exactly this structure, no extra text):
-{
+{{
   "medical_data": [
-    {
+    {{
       "field_name": "",
       "field_value": "",
       "field_unit": "",
@@ -104,9 +104,9 @@ JSON OUTPUT (exactly this structure, no extra text):
       "is_normal": null,
       "category": "",
       "notes": ""
-    }
+    }}
   ]
-}
+}}
 """
 
 
@@ -129,9 +129,9 @@ READING STEPS PER ROW
 - is_normal: null if value or range empty; else true/false only if numbers present.
 
 JSON OUTPUT ONLY:
-{
+{{
   "medical_data": [
-    {
+    {{
       "field_name": "",
       "field_value": "",
       "field_unit": "",
@@ -139,7 +139,7 @@ JSON OUTPUT ONLY:
       "is_normal": null,
       "category": "",
       "notes": ""
-    }
+    }}
   ]
-}
+}}
 """
