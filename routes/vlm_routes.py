@@ -527,18 +527,31 @@ OUTPUT JSON ONLY:
                 
                 if extracted_data.get('medical_data'):
                     new_items = extracted_data['medical_data']
+                    print(f"🔍 DEBUG: First item keys: {list(new_items[0].keys()) if new_items else 'Empty list'}")
                     
                     unique_new_items = []
                     existing_test_names = {str(item.get('field_name', '')).lower() for item in all_extracted_data}
                     
-                    for item in new_items:
+                    for i, item in enumerate(new_items):
                         raw_test_name = item.get('field_name', '')
+                        # Fallback for common AI mistakes
+                        if not raw_test_name and 'test_name' in item:
+                            raw_test_name = item['test_name']
+                        if not raw_test_name and 'Test Name' in item:
+                            raw_test_name = item['Test Name']
+                            
                         raw_test_val = item.get('field_value', '')
+                        # Fallback for common AI mistakes
+                        if not raw_test_val and 'result' in item:
+                            raw_test_val = item['result']
+                        if not raw_test_val and 'value' in item:
+                            raw_test_val = item['value']
                         
                         test_name = str(raw_test_name).strip() if raw_test_name is not None else ''
                         test_val = str(raw_test_val).strip() if raw_test_val is not None else ''
                         
                         if not test_name or test_name.lower() in ['test name', 'test', 'الفحص', 'الاختبار']:
+                            print(f"⚠️ Skipping item {i}: Invalid test name '{test_name}' (Raw: {raw_test_name})")
                             continue
                             
                         if test_name.lower() in existing_test_names:
