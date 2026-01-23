@@ -388,29 +388,30 @@ class ChatResource(Resource):
 Do NOT extract medical test results yet.
 
 ⚠️ **HEADER STRUCTURE ANALYSIS**:
-- Look at the **Top of the Page**.
-- Medical reports often have **Two Header Boxes** (Left & Right) or a Grid.
-- **Left Side/Box**: Often contains **Doctor Name** (Dr., Physician, Referred By, Name of Clinic).
-- **Right Side/Box**: Often contains **Patient Details** (Name, Age, ID).
+- **Scan the TOP of the page strictly.**
+- **Left Header Box**: Look here for **Doctor Name** (Dr., Physician, Referred By).
+  - Common pattern: "Dr. Name" or "المحول: [Name]".
+  - Example: "Dr. Jihad Al-Amleh".
+- **Right Header Box**: Look here for **Patient Name** and **Age/DOB**.
 
 ⚠️ CRITICAL RULES:
 1. **Patient Name (اسم المريض)**:
-   - Extract "Patient Name", "Name", "المريض".
-   - **Arabic Names**: Transcribe EXACTLY (e.g., "رئيسة" not "نزيهة").
+   - Extract the **FULL NAME** (First + Father + Family).
+   - **Do NOT truncate**. If it says "رئيسة خضر طالب خطيب", return "رئيسة خضر طالب خطيب".
+   - **Arabic Names**: Transcribe EXACTLY.
 2. **Doctor Name (الطبيب/المحول)**:
-   - **SEARCH THE LEFT HEADER BOX**.
-   - Look for: "Dr.", "Doctor", "Physician", "Referred By", "الطبيب", "المحول", "اسم الطبيب".
-   - Example: "Jihad Al-Amleh", "Dr. Ahmad".
+   - **FORCE SEARCH**: Look specifically in the **Top Left** or **Header Grid**.
+   - If found, return the full name.
 3. **DOB vs Age**:
-   - Priority: **DOB** (Date of Birth). Calculate Age from DOB if needed.
+   - Priority: **DOB** (Date of Birth).
 
 OUTPUT JSON ONLY:
 {{
-  "patient_name": "Exact Name",
+  "patient_name": "Full Patient Name",
   "patient_gender": "Male/Female",
   "patient_dob": "DD/MM/YYYY",
   "patient_age": "Number",
-  "doctor_names": "Doctor Name Found in Header",
+  "doctor_names": "Doctor Name",
   "report_date": "YYYY-MM-DD",
   "report_type": "Lab Report"
 }}
@@ -455,18 +456,19 @@ OUTPUT JSON ONLY:
 Scan the MEDICAL RESULTS TABLE on Page {idx}/{total_pages} line-by-line.
 
 ⚠️ **STRICT SCANNING PROTOCOL (Line-by-Line)**:
-1. **Identify the Grid**: Locate the main table with Test Name, Result, Unit, Range.
+1. **Identify the Grid**: Locate the main table columns: Test Name, Result, Unit, Range.
 2. **Read Row by Row**:
-   - Start at the FIRST test. Read horizontally.
-   - **DO NOT JUMP ROWS**.
-   - **DO NOT GUESS**.
+   - Start at the FIRST test. Read horizontally (Left to Right).
+   - **DO NOT JUMP ROWS**: Never take a value from the row above or below.
+   - **DO NOT GUESS**: If a value is missing, it is MISSING.
 3. **Empty / Star (*) Handling**:
-   - Look at the "Result" column for the current row.
-   - If it is BLANK, contains `*`, `-`, or just whitespace: **VALUE IS EMPTY ("")**.
-   - **CRITICAL**: Do NOT take the number from the row above or below. If it's empty, IT IS EMPTY.
+   - Look STRICTLY at the "Result" column for the current row.
+   - If the cell is **BLANK**, contains `*`, `-`, or just whitespace: **VALUE IS EMPTY ("")**.
+   - **CRITICAL**: Do NOT grab the number from the neighbor row. Output "" (Empty String).
 4. **Normal Range**:
    - Extract the text EXACTLY as printed (e.g., "13.0-17.0").
-   - Do NOT invent numbers. If it's "-", return "".
+   - If the range column is empty or has `-`, output "".
+   - **Check Alignment**: Ensure the range belongs to THIS test, not the one above.
 
 ⚠️ **DATA CLEANING**:
 - If a row has NO result and NO range (just a header or empty line), **SKIP IT**.
