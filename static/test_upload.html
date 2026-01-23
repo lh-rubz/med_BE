@@ -224,6 +224,124 @@
             color: #555;
             font-weight: 500;
         }
+
+        .reports-container {
+            margin-top: 30px;
+        }
+
+        .reports-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .report-card {
+            background: #f9f9f9;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .report-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .report-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .report-id {
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .patient-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .info-field {
+            font-size: 13px;
+        }
+
+        .info-label {
+            color: #666;
+            font-weight: 600;
+            margin-bottom: 3px;
+        }
+
+        .info-value {
+            color: #333;
+            font-size: 14px;
+            word-break: break-word;
+        }
+
+        .medical-data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 13px;
+        }
+
+        .medical-data-table thead {
+            background: #f0f0f0;
+            border-bottom: 2px solid #ddd;
+        }
+
+        .medical-data-table th {
+            padding: 10px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .medical-data-table td {
+            padding: 10px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .medical-data-table tr:hover {
+            background: #f5f5f5;
+        }
+
+        .value-normal {
+            color: #388e3c;
+            font-weight: 600;
+        }
+
+        .value-abnormal {
+            color: #d32f2f;
+            font-weight: 600;
+        }
+
+        .value-unknown {
+            color: #999;
+        }
+
+        .empty-data {
+            padding: 20px;
+            text-align: center;
+            color: #999;
+            font-style: italic;
+        }
     </style>
 </head>
 
@@ -282,6 +400,12 @@
                 <div class="response-container">
                     <div class="response-header">📊 Backend Response:</div>
                     <pre id="responseContent"></pre>
+                </div>
+
+                <!-- Reports Display Section -->
+                <div id="reportsSection" class="reports-container hidden">
+                    <div class="reports-title">📋 All Patient Reports</div>
+                    <div id="reportsList"></div>
                 </div>
             </div>
         </div>
@@ -507,6 +631,19 @@
                                         responseContainer.classList.remove('hidden');
                                         showStatus(uploadStatus, `✅ Success! Report #${data.report_id} Ready`, 'success');
 
+                                        // Fetch all reports for this patient/profile
+                                        try {
+                                            const allReportsResponse = await fetch(`${API_BASE}/reports?profile_id=${reportJson.report.profile_id || ''}`, {
+                                                headers: { 'Authorization': `Bearer ${authToken}` }
+                                            });
+                                            if (allReportsResponse.ok) {
+                                                const allReports = await allReportsResponse.json();
+                                                displayAllReports(allReports);
+                                            }
+                                        } catch (reportsErr) {
+                                            console.warn("Failed to fetch all reports:", reportsErr);
+                                        }
+
                                     } catch (fetchErr) {
                                         console.error("Failed to fetch report details:", fetchErr);
                                         showStatus(uploadStatus, `⚠️ Report Created (#${data.report_id}) but failed to load details.`, 'warning');
@@ -540,6 +677,138 @@
             element.textContent = message;
             element.className = `status status-${type}`;
             element.classList.remove('hidden');
+        }
+
+        function displayAllReports(allReportsData) {
+            const reportsSection = document.getElementById('reportsSection');
+            const reportsList = document.getElementById('reportsList');
+
+            // Handle different response formats
+            let reports = [];
+            if (Array.isArray(allReportsData)) {
+                reports = allReportsData;
+            } else if (allReportsData.reports && Array.isArray(allReportsData.reports)) {
+                reports = allReportsData.reports;
+            } else if (allReportsData.data && Array.isArray(allReportsData.data)) {
+                reports = allReportsData.data;
+            }
+
+            if (!reports || reports.length === 0) {
+                reportsList.innerHTML = '<div class="empty-data">No reports found for this patient.</div>';
+                reportsSection.classList.remove('hidden');
+                return;
+            }
+
+            // Sort by creation date (newest first)
+            reports.sort((a, b) => {
+                const dateA = new Date(a.created_at || a.report_date || 0);
+                const dateB = new Date(b.created_at || b.report_date || 0);
+                return dateB - dateA;
+            });
+
+            reportsList.innerHTML = '';
+
+            reports.forEach((report, index) => {
+                const reportCard = createReportCard(report, index + 1);
+                reportsList.appendChild(reportCard);
+            });
+
+            reportsSection.classList.remove('hidden');
+        }
+
+        function createReportCard(report, index) {
+            const card = document.createElement('div');
+            card.className = 'report-card';
+
+            // Extract report data
+            const reportData = report.report || report;
+            const fields = report.fields || reportData.fields || [];
+
+            // Format dates
+            const reportDate = new Date(report.report_date || reportData.report_date || report.created_at || '');
+            const formattedDate = reportDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+
+            // Build patient info HTML
+            const patientInfoHtml = `
+                <div class="info-field">
+                    <div class="info-label">Patient Name</div>
+                    <div class="info-value">${report.patient_name || reportData.patient_name || 'N/A'}</div>
+                </div>
+                <div class="info-field">
+                    <div class="info-label">Age / Gender</div>
+                    <div class="info-value">${report.patient_age || reportData.patient_age || 'N/A'} / ${report.patient_gender || reportData.patient_gender || 'N/A'}</div>
+                </div>
+                <div class="info-field">
+                    <div class="info-label">Report Date</div>
+                    <div class="info-value">${formattedDate}</div>
+                </div>
+                <div class="info-field">
+                    <div class="info-label">Doctor</div>
+                    <div class="info-value">${report.doctor_names || reportData.doctor_names || 'N/A'}</div>
+                </div>
+                <div class="info-field">
+                    <div class="info-label">Report Type</div>
+                    <div class="info-value">${report.report_type || reportData.report_type || 'General'}</div>
+                </div>
+                <div class="info-field">
+                    <div class="info-label">Total Fields</div>
+                    <div class="info-value">${report.total_fields || fields.length || 0}</div>
+                </div>
+            `;
+
+            // Build medical data table
+            let tableHtml = '';
+            if (fields && fields.length > 0) {
+                tableHtml = `
+                    <table class="medical-data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Value</th>
+                                <th>Unit</th>
+                                <th>Normal Range</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                fields.forEach(field => {
+                    const isNormal = field.is_normal === true ? 'value-normal' : (field.is_normal === false ? 'value-abnormal' : 'value-unknown');
+                    const statusText = field.is_normal === true ? '✓ Normal' : (field.is_normal === false ? '✗ Abnormal' : '— N/A');
+
+                    tableHtml += `
+                        <tr>
+                            <td><strong>${field.field_name || 'N/A'}</strong></td>
+                            <td>${field.field_value || '—'}</td>
+                            <td>${field.field_unit || '—'}</td>
+                            <td>${field.normal_range || '—'}</td>
+                            <td class="${isNormal}">${statusText}</td>
+                        </tr>
+                    `;
+                });
+
+                tableHtml += `
+                        </tbody>
+                    </table>
+                `;
+            } else {
+                tableHtml = '<div class="empty-data">No medical data found for this report.</div>';
+            }
+
+            // Combine all HTML
+            card.innerHTML = `
+                <div class="report-header">
+                    <div class="report-title">Report #${report.report_id || index}</div>
+                    <div class="report-id">#${report.report_id || index}</div>
+                </div>
+                <div class="patient-info">
+                    ${patientInfoHtml}
+                </div>
+                ${tableHtml}
+            `;
+
+            return card;
         }
 
         // Allow Enter key to submit login

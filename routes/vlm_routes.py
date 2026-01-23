@@ -497,9 +497,12 @@ class ChatResource(Resource):
                         test_name = str(raw_test_name).strip() if raw_test_name is not None else ''
                         test_val = str(raw_test_val).strip() if raw_test_val is not None else ''
                         
+                        # SKIP IF: field_name is empty or is a header label
                         if not test_name or test_name.lower() in ['test name', 'test', 'الفحص', 'الاختبار']:
+                            print(f"⚠️ Skipping row with empty/label field_name: '{test_name}'")
                             continue
-                            
+                        
+                        # SKIP IF: duplicate test name already processed
                         if test_name.lower() in existing_test_names:
                             print(f"⚠️ Duplicate test skipped: {test_name}")
                             continue
@@ -511,7 +514,12 @@ class ChatResource(Resource):
                         test_val_cleaned = test_val.strip() if test_val else ''
                         test_val_lower = test_val_cleaned.lower()
                         
-                        # Also check normal_range for empty indicators
+                        # CRITICAL: SKIP rows with EMPTY field_value (as per updated prompts)
+                        if test_val_lower in empty_indicators or not test_val_cleaned:
+                            print(f"⚠️ Skipping row with empty field_value: {test_name}")
+                            continue
+                        
+                        # Also check normal_range for empty indicators (but don't skip - allow missing ranges)
                         normal_range_raw = str(item.get('normal_range', '') or '').strip()
                         normal_range_lower = normal_range_raw.lower()
                         
@@ -521,15 +529,6 @@ class ChatResource(Resource):
                             if not any(ch.isdigit() for ch in normal_range_raw):
                                 item['normal_range'] = ''
                                 print(f"⚠️ Cleaned empty normal_range for {test_name}: '{normal_range_raw}' -> ''")
-                        
-                        # If value is an empty indicator, set it to empty string but still process the field
-                        if test_val_lower in empty_indicators or not test_val_cleaned:
-                            # Set field_value to empty string - don't skip the field entirely
-                            item['field_value'] = ''
-                            # Still add the field but mark it as having no value
-                            unique_new_items.append(item)
-                            existing_test_names.add(test_name.lower())
-                            continue
                         
                         # Check for qualitative results (normal/abnormal text)
                         qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
@@ -542,6 +541,7 @@ class ChatResource(Resource):
                         if has_digit or is_qualitative:
                             unique_new_items.append(item)
                             existing_test_names.add(test_name.lower())
+                            print(f"✅ Added field: {test_name} = '{test_val_cleaned}'")
                         else:
                             # Value doesn't look like a valid medical result - skip
                             print(f"⚠️ Skipping invalid test value: {test_name} = '{test_val_cleaned}'")
@@ -638,8 +638,11 @@ class ChatResource(Resource):
                             patient_info['doctor_names'] = new_doctor
                         
                 if new_report_date and len(new_report_date) >= 8:
+                    # Extract only YYYY-MM-DD part if timestamp is present
+                    date_only = new_report_date[:10] if ' ' in new_report_date or 'T' in new_report_date else new_report_date
                     if not patient_info.get('report_date'):
-                        patient_info['report_date'] = new_report_date
+                        patient_info['report_date'] = date_only
+                        print(f"✅ Updated report_date: {date_only}")
                     
                 # Keep report_type if not set
                 if not patient_info.get('report_type') and extracted_data.get('report_type'):
