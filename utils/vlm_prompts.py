@@ -3,7 +3,7 @@
 
 def get_personal_info_prompt(idx, total_pages):
     """Prompt to extract ONLY patient personal info; no lab values."""
-    return f"""You are an expert medical document reader for Arabic and English reports.
+    return f"""You are an expert bilingual Arabic/English medical document reader.
 
 Task: Extract ONLY PATIENT PERSONAL INFORMATION from this report image (page {idx}/{total_pages}).
 Do NOT extract lab results. Handle multiple reports in one PDF: each report is separate.
@@ -11,56 +11,75 @@ Return exactly one JSON object per report, no markdown.
 
 FIELDS TO RETURN (all strings): patient_name, patient_gender, patient_age, patient_dob, report_date, doctor_names
 
-WHERE TO LOOK (in order):
-1) Top-right header area (common in Arabic labs; RTL)
-2) Top-left header area (common in English labs; LTR)
-3) Center-top header
-4) Side header panels
-5) Top 40% of page for any standalone fields
-6) Signature blocks, footer areas, referral info for doctor names
+BILINGUAL REPORT STRUCTURE
+- Arabic reports often show bilingual headers: Arabic text (RTL) on RIGHT side, English (LTR) on LEFT side.
+- Labels and values appear TOGETHER in both languages.
+- Search RIGHT side first for Arabic labels, then LEFT side for English equivalents.
+- PREFER the field with more actual data content (not just labels).
 
-MULTI-REPORT HANDLING
-- If page shows TWO separate report headers/sections, treat as two reports.
-- Extract patient info only for the current report section.
-- Do NOT mix data from different reports.
+WHERE TO LOOK (priority order):
+1) TOP-RIGHT header area (Arabic side of bilingual reports)
+2) TOP-LEFT header area (English side)
+3) Center-top section
+4) Entire header row(s) - scan left to right and right to left
+5) Footer and signature areas (especially for doctor names)
+6) Any standalone fields in top 40% of page
 
-PATIENT NAME (MANDATORY, use strict matching)
-- Labels: "اسم المريض", "المريض", "الاسم", "Patient Name", "Name", "Pt Name" (exact or near-exact label match)
-- Remove labels and titles (Mr, Mrs, Dr, Prof, د., دكتور, السيد, السيدة).
-- Keep original language spelling (Arabic or English).
-- NOT: IDs, account numbers, medical file numbers, or single short words.
-- If no match with clear label, return "".
+PATIENT NAME (CRITICAL - MUST FIND)
+- Arabic labels: "اسم المريض", "اسم المرضى", "اسم", "Patient Name", "Name"
+- Location: Header area, often in RIGHT side (Arabic) AND/OR LEFT side (English) - look for BOTH
+- Extract: Text immediately following the label (right-to-left for Arabic, left-to-right for English)
+- Clean: Remove titles like Dr., Mr., Mrs., Prof., د., دكتور, السيد, السيدة, أ.د
+- If TWO names found (one Arabic, one English), use the LONGER/MORE COMPLETE one
+- Validate: 3+ characters, looks like a person's name (NOT: "Patient", "N/A", numbers, facility names)
+- Return: Original language text or "" if uncertain
 
-GENDER (MANDATORY)
-- Labels: "الجنس", "جنس", "النوع", "Gender", "Sex", "M/F"
-- Values: If Arabic, "ذكر" -> "Male"; "أنثى" -> "Female". If English, normalize to "Male" or "Female".
-- If unclear or coded, return "".
+GENDER
+- Arabic labels: "الجنس", "جنس", "النوع", "Gender", "Sex"
+- Arabic values: "ذكر" -> "Male"; "أنثى" -> "Female"
+- English values: normalize to exactly "Male" or "Female"
+- Return: Only "Male", "Female", or ""
 
 AGE / DOB
-- DOB labels: "تاريخ الميلاد", "DOB", "Date of Birth", "Birth Date". Format as YYYY-MM-DD only (no time).
-- Age labels: "العمر", "Age". Extract number only (e.g., "50").
-- If only DOB found, leave age empty; if only age found, leave DOB empty.
+- DOB Arabic labels: "تاريخ الميلاد", "تاريخ الولادة"
+- DOB English labels: "DOB", "Date of Birth"
+- Age Arabic labels: "العمر"
+- Age English labels: "Age"
+- DOB Format: Convert to YYYY-MM-DD (handle both DD/MM/YYYY and MM/DD/YYYY formats)
+- Age: Extract NUMBER only (1-120)
+- Return: Both if available; one if only one available; "" if none
 
-REPORT DATE (DATE ONLY, no time)
-- Labels: "تاريخ الطلب", "تاريخ الفحص", "تاريخ", "التاريخ", "Report Date", "Test Date", "Date", "Date/Time".
-- Extract ONLY the date portion in YYYY-MM-DD format (ignore any time/timestamp).
-- Example: "2025-12-31 10:00:02" -> report_date: "2025-12-31"
+REPORT DATE (CRITICAL - DATE ONLY, NO TIMESTAMP)
+- Arabic labels: "تاريخ الطلب", "تاريخ الفحص", "التاريخ", "تاريخ التقرير"
+- English labels: "Report Date", "Test Date", "Date", "Date/Time"
+- Location: Top section, often MULTIPLE locations (pick most recent/prominent)
+- Extract: ONLY the DATE part in YYYY-MM-DD format
+- CRITICAL: If shows "2025-12-31 10:00:02.0" or similar, EXTRACT ONLY "2025-12-31"
+- Timestamp (time portion after date) must be REMOVED
+- Return: YYYY-MM-DD only, or "" if not found
 
-DOCTOR / PHYSICIAN (MANDATORY if present; search thoroughly)
-- Labels: "الطبيب", "طبيب", "الطبيب المعالج", "الطبيب المسؤول", "طبيب المعالجة", "Doctor", "Physician", "Ref By", "Referred By", "Signature".
-- Search: Header areas, signature blocks, footer, referral notes, any name near doctor labels.
-- Remove titles (Dr., د., Prof, Prof., أ.د, الدكتور).
-- If multiple doctors, join with comma (e.g., "Ahmed Salem, Fatima Ali").
-- If doctor field is visible but empty/blank, return "".
-- Otherwise, keep the extracted name exactly as written.
+DOCTOR / PHYSICIAN (CRITICAL - SEARCH THOROUGHLY)
+- Arabic labels: "الطبيب", "طبيب", "الطبيب المعالج", "طبيب المعالجة", "المحيل", "الطبيب المسؤول"
+- English labels: "Doctor", "Physician", "Ref By", "Referred By", "Signature", "Doctor Name"
+- Search locations:
+  1. Header area (near patient name)
+  2. Side panels or right margin (Arabic text area)
+  3. SIGNATURE BLOCKS at bottom (check for "Dr. [Name]" or "الطبيب [الاسم]")
+  4. Footer referral info
+  5. Any line with doctor-related label
+- Extract: The NAME that immediately follows the doctor label
+- Clean: Remove ALL titles (Dr., Dr, Prof., Prof, د., دكتور, أ.د, الدكتور, أستاذ)
+- If multiple: Join with comma (e.g., "Ahmed Salem, Fatima Ali")
+- Validate: Must look like a person's name (3+ chars), not a facility or lab
+- Return: Clean name(s) or "" if no doctor field/name visible
 
 SELF-VALIDATION BEFORE RETURNING
-- patient_name is a real name, not an ID/number/label. If no clear match, set to "".
-- patient_gender is exactly "Male", "Female", or "".
-- patient_age numeric 1-120 or "".
-- report_date is YYYY-MM-DD only (no time). If timestamp present, extract date part only.
-- patient_dob is YYYY-MM-DD or "".
-- doctor_names filled if doctor label/signature found with a name. Empty only if no doctor visible.
+- patient_name: Real person name (3+ chars, not ID/number/facility). Return "" if doubt.
+- patient_gender: Exactly "Male", "Female", or "".
+- patient_age: Numeric 1-120 or "".
+- patient_dob: YYYY-MM-DD or "".
+- report_date: YYYY-MM-DD ONLY (no time/timestamp). This field is CRITICAL.
+- doctor_names: Person name or "" if not found. No titles included.
 
 JSON OUTPUT (exactly this object, no extra text):
 {{
@@ -95,29 +114,40 @@ HOW TO READ TABLES
 - Map by position: col1 test, col2 value, col3 unit, col4 range.
 
 ROW-BY-ROW PROTOCOL (for EACH row)
-1) Boundaries: Identify the horizontal band for THIS row only.
-2) field_name: Read column 1 of THIS row.
-3) field_value: Follow same line to column 2. If blank / -, --, —, *, ., N/A -> "".
-   SKIP THIS ROW if field_value is empty/blank (do NOT add empty rows).
-4) field_unit: Column 3. If symbol or blank -> "".
-5) normal_range: Column 4. If blank / -, --, —, (-), *, symbols without numbers -> "" (do NOT invent a range).
-6) is_normal: null if value or range empty/non-numeric. Else true/false by comparing numeric value to range.
-7) category: Section header if present, else "".
-8) notes: Any flags/notes in the row, else "".
+CRITICAL: Use EXTREME caution with row boundaries. Trace horizontal lines precisely.
 
-MULTI-REPORT HANDLING IN TABLES
-- If table shows TWO report sections (different headers/sections), extract each separately.
-- Do NOT mix rows from different report sections into one output.
-- Return separate medical_data arrays for each report.
+1) Visual Row Boundary: Draw an imaginary horizontal line across THIS row ONLY. Do not look above or below.
+2) field_name: Read ONLY from the far left cell of THIS row's boundary.
+3) field_value: Trace straight RIGHT along THIS row's line to the NEXT column. STOP at the vertical boundary.
+   - Do NOT look at other rows' values.
+   - If there is NO value in this cell for THIS row, return "".
+4) field_unit: Continue RIGHT along THIS row's line to the UNIT column. STOP at vertical boundary.
+   - Extract the unit symbol from THIS row ONLY.
+   - If blank or symbol, return "".
+5) normal_range: Continue RIGHT along THIS row to the RANGE column. STOP at vertical boundary.
+   - Extract the numeric range from THIS row ONLY.
+   - If blank, return "" (never invent).
+6) is_normal: Calculate ONLY using THIS row's value and range.
+7) category: Section header for THIS row's section, else "".
+8) notes: Flags in THIS row ONLY, else "".
+
+RED FLAGS that indicate misalignment (REDO the row if found):
+- field_value looks like a unit (e.g., "%" or "K/uL")
+- field_unit looks like a range (e.g., "(4-11)")
+- normal_range looks like a value (e.g., "5.2" or "109")
+- The extracted value is physically in a different row than the test name in the image
+- Units don't match the test type (e.g., "%" for RBC which should be M/uL or cells/L)
 
 VALIDATION BEFORE RETURN
 - Every row has field_name (no empty field_names).
 - Every row has field_value (skip rows with empty/blank values).
-- Units are not symbols.
+- Units are not symbols and not numbers.
 - If range present, it contains numbers (if range truly absent, leave empty; never invent).
+- CRITICAL: Normal_range must NOT look like a value, and field_value must NOT look like a unit or range.
 - Duplicate ranges allowed when units differ or the source shows the same range; re-check only if same unit and the range clearly belongs to another row.
 - Common sense: WBC ~4-11 K/uL; RBC ~4-5.5 M/uL; Hgb ~12-16 g/dL. If wildly off, re-check.
 - Do NOT return medical_data entries with empty field_name or field_value. Skip those rows entirely.
+- If ANY extracted row looks misaligned (e.g., value is a %, unit is a range, range is a value), RE-CHECK that row's alignment before including it.
 
 JSON OUTPUT (exactly this structure, no extra text):
 {{
@@ -141,22 +171,41 @@ def get_table_retry_prompt(idx, total_pages):
     return f"""You are reading a lab report image (page {idx}/{total_pages}) in Arabic or English.
 Focus ONLY on table rows. Return exactly one JSON object with medical_data.
 
-RULES
-1) One row at a time. Follow the horizontal line even if slanted.
-2) If a cell in THIS row is empty or a symbol (-, *, .), return "" for that cell.
-3) Do NOT copy values/ranges from other rows. Never invent values.
-4) Skip rows where field_name or field_value is empty (do not add empty rows to output).
-5) If page has multiple reports (different sections/headers), treat each report separately.
-6) Before returning, check if any two different tests share the EXACT same range AND same unit -> only re-check alignment in that case. If units differ (e.g., value vs %), keep both.
+CRITICAL ALIGNMENT RULES
+1) Vertical Column Boundaries: Each table has clear vertical lines separating columns.
+   - Do NOT cross these boundaries.
+   - Column 1 = Test Names (far left)
+   - Column 2 = Values (after first vertical line)
+   - Column 3 = Units (after second vertical line)
+   - Column 4 = Normal Range (after third vertical line)
+
+2) Horizontal Row Boundaries: Each row has a clear horizontal space or line separating it from adjacent rows.
+   - Trace across ONE row at a time.
+   - Read each column value ONLY from within that row's horizontal band.
+
+3) One row at a time. Follow the horizontal line even if slanted.
+4) If a cell in THIS row is empty or a symbol (-, *, .), return "" for that cell.
+5) Do NOT copy values/ranges from other rows. Never invent values.
+6) MISALIGNMENT CHECK: Before returning, verify that:
+   - Each field_value is a number or qualitative text (NOT a %, unit, or range)
+   - Each field_unit is a medical unit (NOT a number, range, or percentage symbol alone)
+   - Each normal_range is a range like (X-Y) (NOT a number or unit)
+   - If any two different tests share the EXACT same range AND same unit -> re-check alignment.
 
 READING STEPS PER ROW
-- field_name: test column in THIS row.
+- field_name: test column in THIS row. Must be a medical test name.
 - field_value: result column same row; if empty/-/*/blank -> "".
   (If field_value is empty, SKIP THIS ROW entirely—do not add it to medical_data).
-- field_unit: unit column same row.
+- field_unit: unit column same row. Must be a medical unit abbreviation.
 - normal_range: range column same row; if empty/-/(-)/*/symbol-only -> "".
   (If the report shows an empty range, leave it empty. Do NOT invent ranges.)
 - is_normal: null if value or range empty; else true/false only if numbers present.
+
+FINAL CHECK
+- value should NOT contain % or unit symbols
+- unit should NOT contain numbers, ranges, or value-like content
+- range should NOT contain just a single number
+- If this check FAILS, recheck the row alignment
 
 OUTPUT: Only rows with non-empty field_name AND non-empty field_value.
 

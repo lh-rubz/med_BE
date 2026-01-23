@@ -19,6 +19,7 @@ from config import ollama_client, Config
 from utils.medical_validator import validate_medical_data, MedicalValidator
 from utils.medical_mappings import add_new_alias
 from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_personal_info_prompt
+from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt
 from ollama import Client
 
 # Create namespace
@@ -408,6 +409,59 @@ class ChatResource(Resource):
                 print(f"⚠️ Personal info extraction error (Page {idx}): {str(e)}")
                 personal_data = {}
             
+            # SELF-CORRECTION LOOP: Analyze extraction for errors and retry if needed
+            print(f"🔍 Analyzing personal info extraction for errors...")
+            analysis = analyze_extraction_issues(personal_data)
+            if analysis['has_issues']:
+                print(f"⚠️ Found {analysis['issue_count']} issue(s) in personal info extraction:")
+                for issue in analysis['issues']:
+                    print(f"   - {issue['type']}: {issue['reason']}")
+                
+                print(f"🔄 Running CORRECTIVE extraction pass for personal info...")
+                yield f"data: {json.dumps({'percent': current_progress + 7, 'message': f'Correcting personal info errors (page {idx})...'})}\n\n"
+                
+                corrective_prompt = generate_corrective_prompt(personal_data, analysis, idx, total_pages)
+                try:
+                    content = [
+                        {'type': 'text', 'text': corrective_prompt},
+                        {
+                            'type': 'image_url',
+                            'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                        }
+                    ]
+                    
+                    correction_completion = ollama_client.chat.completions.create(
+                        model=Config.OLLAMA_MODEL,
+                        messages=[{'role': 'user', 'content': content}],
+                        temperature=0.1,
+                        response_format={"type": "json_object"},
+                        max_tokens=800,
+                        timeout=60.0
+                    )
+                    correction_response = correction_completion.choices[0].message.content.strip()
+                    print(f"✅ Corrective Response for Page {idx}:\n{'-'*40}\n{correction_response[:200]}...\n{'-'*40}")
+                    
+                    try:
+                        start_idx = correction_response.find('{')
+                        end_idx = correction_response.rfind('}')
+                        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                            json_str = correction_response[start_idx:end_idx+1]
+                            corrected_data = json.loads(json_str)
+                            
+                            # Compare: if corrected version has fewer issues, use it
+                            corrected_analysis = analyze_extraction_issues(corrected_data)
+                            if corrected_analysis['issue_count'] < analysis['issue_count']:
+                                personal_data = corrected_data
+                                print(f"✅ IMPROVEMENT: Reduced issues from {analysis['issue_count']} to {corrected_analysis['issue_count']}")
+                            else:
+                                print(f"⚠️ Corrected version not better (issues: {corrected_analysis['issue_count']} vs {analysis['issue_count']}), keeping original")
+                    except Exception as corr_json_err:
+                        print(f"⚠️ JSON Parsing Failed for corrective response: {corr_json_err}")
+                except Exception as corr_e:
+                    print(f"⚠️ Corrective extraction error: {str(corr_e)}")
+            else:
+                print(f"✅ No major issues detected in personal info extraction")
+            
             # Step 2: VLM Processing for Medical Data (Native Vision)
             print(f"🤖 Step 2: Extracting medical lab data...")
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Extracting medical values from page {idx}...'})}\n\n"
@@ -493,9 +547,13 @@ class ChatResource(Resource):
                     for item in new_items:
                         raw_test_name = item.get('field_name', '')
                         raw_test_val = item.get('field_value', '')
+                        raw_test_unit = item.get('field_unit', '')
+                        raw_test_range = item.get('normal_range', '')
                         
                         test_name = str(raw_test_name).strip() if raw_test_name is not None else ''
                         test_val = str(raw_test_val).strip() if raw_test_val is not None else ''
+                        test_unit = str(raw_test_unit).strip() if raw_test_unit is not None else ''
+                        test_range = str(raw_test_range).strip() if raw_test_range is not None else ''
                         
                         # SKIP IF: field_name is empty or is a header label
                         if not test_name or test_name.lower() in ['test name', 'test', 'الفحص', 'الاختبار']:
@@ -505,6 +563,58 @@ class ChatResource(Resource):
                         # SKIP IF: duplicate test name already processed
                         if test_name.lower() in existing_test_names:
                             print(f"⚠️ Duplicate test skipped: {test_name}")
+                            continue
+                        
+                        # CRITICAL: Detect misalignment - value looks like a unit or range
+                        # Example: value="%" or value="(4-11)" or unit="5.2" or range="cells/L"
+                        unit_symbols = {'%', 'mg/dl', 'mg/dL', 'U/L', 'K/uL', 'M/uL', 'g/dL', 'fL', 'pg', 'cells/L', 'cells/uL', 'mmol/L'}
+                        is_value_a_unit = any(sym in test_val for sym in unit_symbols) or test_val in ['%', '-', '*']
+                        is_value_a_range = test_val.startswith('(') and test_val.endswith(')')
+                        is_unit_a_value = test_unit and (any(ch.isdigit() for ch in test_unit) or test_unit in ['%', '-', '*'])
+                        is_unit_a_range = test_unit.startswith('(') and test_unit.endswith(')')
+                        is_range_a_value = test_range and not test_range.startswith('(') and not any(ch in test_range for ch in ['-', ','])
+                        is_range_a_unit = any(sym in test_range for sym in unit_symbols)
+                        
+                        # Additional check: known tests with expected unit types
+                        expected_units_map = {
+                            'fasting blood sugar': ['mg/dl', 'mmol/l'],
+                            'fbs': ['mg/dl', 'mmol/l'],
+                            'glucose': ['mg/dl', 'mmol/l'],
+                            'creatinine': ['mg/dl', 'umol/l'],
+                            'cholesterol': ['mg/dl', 'mmol/l'],
+                            'red blood cell': ['m/ul', 'k/ul'],
+                            'rbc': ['m/ul', 'k/ul'],
+                            'white blood cell': ['k/ul', 'm/ul'],
+                            'wbc': ['k/ul', 'm/ul'],
+                            'hemoglobin': ['g/dl'],
+                            'hgb': ['g/dl'],
+                            'hematocrit': ['%'],
+                            'hct': ['%'],
+                            'mean cell volume': ['fl'],
+                            'mcv': ['fl'],
+                            'platelets': ['k/ul'],
+                            'lymphocytes': ['%', 'cells/ul'],
+                            'monocytes': ['%', 'cells/ul'],
+                            'neutrophils': ['%', 'cells/ul'],
+                        }
+                        
+                        # Check if extracted unit contradicts known expected units for this test
+                        test_name_lower = test_name.lower()
+                        unit_conflict = False
+                        for known_test, expected_unit_list in expected_units_map.items():
+                            if known_test in test_name_lower and test_unit:
+                                unit_lower = test_unit.lower()
+                                # Check if unit contains digits mixed with letters (corruption sign)
+                                if any(ch.isdigit() for ch in unit_lower) and not any(ch.isdigit() for ch in test_val):
+                                    unit_conflict = True
+                                    break
+                        
+                        if is_value_a_unit or is_value_a_range or is_unit_a_value or is_unit_a_range or is_range_a_value or is_range_a_unit or unit_conflict:
+                            print(f"🚨 MISALIGNMENT DETECTED in row '{test_name}':")
+                            print(f"   Value: '{test_val}' {'(looks like unit!)' if is_value_a_unit else '(looks like range!)' if is_value_a_range else ''}")
+                            print(f"   Unit: '{test_unit}' {'(looks like value!)' if is_unit_a_value else '(looks like range!)' if is_unit_a_range else '(unit conflict!)' if unit_conflict else ''}")
+                            print(f"   Range: '{test_range}' {'(looks like value!)' if is_range_a_value else '(looks like unit!)' if is_range_a_unit else ''}")
+                            print(f"   SKIPPING to avoid data corruption")
                             continue
                         
                         # Enhanced empty value detection - recognize all empty indicators
@@ -541,7 +651,7 @@ class ChatResource(Resource):
                         if has_digit or is_qualitative:
                             unique_new_items.append(item)
                             existing_test_names.add(test_name.lower())
-                            print(f"✅ Added field: {test_name} = '{test_val_cleaned}'")
+                            print(f"✅ Added field: {test_name} = '{test_val_cleaned}' {test_unit}")
                         else:
                             # Value doesn't look like a valid medical result - skip
                             print(f"⚠️ Skipping invalid test value: {test_name} = '{test_val_cleaned}'")
