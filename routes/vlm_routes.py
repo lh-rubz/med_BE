@@ -686,10 +686,11 @@ class ChatResource(Resource):
                 print(f"⛔ Rejected as non-medical: {error_msg}")
                 continue
             
+            unique_new_items = []  # Initialize outside to avoid scope error
+            
             if extracted_data.get('medical_data'):
                 new_items = extracted_data['medical_data']
                 
-                unique_new_items = []
                 existing_test_names = {str(item.get('field_name', '')).lower() for item in all_extracted_data}
                 
                 for item in new_items:
@@ -702,96 +703,96 @@ class ChatResource(Resource):
                     test_val = str(raw_test_val).strip() if raw_test_val is not None else ''
                     test_unit = str(raw_test_unit).strip() if raw_test_unit is not None else ''
                     test_range = str(raw_test_range).strip() if raw_test_range is not None else ''
-                        
-                # SKIP IF: field_name is empty or is a header label
-                if not test_name or test_name.lower() in ['test name', 'test', 'الفحص', 'الاختبار']:
-                    print(f"⚠️ Skipping row with empty/label field_name: '{test_name}'")
-                    continue
-                
-                # SKIP IF: duplicate test name already processed
-                if test_name.lower() in existing_test_names:
-                    print(f"⚠️ Duplicate test skipped: {test_name}")
-                    continue
-                
-                # CRITICAL: Detect misalignment - value looks like a unit or range
-                # Be STRICT about catching corruption but don't be overly paranoid
-                unit_symbols = {'%', 'mg/dl', 'mg/dL', 'U/L', 'K/uL', 'M/uL', 'g/dL', 'fL', 'pg', 'cells/L', 'cells/uL', 'mmol/L'}
-                
-                # Check 1: Is value a unit symbol (OBVIOUS corruption)
-                is_value_a_unit = test_val in unit_symbols
-                
-                # Check 2: Is value a range like "(4-11)" (OBVIOUS corruption)
-                is_value_a_range = test_val.startswith('(') and test_val.endswith(')') and '-' in test_val
-                
-                # Check 3: Is unit all digits (OBVIOUS corruption - value leak into unit column)
-                is_unit_a_value = test_unit and test_unit.replace('.', '').isdigit()
-                
-                # Check 4: Is unit a parenthesized range (OBVIOUS corruption)
-                is_unit_a_range = test_unit.startswith('(') and test_unit.endswith(')') and '-' in test_unit
-                
-                # Check 5: Is range a single number without dashes (OBVIOUS corruption - value leaked)
-                is_range_a_value = test_range and not test_range.startswith('(') and not '-' in test_range and test_range.replace('.', '').isdigit()
-                
-                # Check 6: Is range just a unit symbol (OBVIOUS corruption)
-                is_range_a_unit = test_range in unit_symbols
-                
-                if is_value_a_unit or is_value_a_range or is_unit_a_value or is_unit_a_range or is_range_a_value or is_range_a_unit:
-                    print(f"🚨 MISALIGNMENT DETECTED in row '{test_name}':")
-                    if is_value_a_unit:
-                        print(f"   Value is unit symbol: '{test_val}'")
-                    if is_value_a_range:
-                        print(f"   Value is range format: '{test_val}'")
-                    if is_unit_a_value:
-                        print(f"   Unit is numeric: '{test_unit}'")
-                    if is_unit_a_range:
-                        print(f"   Unit is range format: '{test_unit}'")
-                    if is_range_a_value:
-                        print(f"   Range is single number: '{test_range}'")
-                    if is_range_a_unit:
-                        print(f"   Range is unit symbol: '{test_range}'")
-                    print(f"   SKIPPING to avoid data corruption")
-                    continue
+                    
+                    # SKIP IF: field_name is empty or is a header label
+                    if not test_name or test_name.lower() in ['test name', 'test', 'الفحص', 'الاختبار']:
+                        print(f"⚠️ Skipping row with empty/label field_name: '{test_name}'")
+                        continue
+                    
+                    # SKIP IF: duplicate test name already processed
+                    if test_name.lower() in existing_test_names:
+                        print(f"⚠️ Duplicate test skipped: {test_name}")
+                        continue
+                    
+                    # CRITICAL: Detect misalignment - value looks like a unit or range
+                    # Be STRICT about catching corruption but don't be overly paranoid
+                    unit_symbols = {'%', 'mg/dl', 'mg/dL', 'U/L', 'K/uL', 'M/uL', 'g/dL', 'fL', 'pg', 'cells/L', 'cells/uL', 'mmol/L'}
+                    
+                    # Check 1: Is value a unit symbol (OBVIOUS corruption)
+                    is_value_a_unit = test_val in unit_symbols
+                    
+                    # Check 2: Is value a range like "(4-11)" (OBVIOUS corruption)
+                    is_value_a_range = test_val.startswith('(') and test_val.endswith(')') and '-' in test_val
+                    
+                    # Check 3: Is unit all digits (OBVIOUS corruption - value leak into unit column)
+                    is_unit_a_value = test_unit and test_unit.replace('.', '').isdigit()
+                    
+                    # Check 4: Is unit a parenthesized range (OBVIOUS corruption)
+                    is_unit_a_range = test_unit.startswith('(') and test_unit.endswith(')') and '-' in test_unit
+                    
+                    # Check 5: Is range a single number without dashes (OBVIOUS corruption - value leaked)
+                    is_range_a_value = test_range and not test_range.startswith('(') and not '-' in test_range and test_range.replace('.', '').isdigit()
+                    
+                    # Check 6: Is range just a unit symbol (OBVIOUS corruption)
+                    is_range_a_unit = test_range in unit_symbols
+                    
+                    if is_value_a_unit or is_value_a_range or is_unit_a_value or is_unit_a_range or is_range_a_value or is_range_a_unit:
+                        print(f"🚨 MISALIGNMENT DETECTED in row '{test_name}':")
+                        if is_value_a_unit:
+                            print(f"   Value is unit symbol: '{test_val}'")
+                        if is_value_a_range:
+                            print(f"   Value is range format: '{test_val}'")
+                        if is_unit_a_value:
+                            print(f"   Unit is numeric: '{test_unit}'")
+                        if is_unit_a_range:
+                            print(f"   Unit is range format: '{test_unit}'")
+                        if is_range_a_value:
+                            print(f"   Range is single number: '{test_range}'")
+                        if is_range_a_unit:
+                            print(f"   Range is unit symbol: '{test_range}'")
+                        print(f"   SKIPPING to avoid data corruption")
+                        continue
 
-                
-                # Enhanced empty value detection - recognize all empty indicators
-                empty_indicators = {'', ' ', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
-                                  'nil', 'none', 'unknown', 'null', 'nul', 'not available', '.', '..',
-                                  'غير متوفر', 'غير موجود'}
-                test_val_cleaned = test_val.strip() if test_val else ''
-                test_val_lower = test_val_cleaned.lower()
-                
-                # SKIP rows with EMPTY field_value (as per original logic)
-                if test_val_lower in empty_indicators or not test_val_cleaned:
-                    print(f"⚠️ Skipping row with empty field_value: {test_name}")
-                    continue
-                
-                # Also check normal_range for empty indicators (but don't skip - allow missing ranges)
-                normal_range_raw = str(item.get('normal_range', '') or '').strip()
-                normal_range_lower = normal_range_raw.lower()
-                
-                # Clean normal_range if it's an empty indicator - convert to empty string
-                if normal_range_raw in ['-', '--', '—', '*', '(-)', '.'] or normal_range_lower in empty_indicators:
-                    # Check if it actually contains numbers - if not, it's empty
-                    if not any(ch.isdigit() for ch in normal_range_raw):
-                        item['normal_range'] = ''
-                        print(f"⚠️ Cleaned empty normal_range for {test_name}: '{normal_range_raw}' -> ''")
+                    
+                    # Enhanced empty value detection - recognize all empty indicators
+                    empty_indicators = {'', ' ', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
+                                      'nil', 'none', 'unknown', 'null', 'nul', 'not available', '.', '..',
+                                      'غير متوفر', 'غير موجود'}
+                    test_val_cleaned = test_val.strip() if test_val else ''
+                    test_val_lower = test_val_cleaned.lower()
+                    
+                    # SKIP rows with EMPTY field_value (as per original logic)
+                    if test_val_lower in empty_indicators or not test_val_cleaned:
+                        print(f"⚠️ Skipping row with empty field_value: {test_name}")
+                        continue
+                    
+                    # Also check normal_range for empty indicators (but don't skip - allow missing ranges)
+                    normal_range_raw = str(item.get('normal_range', '') or '').strip()
+                    normal_range_lower = normal_range_raw.lower()
+                    
+                    # Clean normal_range if it's an empty indicator - convert to empty string
+                    if normal_range_raw in ['-', '--', '—', '*', '(-)', '.'] or normal_range_lower in empty_indicators:
+                        # Check if it actually contains numbers - if not, it's empty
+                        if not any(ch.isdigit() for ch in normal_range_raw):
+                            item['normal_range'] = ''
+                            print(f"⚠️ Cleaned empty normal_range for {test_name}: '{normal_range_raw}' -> ''")
 
-                
-                # Check for qualitative results (normal/abnormal text)
-                qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
-                is_qualitative = any(token in test_val_lower for token in qualitative_tokens)
-                
-                # Check if value contains numbers
-                has_digit = any(ch.isdigit() for ch in test_val_cleaned)
-                
-                # Accept if it has digits OR is a qualitative result
-                if has_digit or is_qualitative:
-                    unique_new_items.append(item)
-                    existing_test_names.add(test_name.lower())
-                    print(f"✅ Added field: {test_name} = '{test_val_cleaned}' {test_unit}")
-                else:
-                    # Value doesn't look like a valid medical result - skip
-                    print(f"⚠️ Skipping invalid test value: {test_name} = '{test_val_cleaned}'")
+                    
+                    # Check for qualitative results (normal/abnormal text)
+                    qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
+                    is_qualitative = any(token in test_val_lower for token in qualitative_tokens)
+                    
+                    # Check if value contains numbers
+                    has_digit = any(ch.isdigit() for ch in test_val_cleaned)
+                    
+                    # Accept if it has digits OR is a qualitative result
+                    if has_digit or is_qualitative:
+                        unique_new_items.append(item)
+                        existing_test_names.add(test_name.lower())
+                        print(f"✅ Added field: {test_name} = '{test_val_cleaned}' {test_unit}")
+                    else:
+                        # Value doesn't look like a valid medical result - skip
+                        print(f"⚠️ Skipping invalid test value: {test_name} = '{test_val_cleaned}'")
             
             all_extracted_data.extend(unique_new_items)
             print(f"✅ Extracted {len(unique_new_items)} field(s) from page {idx}")
