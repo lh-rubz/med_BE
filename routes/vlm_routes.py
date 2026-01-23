@@ -429,11 +429,18 @@ OUTPUT JSON ONLY:
                     temperature=0.1,
                     response_format={"type": "json_object"},
                     max_tokens=1000,
-                    timeout=60.0
+                    timeout=120.0
                 )
                 resp_p = completion_p.choices[0].message.content.strip()
-                extracted_patient_data = json.loads(resp_p) if '{' in resp_p else {}
-                print(f"✅ Patient Info Extracted: {extracted_patient_data.get('patient_name', 'N/A')}")
+                
+                # Robust JSON extraction
+                p_start = resp_p.find('{')
+                p_end = resp_p.rfind('}')
+                if p_start != -1 and p_end != -1:
+                    extracted_patient_data = json.loads(resp_p[p_start:p_end+1])
+                    print(f"✅ Patient Info Extracted: {extracted_patient_data.get('patient_name', 'N/A')}")
+                else:
+                    print(f"⚠️ Stage 1 Warning: No JSON found in response. Raw: {resp_p[:100]}...")
             except Exception as e:
                 print(f"⚠️ Stage 1 Error: {e}")
 
@@ -450,10 +457,8 @@ Your task is to extract the MEDICAL RESULTS TABLE from Page {idx}/{total_pages} 
 1. **Visualize Rows**: Draw an invisible line across each row.
 2. **Strict Alignment**: For every "Test Name", read the value strictly to its RIGHT in the same row.
    - **NEVER** take a value from the row above or below.
-   - **Example**: If 'Lymphocytes' is on Row 5, do NOT read the value from Row 4 (Neutrophils).
 3. **Empty/Symbol Handling**:
    - If a Result cell contains "*", "-", "--", "—", or is blank -> Output "" (Empty String).
-   - **Example**: If 'Basophils' has a '*' in the result column, its value is "". Do NOT grab '2.9' from the row above.
 4. **Ranges**:
    - Extract the Normal Range exactly as written for that row.
    - If the cell is empty or has '*', output "".
@@ -486,7 +491,7 @@ OUTPUT JSON ONLY:
                     temperature=0.1,
                     response_format={"type": "json_object"},
                     max_tokens=3000,
-                    timeout=120.0
+                    timeout=180.0
                 )
                 resp_t = completion_t.choices[0].message.content.strip()
                 
@@ -494,13 +499,22 @@ OUTPUT JSON ONLY:
                 start_idx = resp_t.find('{')
                 end_idx = resp_t.rfind('}')
                 if start_idx != -1 and end_idx != -1:
-                    extracted_table_data = json.loads(resp_t[start_idx:end_idx+1])
-                    print(f"✅ Medical Table Extracted: {len(extracted_table_data.get('medical_data', []))} items")
+                    json_str = resp_t[start_idx:end_idx+1]
+                    # Attempt to fix common JSON errors if needed (e.g. trailing commas)
+                    try:
+                        extracted_table_data = json.loads(json_str)
+                        print(f"✅ Medical Table Extracted: {len(extracted_table_data.get('medical_data', []))} items")
+                    except json.JSONDecodeError as je:
+                        print(f"⚠️ JSON Decode Error in Stage 2: {je}")
+                        # Last ditch effort: try to eval python dict (risky but okay for local) or regex
+                        # For now, just log it.
+                        print(f"   Raw JSON string: {json_str[:200]}...")
                 else:
-                     print(f"⚠️ No JSON in Stage 2 response")
+                     print(f"⚠️ No JSON in Stage 2 response. Raw: {resp_t[:200]}...")
                      
             except Exception as e:
                 print(f"⚠️ Stage 2 Error: {e}")
+
 
             # Merge Data for downstream processing
             extracted_data = {**extracted_patient_data, **extracted_table_data}
