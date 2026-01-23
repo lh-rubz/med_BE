@@ -18,7 +18,7 @@ from models import db, User, Report, ReportField, ReportFile, MedicalSynonym
 from config import ollama_client, Config
 from utils.medical_validator import validate_medical_data, MedicalValidator
 from utils.medical_mappings import add_new_alias
-from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt
+from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_personal_info_prompt
 from ollama import Client
 
 # Create namespace
@@ -365,8 +365,51 @@ class ChatResource(Resource):
                 print(f"📖 PDF Page: {image_info['page_number']}/{image_info.get('total_pages', '?')}")
             print(f"{'='*80}\n")
             
-            # Step 1: VLM Processing (Native Vision)
-            print(f"🤖 Step 1: Structuring data with Qwen2-VL (native vision)...")
+            # Step 1: Extract Personal Information (Name, Gender, Age, etc.)
+            print(f"🤖 Step 1: Extracting patient personal information...")
+            yield f"data: {json.dumps({'percent': current_progress + 5, 'message': f'Extracting patient info from page {idx}...'})}\n\n"
+            
+            personal_info_prompt = get_personal_info_prompt(idx, total_pages)
+            personal_data = {}
+            try:
+                image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
+                image_format = image_info['format']
+                
+                content = [
+                    {'type': 'text', 'text': personal_info_prompt},
+                    {
+                        'type': 'image_url',
+                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                    }
+                ]
+                
+                completion = ollama_client.chat.completions.create(
+                    model=Config.OLLAMA_MODEL,
+                    messages=[{'role': 'user', 'content': content}],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                    max_tokens=800,
+                    timeout=60.0
+                )
+                response_text = completion.choices[0].message.content.strip()
+                print(f"✅ Personal Info Response for Page {idx}:\n{'-'*40}\n{response_text[:200]}...\n{'-'*40}")
+                
+                try:
+                    start_idx = response_text.find('{')
+                    end_idx = response_text.rfind('}')
+                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                        json_str = response_text[start_idx:end_idx+1]
+                        personal_data = json.loads(json_str)
+                        print(f"✅ Personal info extracted for Page {idx}")
+                except Exception as json_err:
+                    print(f"⚠️ JSON Parsing Failed for personal info (Page {idx}): {json_err}")
+                    personal_data = {}
+            except Exception as e:
+                print(f"⚠️ Personal info extraction error (Page {idx}): {str(e)}")
+                personal_data = {}
+            
+            # Step 2: VLM Processing for Medical Data (Native Vision)
+            print(f"🤖 Step 2: Extracting medical lab data...")
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Extracting medical values from page {idx}...'})}\n\n"
             
             prompt_text = get_main_vlm_prompt(idx, total_pages)
@@ -506,84 +549,64 @@ class ChatResource(Resource):
                     all_extracted_data.extend(unique_new_items)
                     print(f"✅ Extracted {len(unique_new_items)} UNIQUE field(s) from page {idx}")
                 
-                # Capture patient info - merge intelligently, prefer most complete data
-                new_name = str(extracted_data.get('patient_name', '') or '').strip()
-                new_gender = str(extracted_data.get('patient_gender', '') or '').strip()
-                new_age = str(extracted_data.get('patient_age', '') or '').strip()
-                new_dob = str(extracted_data.get('patient_dob', '') or '').strip()
-                new_doctor = str(extracted_data.get('doctor_names', '') or '').strip()
-                new_report_date = str(extracted_data.get('report_date', '') or '').strip()
+                # Merge personal info: Use the dedicated personal_info extraction (Step 1)
+                # This is more accurate than trying to extract it with medical data
+                personal_name = str(personal_data.get('patient_name', '') or '').strip()
+                personal_gender = str(personal_data.get('patient_gender', '') or '').strip()
+                personal_age = str(personal_data.get('patient_age', '') or '').strip()
+                personal_dob = str(personal_data.get('patient_dob', '') or '').strip()
+                personal_doctor = str(personal_data.get('doctor_names', '') or '').strip()
+                personal_report_date = str(personal_data.get('report_date', '') or '').strip()
+                
+                # Also extract from medical_data prompt as fallback
+                fallback_name = str(extracted_data.get('patient_name', '') or '').strip()
+                fallback_gender = str(extracted_data.get('patient_gender', '') or '').strip()
+                fallback_age = str(extracted_data.get('patient_age', '') or '').strip()
+                fallback_dob = str(extracted_data.get('patient_dob', '') or '').strip()
+                fallback_doctor = str(extracted_data.get('doctor_names', '') or '').strip()
+                fallback_report_date = str(extracted_data.get('report_date', '') or '').strip()
+                
+                # PRIORITY: Use personal_data (from dedicated personal info prompt) first,
+                # fallback to medical_data extraction if personal_data is empty
+                new_name = personal_name or fallback_name
+                new_gender = personal_gender or fallback_gender
+                new_age = personal_age or fallback_age
+                new_dob = personal_dob or fallback_dob
+                new_doctor = personal_doctor or fallback_doctor
+                new_report_date = personal_report_date or fallback_report_date
                 
                 # Debug: Print what we extracted from this page
                 print(f"📋 Page {idx} - Extracted patient info:")
-                print(f"   Name: '{new_name}' (length: {len(new_name)})")
-                print(f"   Gender: '{new_gender}'")
+                print(f"   Name: '{new_name}' (from {'personal' if personal_name else 'fallback'})")
+                print(f"   Gender: '{new_gender}' (from {'personal' if personal_gender else 'fallback'})")
                 print(f"   Age: '{new_age}', DOB: '{new_dob}'")
                 print(f"   Doctor: '{new_doctor}'")
+                print(f"   Report Date: '{new_report_date}'")
                 
                 current_name = str(patient_info.get('patient_name', '') or '').strip()
                 current_gender = str(patient_info.get('patient_gender', '') or '').strip()
                 current_age = str(patient_info.get('patient_age', '') or '').strip()
                 current_dob = str(patient_info.get('patient_dob', '') or '').strip()
                 
-                # SMART FIX: If patient_name is rejected as label but doctor_names looks like a real person name,
-                # swap them - this handles the common VLM mistake of mixing up patient and doctor names
-                name_reject_patterns = [
-                    # Arabic labels
-                    'رقم المريض', 'اسم المريض', 'المريض', 'المرضى', 'الاسم', 
-                    'دكتور', 'طبيب', 'الطبيب', 'الموظف',
-                    # English labels
-                    'doctor', 'dr.', 'employee', 'patient name', 'patient id', 'patient number',
-                    'name', 'id number', 'gender', 'sex', 'date of birth', 'dob',
-                    # Partial matches
-                    'patient', 'patients', 'رقم', 'اسم'
-                ]
-                
-                new_name_is_label = False
-                if new_name:
-                    name_lower = new_name.lower().strip()
-                    # Check if name matches any reject pattern exactly or starts with it
-                    for pattern in name_reject_patterns:
-                        if name_lower == pattern.lower() or name_lower.startswith(pattern.lower() + ':'):
-                            print(f"⚠️ Rejected suspicious patient name (label): {new_name}")
-                            new_name_is_label = True
-                            new_name = ''
-                            break
-                    # Also reject if name is too short or looks like a number only
-                    if new_name and (len(new_name) < 3 or new_name.strip().isdigit()):
-                        print(f"⚠️ Rejected suspicious patient name (too short/numeric): {new_name}")
-                        new_name_is_label = True
-                        new_name = ''
-                
-                # SMART CORRECTION: If patient_name was rejected but doctor_names looks like a real person name
-                # (contains multiple words, looks like Arabic/English name, not a label), swap them
-                if new_name_is_label and new_doctor:
-                    doctor_lower = new_doctor.lower().strip()
-                    # Check if doctor name looks like a real person name (not a label)
-                    is_doctor_a_label = any(pattern in doctor_lower for pattern in name_reject_patterns)
-                    # Check if it looks like a real name (has multiple words or is Arabic name with spaces)
-                    has_multiple_words = len(new_doctor.split()) >= 2
-                    looks_like_real_name = has_multiple_words and not is_doctor_a_label and len(new_doctor) > 5
-                    
-                    if looks_like_real_name:
-                        print(f"🔄 SMART FIX: Swapping - doctor_names '{new_doctor}' looks like patient name")
-                        print(f"   Moving '{new_doctor}' from doctor_names to patient_name")
-                        new_name = new_doctor  # Use doctor name as patient name
-                        new_doctor = ''  # Clear doctor name as it was probably the patient name
+                # Note: With dedicated personal info extraction, we should have cleaner data
+                # The previous "SMART FIX" for swapping patient/doctor names should be less necessary
                 
                 # Merge patient info: use new data if current is empty, or if new is longer/more complete
-                # Only update if new value is actually valid (not empty, not a label)
+                # Since personal_data comes from dedicated prompt, it should be cleaner than fallback data
                 if new_name and len(new_name) > 2:  # At least 3 characters
                     if not current_name or (len(new_name) > len(current_name) and len(new_name) > 3):
                         patient_info['patient_name'] = new_name
                         print(f"✅ Updated patient_name: {new_name}")
                     
-                # Gender: only accept Male/Male equivalents or Female/Female equivalents
-                valid_genders = {'male', 'female', 'ذكر', 'أنثى', 'انثى', 'm', 'f'}
-                if new_gender and new_gender.lower() in valid_genders:
-                    if not current_gender or current_gender.lower() not in valid_genders:
-                        patient_info['patient_gender'] = new_gender
-                        print(f"✅ Updated patient_gender: {new_gender}")
+                # Gender: only accept "Male" or "Female" as normalized
+                if new_gender:
+                    gender_lower = new_gender.lower()
+                    if gender_lower in ['male', 'ذكر', 'm'] and (not current_gender or current_gender != 'Male'):
+                        patient_info['patient_gender'] = 'Male'
+                        print(f"✅ Updated patient_gender: Male")
+                    elif gender_lower in ['female', 'أنثى', 'انثى', 'f'] and (not current_gender or current_gender != 'Female'):
+                        patient_info['patient_gender'] = 'Female'
+                        print(f"✅ Updated patient_gender: Female")
                     
                 # Age: validate it's a reasonable number
                 if new_age:
@@ -602,7 +625,7 @@ class ChatResource(Resource):
                         patient_info['patient_dob'] = new_dob
                         print(f"✅ Updated patient_dob: {new_dob}")
                     
-                # Doctor names - separate field, can have multiple
+                # Doctor names - separate field
                 if new_doctor and len(new_doctor) > 2:
                     if not patient_info.get('doctor_names'):
                         patient_info['doctor_names'] = new_doctor
