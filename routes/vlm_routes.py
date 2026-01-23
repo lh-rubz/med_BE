@@ -635,227 +635,229 @@ class ChatResource(Resource):
             except Exception as e:
                 print(f"⚠️ Medical data extraction error (Page {idx}): {str(e)}")
                 extracted_data = {}
+            
+            # Debug: Print what we got
+            print(f"📊 Extracted data keys: {list(extracted_data.keys()) if extracted_data else 'EMPTY'}")
+            print(f"📊 Has medical_data key: {extracted_data.get('medical_data') is not None}")
+            if extracted_data.get('medical_data'):
+                print(f"📊 Medical data count: {len(extracted_data['medical_data'])} items")
+            
+            # Continue processing the extracted data
+            if extracted_data.get('is_medical_report') is False:
+                error_msg = extracted_data.get('reason', 'The uploaded file does not appear to be a valid medical report.')
+                print(f"⛔ Rejected as non-medical: {error_msg}")
+                continue
+            
+            if extracted_data.get('medical_data'):
+                new_items = extracted_data['medical_data']
+                
+                unique_new_items = []
+                existing_test_names = {str(item.get('field_name', '')).lower() for item in all_extracted_data}
+                
+                for item in new_items:
+                    raw_test_name = item.get('field_name', '')
+                    raw_test_val = item.get('field_value', '')
+                    raw_test_unit = item.get('field_unit', '')
+                    raw_test_range = item.get('normal_range', '')
+                    
+                    test_name = str(raw_test_name).strip() if raw_test_name is not None else ''
+                    test_val = str(raw_test_val).strip() if raw_test_val is not None else ''
+                    test_unit = str(raw_test_unit).strip() if raw_test_unit is not None else ''
+                    test_range = str(raw_test_range).strip() if raw_test_range is not None else ''
+                        
+                # SKIP IF: field_name is empty or is a header label
+                if not test_name or test_name.lower() in ['test name', 'test', 'الفحص', 'الاختبار']:
+                    print(f"⚠️ Skipping row with empty/label field_name: '{test_name}'")
+                    continue
+                
+                # SKIP IF: duplicate test name already processed
+                if test_name.lower() in existing_test_names:
+                    print(f"⚠️ Duplicate test skipped: {test_name}")
+                    continue
+                
+                # CRITICAL: Detect misalignment - value looks like a unit or range
+                # Be STRICT about catching corruption but don't be overly paranoid
+                unit_symbols = {'%', 'mg/dl', 'mg/dL', 'U/L', 'K/uL', 'M/uL', 'g/dL', 'fL', 'pg', 'cells/L', 'cells/uL', 'mmol/L'}
+                
+                # Check 1: Is value a unit symbol (OBVIOUS corruption)
+                is_value_a_unit = test_val in unit_symbols
+                
+                # Check 2: Is value a range like "(4-11)" (OBVIOUS corruption)
+                is_value_a_range = test_val.startswith('(') and test_val.endswith(')') and '-' in test_val
+                
+                # Check 3: Is unit all digits (OBVIOUS corruption - value leak into unit column)
+                is_unit_a_value = test_unit and test_unit.replace('.', '').isdigit()
+                
+                # Check 4: Is unit a parenthesized range (OBVIOUS corruption)
+                is_unit_a_range = test_unit.startswith('(') and test_unit.endswith(')') and '-' in test_unit
+                
+                # Check 5: Is range a single number without dashes (OBVIOUS corruption - value leaked)
+                is_range_a_value = test_range and not test_range.startswith('(') and not '-' in test_range and test_range.replace('.', '').isdigit()
+                
+                # Check 6: Is range just a unit symbol (OBVIOUS corruption)
+                is_range_a_unit = test_range in unit_symbols
+                
+                if is_value_a_unit or is_value_a_range or is_unit_a_value or is_unit_a_range or is_range_a_value or is_range_a_unit:
+                    print(f"🚨 MISALIGNMENT DETECTED in row '{test_name}':")
+                    if is_value_a_unit:
+                        print(f"   Value is unit symbol: '{test_val}'")
+                    if is_value_a_range:
+                        print(f"   Value is range format: '{test_val}'")
+                    if is_unit_a_value:
+                        print(f"   Unit is numeric: '{test_unit}'")
+                    if is_unit_a_range:
+                        print(f"   Unit is range format: '{test_unit}'")
+                    if is_range_a_value:
+                        print(f"   Range is single number: '{test_range}'")
+                    if is_range_a_unit:
+                        print(f"   Range is unit symbol: '{test_range}'")
+                    print(f"   SKIPPING to avoid data corruption")
+                    continue
 
+                
+                # Enhanced empty value detection - recognize all empty indicators
+                empty_indicators = {'', ' ', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
+                                  'nil', 'none', 'unknown', 'null', 'nul', 'not available', '.', '..',
+                                  'غير متوفر', 'غير موجود'}
+                test_val_cleaned = test_val.strip() if test_val else ''
+                test_val_lower = test_val_cleaned.lower()
+                
+                # SKIP rows with EMPTY field_value (as per original logic)
+                if test_val_lower in empty_indicators or not test_val_cleaned:
+                    print(f"⚠️ Skipping row with empty field_value: {test_name}")
+                    continue
+                
+                # Also check normal_range for empty indicators (but don't skip - allow missing ranges)
+                normal_range_raw = str(item.get('normal_range', '') or '').strip()
+                normal_range_lower = normal_range_raw.lower()
+                
+                # Clean normal_range if it's an empty indicator - convert to empty string
+                if normal_range_raw in ['-', '--', '—', '*', '(-)', '.'] or normal_range_lower in empty_indicators:
+                    # Check if it actually contains numbers - if not, it's empty
+                    if not any(ch.isdigit() for ch in normal_range_raw):
+                        item['normal_range'] = ''
+                        print(f"⚠️ Cleaned empty normal_range for {test_name}: '{normal_range_raw}' -> ''")
 
-
-                if extracted_data.get('is_medical_report') is False:
-                     error_msg = extracted_data.get('reason', 'The uploaded file does not appear to be a valid medical report.')
-                     print(f"⛔ Rejected as non-medical: {error_msg}")
-                     continue
                 
-                if extracted_data.get('medical_data'):
-                    new_items = extracted_data['medical_data']
-                    
-                    unique_new_items = []
-                    existing_test_names = {str(item.get('field_name', '')).lower() for item in all_extracted_data}
-                    
-                    for item in new_items:
-                        raw_test_name = item.get('field_name', '')
-                        raw_test_val = item.get('field_value', '')
-                        raw_test_unit = item.get('field_unit', '')
-                        raw_test_range = item.get('normal_range', '')
-                        
-                        test_name = str(raw_test_name).strip() if raw_test_name is not None else ''
-                        test_val = str(raw_test_val).strip() if raw_test_val is not None else ''
-                        test_unit = str(raw_test_unit).strip() if raw_test_unit is not None else ''
-                        test_range = str(raw_test_range).strip() if raw_test_range is not None else ''
-                        
-                        # SKIP IF: field_name is empty or is a header label
-                        if not test_name or test_name.lower() in ['test name', 'test', 'الفحص', 'الاختبار']:
-                            print(f"⚠️ Skipping row with empty/label field_name: '{test_name}'")
-                            continue
-                        
-                        # SKIP IF: duplicate test name already processed
-                        if test_name.lower() in existing_test_names:
-                            print(f"⚠️ Duplicate test skipped: {test_name}")
-                            continue
-                        
-                        # CRITICAL: Detect misalignment - value looks like a unit or range
-                        # Be STRICT about catching corruption but don't be overly paranoid
-                        unit_symbols = {'%', 'mg/dl', 'mg/dL', 'U/L', 'K/uL', 'M/uL', 'g/dL', 'fL', 'pg', 'cells/L', 'cells/uL', 'mmol/L'}
-                        
-                        # Check 1: Is value a unit symbol (OBVIOUS corruption)
-                        is_value_a_unit = test_val in unit_symbols
-                        
-                        # Check 2: Is value a range like "(4-11)" (OBVIOUS corruption)
-                        is_value_a_range = test_val.startswith('(') and test_val.endswith(')') and '-' in test_val
-                        
-                        # Check 3: Is unit all digits (OBVIOUS corruption - value leak into unit column)
-                        is_unit_a_value = test_unit and test_unit.replace('.', '').isdigit()
-                        
-                        # Check 4: Is unit a parenthesized range (OBVIOUS corruption)
-                        is_unit_a_range = test_unit.startswith('(') and test_unit.endswith(')') and '-' in test_unit
-                        
-                        # Check 5: Is range a single number without dashes (OBVIOUS corruption - value leaked)
-                        is_range_a_value = test_range and not test_range.startswith('(') and not '-' in test_range and test_range.replace('.', '').isdigit()
-                        
-                        # Check 6: Is range just a unit symbol (OBVIOUS corruption)
-                        is_range_a_unit = test_range in unit_symbols
-                        
-                        if is_value_a_unit or is_value_a_range or is_unit_a_value or is_unit_a_range or is_range_a_value or is_range_a_unit:
-                            print(f"🚨 MISALIGNMENT DETECTED in row '{test_name}':")
-                            if is_value_a_unit:
-                                print(f"   Value is unit symbol: '{test_val}'")
-                            if is_value_a_range:
-                                print(f"   Value is range format: '{test_val}'")
-                            if is_unit_a_value:
-                                print(f"   Unit is numeric: '{test_unit}'")
-                            if is_unit_a_range:
-                                print(f"   Unit is range format: '{test_unit}'")
-                            if is_range_a_value:
-                                print(f"   Range is single number: '{test_range}'")
-                            if is_range_a_unit:
-                                print(f"   Range is unit symbol: '{test_range}'")
-                            print(f"   SKIPPING to avoid data corruption")
-                            continue
-
-                        
-                        # Enhanced empty value detection - recognize all empty indicators
-                        empty_indicators = {'', ' ', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
-                                          'nil', 'none', 'unknown', 'null', 'nul', 'not available', '.', '..',
-                                          'غير متوفر', 'غير موجود'}
-                        test_val_cleaned = test_val.strip() if test_val else ''
-                        test_val_lower = test_val_cleaned.lower()
-                        
-                        # SKIP rows with EMPTY field_value (as per original logic)
-                        if test_val_lower in empty_indicators or not test_val_cleaned:
-                            print(f"⚠️ Skipping row with empty field_value: {test_name}")
-                            continue
-                        
-                        # Also check normal_range for empty indicators (but don't skip - allow missing ranges)
-                        normal_range_raw = str(item.get('normal_range', '') or '').strip()
-                        normal_range_lower = normal_range_raw.lower()
-                        
-                        # Clean normal_range if it's an empty indicator - convert to empty string
-                        if normal_range_raw in ['-', '--', '—', '*', '(-)', '.'] or normal_range_lower in empty_indicators:
-                            # Check if it actually contains numbers - if not, it's empty
-                            if not any(ch.isdigit() for ch in normal_range_raw):
-                                item['normal_range'] = ''
-                                print(f"⚠️ Cleaned empty normal_range for {test_name}: '{normal_range_raw}' -> ''")
-
-                        
-                        # Check for qualitative results (normal/abnormal text)
-                        qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
-                        is_qualitative = any(token in test_val_lower for token in qualitative_tokens)
-                        
-                        # Check if value contains numbers
-                        has_digit = any(ch.isdigit() for ch in test_val_cleaned)
-                        
-                        # Accept if it has digits OR is a qualitative result
-                        if has_digit or is_qualitative:
-                            unique_new_items.append(item)
-                            existing_test_names.add(test_name.lower())
-                            print(f"✅ Added field: {test_name} = '{test_val_cleaned}' {test_unit}")
-                        else:
-                            # Value doesn't look like a valid medical result - skip
-                            print(f"⚠️ Skipping invalid test value: {test_name} = '{test_val_cleaned}'")
-                    
-                    all_extracted_data.extend(unique_new_items)
-                    print(f"✅ Extracted {len(unique_new_items)} field(s) from page {idx}")
+                # Check for qualitative results (normal/abnormal text)
+                qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
+                is_qualitative = any(token in test_val_lower for token in qualitative_tokens)
                 
-                # Merge personal info: Use the dedicated personal_info extraction (Step 1)
-                # This is more accurate than trying to extract it with medical data
-                personal_name = str(personal_data.get('patient_name', '') or '').strip()
-                personal_gender = str(personal_data.get('patient_gender', '') or '').strip()
-                personal_age = str(personal_data.get('patient_age', '') or '').strip()
-                personal_dob = str(personal_data.get('patient_dob', '') or '').strip()
-                personal_doctor = str(personal_data.get('doctor_names', '') or '').strip()
-                personal_report_date = str(personal_data.get('report_date', '') or '').strip()
+                # Check if value contains numbers
+                has_digit = any(ch.isdigit() for ch in test_val_cleaned)
                 
-                # Also extract from medical_data prompt as fallback
-                fallback_name = str(extracted_data.get('patient_name', '') or '').strip()
-                fallback_gender = str(extracted_data.get('patient_gender', '') or '').strip()
-                fallback_age = str(extracted_data.get('patient_age', '') or '').strip()
-                fallback_dob = str(extracted_data.get('patient_dob', '') or '').strip()
-                fallback_doctor = str(extracted_data.get('doctor_names', '') or '').strip()
-                fallback_report_date = str(extracted_data.get('report_date', '') or '').strip()
+                # Accept if it has digits OR is a qualitative result
+                if has_digit or is_qualitative:
+                    unique_new_items.append(item)
+                    existing_test_names.add(test_name.lower())
+                    print(f"✅ Added field: {test_name} = '{test_val_cleaned}' {test_unit}")
+                else:
+                    # Value doesn't look like a valid medical result - skip
+                    print(f"⚠️ Skipping invalid test value: {test_name} = '{test_val_cleaned}'")
+            
+            all_extracted_data.extend(unique_new_items)
+            print(f"✅ Extracted {len(unique_new_items)} field(s) from page {idx}")
+            
+            # Merge personal info: Use the dedicated personal_info extraction (Step 1)
+            # This is more accurate than trying to extract it with medical data
+            personal_name = str(personal_data.get('patient_name', '') or '').strip()
+            personal_gender = str(personal_data.get('patient_gender', '') or '').strip()
+            personal_age = str(personal_data.get('patient_age', '') or '').strip()
+            personal_dob = str(personal_data.get('patient_dob', '') or '').strip()
+            personal_doctor = str(personal_data.get('doctor_names', '') or '').strip()
+            personal_report_date = str(personal_data.get('report_date', '') or '').strip()
+            
+            # Also extract from medical_data prompt as fallback
+            fallback_name = str(extracted_data.get('patient_name', '') or '').strip()
+            fallback_gender = str(extracted_data.get('patient_gender', '') or '').strip()
+            fallback_age = str(extracted_data.get('patient_age', '') or '').strip()
+            fallback_dob = str(extracted_data.get('patient_dob', '') or '').strip()
+            fallback_doctor = str(extracted_data.get('doctor_names', '') or '').strip()
+            fallback_report_date = str(extracted_data.get('report_date', '') or '').strip()
+            
+            # PRIORITY: Use personal_data (from dedicated personal info prompt) first,
+            # fallback to medical_data extraction if personal_data is empty
+            new_name = personal_name or fallback_name
+            new_gender = personal_gender or fallback_gender
+            new_age = personal_age or fallback_age
+            new_dob = personal_dob or fallback_dob
+            new_doctor = personal_doctor or fallback_doctor
+            new_report_date = personal_report_date or fallback_report_date
+            
+            # Debug: Print what we extracted from this page
+            print(f"📋 Page {idx} - Extracted patient info:")
+            print(f"   Name: '{new_name}' (from {'personal' if personal_name else 'fallback'})")
+            print(f"   Gender: '{new_gender}' (from {'personal' if personal_gender else 'fallback'})")
+            print(f"   Age: '{new_age}', DOB: '{new_dob}'")
+            print(f"   Doctor: '{new_doctor}'")
+            print(f"   Report Date: '{new_report_date}'")
+            
+            current_name = str(patient_info.get('patient_name', '') or '').strip()
+            current_gender = str(patient_info.get('patient_gender', '') or '').strip()
+            current_age = str(patient_info.get('patient_age', '') or '').strip()
+            current_dob = str(patient_info.get('patient_dob', '') or '').strip()
+            
+            # Note: With dedicated personal info extraction, we should have cleaner data
+            # The previous "SMART FIX" for swapping patient/doctor names should be less necessary
+            
+            # Merge patient info: use new data if current is empty, or if new is longer/more complete
+            # Since personal_data comes from dedicated prompt, it should be cleaner than fallback data
+            if new_name and len(new_name) > 2:  # At least 3 characters
+                if not current_name or (len(new_name) > len(current_name) and len(new_name) > 3):
+                    patient_info['patient_name'] = new_name
+                    print(f"✅ Updated patient_name: {new_name}")
                 
-                # PRIORITY: Use personal_data (from dedicated personal info prompt) first,
-                # fallback to medical_data extraction if personal_data is empty
-                new_name = personal_name or fallback_name
-                new_gender = personal_gender or fallback_gender
-                new_age = personal_age or fallback_age
-                new_dob = personal_dob or fallback_dob
-                new_doctor = personal_doctor or fallback_doctor
-                new_report_date = personal_report_date or fallback_report_date
+            # Gender: only accept "Male" or "Female" as normalized
+            if new_gender:
+                gender_lower = new_gender.lower()
+                if gender_lower in ['male', 'ذكر', 'm'] and (not current_gender or current_gender != 'Male'):
+                    patient_info['patient_gender'] = 'Male'
+                    print(f"✅ Updated patient_gender: Male")
+                elif gender_lower in ['female', 'أنثى', 'انثى', 'f'] and (not current_gender or current_gender != 'Female'):
+                    patient_info['patient_gender'] = 'Female'
+                    print(f"✅ Updated patient_gender: Female")
                 
-                # Debug: Print what we extracted from this page
-                print(f"📋 Page {idx} - Extracted patient info:")
-                print(f"   Name: '{new_name}' (from {'personal' if personal_name else 'fallback'})")
-                print(f"   Gender: '{new_gender}' (from {'personal' if personal_gender else 'fallback'})")
-                print(f"   Age: '{new_age}', DOB: '{new_dob}'")
-                print(f"   Doctor: '{new_doctor}'")
-                print(f"   Report Date: '{new_report_date}'")
+            # Age: validate it's a reasonable number
+            if new_age:
+                try:
+                    age_num = int(new_age)
+                    if 1 <= age_num <= 120:
+                        if not current_age or current_age != new_age:
+                            patient_info['patient_age'] = new_age
+                            print(f"✅ Updated patient_age: {new_age}")
+                except (ValueError, TypeError):
+                    pass
                 
-                current_name = str(patient_info.get('patient_name', '') or '').strip()
-                current_gender = str(patient_info.get('patient_gender', '') or '').strip()
-                current_age = str(patient_info.get('patient_age', '') or '').strip()
-                current_dob = str(patient_info.get('patient_dob', '') or '').strip()
+            # Date of birth
+            if new_dob and len(new_dob) >= 8:  # At least YYYY-MM-DD format
+                if not current_dob:
+                    patient_info['patient_dob'] = new_dob
+                    print(f"✅ Updated patient_dob: {new_dob}")
                 
-                # Note: With dedicated personal info extraction, we should have cleaner data
-                # The previous "SMART FIX" for swapping patient/doctor names should be less necessary
-                
-                # Merge patient info: use new data if current is empty, or if new is longer/more complete
-                # Since personal_data comes from dedicated prompt, it should be cleaner than fallback data
-                if new_name and len(new_name) > 2:  # At least 3 characters
-                    if not current_name or (len(new_name) > len(current_name) and len(new_name) > 3):
-                        patient_info['patient_name'] = new_name
-                        print(f"✅ Updated patient_name: {new_name}")
-                    
-                # Gender: only accept "Male" or "Female" as normalized
-                if new_gender:
-                    gender_lower = new_gender.lower()
-                    if gender_lower in ['male', 'ذكر', 'm'] and (not current_gender or current_gender != 'Male'):
-                        patient_info['patient_gender'] = 'Male'
-                        print(f"✅ Updated patient_gender: Male")
-                    elif gender_lower in ['female', 'أنثى', 'انثى', 'f'] and (not current_gender or current_gender != 'Female'):
-                        patient_info['patient_gender'] = 'Female'
-                        print(f"✅ Updated patient_gender: Female")
-                    
-                # Age: validate it's a reasonable number
-                if new_age:
-                    try:
-                        age_num = int(new_age)
-                        if 1 <= age_num <= 120:
-                            if not current_age or current_age != new_age:
-                                patient_info['patient_age'] = new_age
-                                print(f"✅ Updated patient_age: {new_age}")
-                    except (ValueError, TypeError):
-                        pass
-                    
-                # Date of birth
-                if new_dob and len(new_dob) >= 8:  # At least YYYY-MM-DD format
-                    if not current_dob:
-                        patient_info['patient_dob'] = new_dob
-                        print(f"✅ Updated patient_dob: {new_dob}")
-                    
-                # Doctor names - separate field
-                if new_doctor and len(new_doctor) > 2:
-                    if not patient_info.get('doctor_names'):
+            # Doctor names - separate field
+            if new_doctor and len(new_doctor) > 2:
+                if not patient_info.get('doctor_names'):
+                    patient_info['doctor_names'] = new_doctor
+                elif new_doctor != patient_info.get('doctor_names') and new_doctor.lower() not in patient_info.get('doctor_names', '').lower():
+                    # Append if different
+                    existing = patient_info.get('doctor_names', '')
+                    if existing:
+                        patient_info['doctor_names'] = f"{existing}, {new_doctor}"
+                    else:
                         patient_info['doctor_names'] = new_doctor
-                    elif new_doctor != patient_info.get('doctor_names') and new_doctor.lower() not in patient_info.get('doctor_names', '').lower():
-                        # Append if different
-                        existing = patient_info.get('doctor_names', '')
-                        if existing:
-                            patient_info['doctor_names'] = f"{existing}, {new_doctor}"
-                        else:
-                            patient_info['doctor_names'] = new_doctor
-                        
-                if new_report_date and len(new_report_date) >= 8:
-                    # Extract only YYYY-MM-DD part if timestamp is present
-                    date_only = new_report_date[:10] if ' ' in new_report_date or 'T' in new_report_date else new_report_date
-                    if not patient_info.get('report_date'):
-                        patient_info['report_date'] = date_only
-                        print(f"✅ Updated report_date: {date_only}")
                     
-                # Keep report_type if not set
-                if not patient_info.get('report_type') and extracted_data.get('report_type'):
-                    patient_info['report_type'] = extracted_data.get('report_type')
+            if new_report_date and len(new_report_date) >= 8:
+                # Extract only YYYY-MM-DD part if timestamp is present
+                date_only = new_report_date[:10] if ' ' in new_report_date or 'T' in new_report_date else new_report_date
+                if not patient_info.get('report_date'):
+                    patient_info['report_date'] = date_only
+                    print(f"✅ Updated report_date: {date_only}")
+                
+            # Keep report_type if not set
+            if not patient_info.get('report_type') and extracted_data.get('report_type'):
+                patient_info['report_type'] = extracted_data.get('report_type')
 
-                print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")
-                     
-            except Exception as e:
-                print(f"❌ VLM Error on page {idx}: {e}")
+            print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")
 
         # Check if we have ANY data after processing all pages
         if not all_extracted_data:
