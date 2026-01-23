@@ -802,7 +802,7 @@ class ChatResource(Resource):
             print(f"   Name: '{new_name}' (from {'personal' if personal_name else 'fallback'})")
             print(f"   Gender: '{new_gender}' (from {'personal' if personal_gender else 'fallback'})")
             print(f"   Age: '{new_age}', DOB: '{new_dob}'")
-            print(f"   Doctor: '{new_doctor}'")
+            print(f"   Doctor: '{new_doctor}' (from {'personal' if personal_doctor else 'fallback'})")
             print(f"   Report Date: '{new_report_date}'")
             
             current_name = str(patient_info.get('patient_name', '') or '').strip()
@@ -829,6 +829,9 @@ class ChatResource(Resource):
                     # Combine doctor names if different (might be from different pages)
                     patient_info['doctor_names'] = f"{current_doctor} / {new_doctor}"
                     print(f"✅ Updated doctor name: '{patient_info['doctor_names']}'")
+            else:
+                if new_doctor:
+                    print(f"⚠️ Doctor name too short, skipping: '{new_doctor}'")
                     print(f"✅ Updated patient_name: {new_name}")
                 
             # Gender: At this point new_gender should already be normalized to "Male" or "Female"
@@ -1017,20 +1020,18 @@ class ChatResource(Resource):
         cleaned_gender = ''
         
         # Very strict matching - only accept clear gender indicators
-        # Arabic: ذكر = Male, أنثى/انثى = Female
-        # English: Male/M = Male, Female/F = Female
-        male_indicators = ['ذكر', 'male']
-        female_indicators = ['أنثى', 'انثى', 'female']
+        # Convert to ENGLISH: Male/Female (not Arabic)
+        male_indicators = ['ذكر', 'male', 'm']
+        female_indicators = ['أنثى', 'انثى', 'انتى', 'أنتى', 'female', 'f']
         
-        # Check for male (must start with or be exactly one of these)
-        if gender_lower in male_indicators or any(gender_lower.startswith(ind) for ind in male_indicators):
-            # Double check it's not a false positive (e.g., "Male" in "Males")
-            if not any(gender_lower.startswith(fem) for fem in female_indicators):
-                cleaned_gender = 'ذكر'
+        # Check for male (must match exactly or start with one of these)
+        if any(gender_lower == ind.lower() for ind in male_indicators) or any(gender_lower.startswith(ind.lower()) for ind in male_indicators if len(ind) > 1):
+            if not any(gender_lower.startswith(fem.lower()) for fem in female_indicators):
+                cleaned_gender = 'Male'  # ENGLISH, not Arabic
                 print(f"✅ Cleaned gender: {raw_gender} -> {cleaned_gender}")
         # Check for female
-        elif gender_lower in female_indicators or any(gender_lower.startswith(ind) for ind in female_indicators):
-            cleaned_gender = 'أنثى'
+        elif any(gender_lower == ind.lower() for ind in female_indicators) or any(gender_lower.startswith(ind.lower()) for ind in female_indicators if len(ind) > 1):
+            cleaned_gender = 'Female'  # ENGLISH, not Arabic
             print(f"✅ Cleaned gender: {raw_gender} -> {cleaned_gender}")
         elif raw_gender:
             # If we have a gender value but it doesn't match, log it for debugging
@@ -1067,6 +1068,8 @@ class ChatResource(Resource):
         print(f"   Gender: '{cleaned_gender}'")
         print(f"   Age: '{cleaned_age}'")
         print(f"   DOB: '{cleaned_dob}'")
+        print(f"   Doctor: '{patient_info.get('doctor_names', '')}'")
+        print(f"   Total fields extracted: {len(all_extracted_data)}")
         print(f"{'='*80}\n")
         
         # Validation Logic (Call utils)

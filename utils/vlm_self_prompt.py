@@ -9,16 +9,22 @@ You are analyzing page {idx}/{total_pages} of a medical lab report.
 
 🎯 YOUR MISSION: COUNT EVERY SINGLE ROW IN THE MEDICAL TABLE
 
-STEP 1 - COUNT THE ROWS:
-Look at the medical data table in the image. Starting from the first test row, COUNT each row:
-- Row 1: [what test?]
-- Row 2: [what test?]
-- Row 3: [what test?]
+STEP 1 - COUNT THE ROWS AND IDENTIFY LANGUAGES:
+Look at the medical data table in the image. Starting from the first test row, COUNT each row and note the language:
+- Row 1: [test name in English or Arabic?]
+- Row 2: [test name]
+- Row 3: [test name]
 ...continue until the last row
+
+For EACH row, also note:
+- Is the test name in ENGLISH (e.g., "Glucose", "Cholesterol") or ARABIC (e.g., "الغلوكوز", "الكولسترول")?
+- Are values clearly separated from units?
+- Is there a normal range shown in parentheses like (74-110) or is it EMPTY/missing?
 
 ⚠️ DO NOT STOP AT 5 OR 10 ROWS - COUNT THEM ALL!
 ⚠️ If you see 24+ rows, your answer should be 24+, not 6!
 ⚠️ THIS IS PAGE {idx} OF {total_pages} - CONTINUE EXTRACTION ACROSS ALL PAGES!
+⚠️ DO NOT INVENT NORMAL RANGES - if empty in image, leave it empty in JSON!
 
 STEP 2 - ANALYZE THE TABLE STRUCTURE:
 1. Language: Is it Arabic, English, or bilingual?
@@ -28,12 +34,13 @@ STEP 2 - ANALYZE THE TABLE STRUCTURE:
    - Which column has UNITS?
    - Which column has NORMAL RANGES?
 3. Patient info location:
-   - Where is patient name? (after 'اسم المريض' or 'Patient Name')
-   - Where is gender? (If Arabic: ذكر=Male, أنثى=Female)
+   - Where is patient name? (after 'اسم المريض' or 'Patient Name') - NOTE THE EXACT TEXT AND LANGUAGE
+   - Where is gender? (If Arabic: ذكر=Male, أنثى=Female) - CONVERT TO ENGLISH
    - Where is date?
 4. Doctor/Lab info location:
-   - Where is doctor name? (look for 'دكتور', 'طبيب', 'Doctor', 'DR', 'Dr.' or lab signature)
+   - Where is doctor name? (look for 'دكتور', 'طبيب', 'Doctor', 'DR', 'Dr.' or signature) - IMPORTANT: MUST RETURN THIS
    - Where is lab name or clinic name?
+   - Is there a signature area at bottom or top?
 
 STEP 3 - CREATE ROW-BY-ROW EXTRACTION MAP:
 List the FIRST 5 ROWS and LAST 5 ROWS you can see:
@@ -64,8 +71,8 @@ Return JSON:
   }},
   "doctor_name_location": "Found at [location] or [exact text]",
   "lab_name_location": "Found at [location] or [exact text]",
-  "first_5_test_names": ["Test 1", "Test 2", "Test 3", "Test 4", "Test 5"],
-  "last_5_test_names": ["Test 20", "Test 21", "Test 22", "Test 23", "Test 24"],
+  "first_5_test_names": ["Test 1 (English/Arabic)", "Test 2 (English/Arabic)", "Test 3 (English/Arabic)", "Test 4 (English/Arabic)", "Test 5 (English/Arabic)"],
+  "last_5_test_names": ["Test 20 (English/Arabic)", "Test 21 (English/Arabic)", "Test 22 (English/Arabic)", "Test 23 (English/Arabic)", "Test 24 (English/Arabic)"],
   "patient_gender_value": "أنثى (=Female)" or "ذكر (=Male)",
   "extraction_instructions": "DETAILED step-by-step:
 1. Patient name is at [exact location]
@@ -124,15 +131,23 @@ Page {idx}/{total_pages} - You ALREADY analyzed this report and found {total_row
 5. Gender: Convert {analysis.get('patient_gender_value', 'ذكر/أنثى')} to English "Male" or "Female"
 6. Normal ranges: Read from IMAGE, not from memory! If range says "(10-15)", write "(10-15)", NOT "(0-0.75)"!
 
+🔍 CRITICAL EXTRACTION RULES:
+1. For EACH field: extract test name EXACTLY as shown (preserve Arabic if Arabic, English if English)
+2. Extract value ONLY if it exists in image - do NOT guess or invent
+3. Extract normal range ONLY if shown in image - if empty/missing in image, leave as empty string ""
+4. NEVER invent a normal range like "(0-0.75)" if not visible in image
+5. Gender MUST be converted to English: "ذكر" -> "Male", "أنثى" -> "Female"
+6. Patient name MUST be the actual person's name, not a label
+7. Doctor name MUST be found and returned - look at signature area, header, or footer
+
 🔍 ROW-BY-ROW EXTRACTION CHECKLIST:
-As you extract, verify:
-✓ Row 1: {first_5_tests[0] if first_5_tests else '[First test name]'}
-✓ Row 2: {first_5_tests[1] if len(first_5_tests) > 1 else '[Second test name]'}
-✓ Row 3: {first_5_tests[2] if len(first_5_tests) > 2 else '[Third test name]'}
+As you extract, verify each row has all 4 pieces (or mark as empty if missing):
+✓ Row 1: {first_5_tests[0] if first_5_tests else '[First test name]'} - value, unit, range (if exists)
+✓ Row 2: {first_5_tests[1] if len(first_5_tests) > 1 else '[Second test name]'} - value, unit, range (if exists)
 ...
-✓ Row {total_rows-2}: {last_5_tests[-3] if len(last_5_tests) > 2 else '[Third from last]'}
-✓ Row {total_rows-1}: {last_5_tests[-2] if len(last_5_tests) > 1 else '[Second from last]'}  
-✓ Row {total_rows}: {last_5_tests[-1] if last_5_tests else '[Last test name]'}
+✓ Row {total_rows-2}: {last_5_tests[-3] if len(last_5_tests) > 2 else '[Third from last]'} - value, unit, range (if exists)
+✓ Row {total_rows-1}: {last_5_tests[-2] if len(last_5_tests) > 1 else '[Second from last]'} - value, unit, range (if exists)  
+✓ Row {total_rows}: {last_5_tests[-1] if last_5_tests else '[Last test name]'} - value, unit, range (if exists)
 
 🔄 MULTI-PAGE REMINDER: You're analyzing page {idx}/{total_pages}. Extract ALL data from THIS page.
 
@@ -146,10 +161,10 @@ Return JSON:Full patient name from image",
   "patient_age": "Age in years",
   "patient_dob": "Birth date YYYY-MM-DD",
   "patient_gender": "Male" or "Female",
-  "report_date": "YYYY-MM-DD",
-  "doctor_names": "Doctor name(s) if visible on report",
-  "lab_name": "Lab or clinic name if visible "Male" or "Female",
-  "report_date": "YYYY-MM-DD",
+  "report_date": "YYYY-MM-DD",EXACTLY from image (preserve language: Arabic or English)",
+      "field_value": "Result value from image ONLY - if missing in image, put empty string",
+      "field_unit": "Unit from image (e.g., mg/dl, %, cells/L) - if missing, put empty string",
+      "normal_range": "EXACT range from image like (10-15) or (10-15) mg/dL - if NOT shown in image, put empty string (NOT null, NOT hallucinated value)
   "doctor_names": "",
   "medical_data": [
     // Array of {total_rows} objects:
