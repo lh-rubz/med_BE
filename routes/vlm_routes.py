@@ -368,130 +368,103 @@ class ChatResource(Resource):
             print(f"🤖 Step 1: Structuring data with Qwen2-VL (native vision)...")
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Extracting medical values from page {idx}...'})}\n\n"
             
-            prompt_text = f"""You are a genius medical AI expert. Your task is to digitize this medical report (Page {idx}/{total_pages}) with 100% ACCURACY.
-This report may be complex, handwritten, skewed, or contain mixed Arabic/English text.
-
-⚠️ CRITICAL INSTRUCTIONS - READ CAREFULLY:
-
-1. **HEADER & PATIENT INFO (Top Priority)**:
-   - **Scanning**: Look at the top section. Identify "Ministry of Health" (وزارة الصحة) or Lab headers.
-   - **Tables**: Often there are two tables side-by-side. 
-     * **RIGHT Table**: Patient Info (Name, Gender, DOB).
-     * **LEFT Table**: Request Info (Doctor, Date).
-   - **Gender (الجنس)**: 
-     * **CRITICAL**: Check for "أنثى"/"انثى" (Female) vs "ذكر" (Male).
-     * If the report says "انثى", output "Female". Do NOT default to Male.
-   - **Age/DOB**: 
-     * Extract "تاريخ الميلاد" (DOB) exactly (e.g., "01/05/1975"). 
-     * **Priority**: DOB > Age. If DOB is 1975, Age MUST be consistent (approx ~50, NOT 28).
-   - **Doctor (الطبيب)**: Look in the LEFT table, often the last cell. Return the name found there (e.g. "Jihad...").
-
-2. **TABLE EXTRACTION (Row-by-Row Precision)**:
-   - **Alignment**: The image might be tilted. Trace the invisible line for EACH row.
-   - **Values**: Match "Test Name" to "Result" in the EXACT SAME ROW.
-   - **Swapping Error**: **NEVER** take a value from the row above or below. 
-     * Example: If 'ALT' is on row X, its value MUST be on row X. Do NOT read the value from row X-1.
-   - **Columns**: Identify [Test Name] | [Result] | [Unit] | [Normal Range].
-
-3. **EMPTY VALUES & SYMBOLS (Zero Hallucination)**:
-   - **Empty Indicators**: If a cell has "*", "-", "--", "—", "( - )", "N/A", or is blank -> RETURN "" (Empty String).
-   - **Ranges**: If the range is specific to gender (e.g., "M: 0-40, F: 0-30"), pick the one matching the PATIENT'S gender.
-   - **NEVER** fill a missing value with a number from your head.
-
-4. **SPECIAL HANDLING**:
-   - **Clinical Chemistry**: Watch out for crowded numbers.
-   - **Handwritten**: Do your best to decipher handwritten text in the header/footer.
-   - **Arabic Text**: Handle mixed Arabic/English correctly.
-
-OUTPUT FORMAT:
-Return a SINGLE JSON object. No text before or after.
-{{
-  "patient_name": "Full Name",
-  "patient_gender": "Male" or "Female",
-  "patient_dob": "DD/MM/YYYY" or "YYYY-MM-DD",
-  "patient_age": "Number",
-  "doctor_names": "Doctor Name",
-  "report_date": "YYYY-MM-DD",
-  "report_type": "Lab Report",
-  "medical_data": [
-    {{
-      "field_name": "Test Name (e.g. Glucose)",
-      "field_value": "Result (e.g. 109)",
-      "field_unit": "Unit (e.g. mg/dl)",
-      "normal_range": "Range (e.g. 74-110)",
-      "is_normal": true/false/null,
-      "category": "Section Name (e.g. Chemistry)"
-    }}
-  ]
-}}
-"""
+            # Prepare Image Data (Shared for both stages)
+            image_base64 = ""
+            image_format = "jpeg"
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                 image_format = image_info['format']
-                
-                content = [
-                    {'type': 'text', 'text': prompt_text},
-                    {
-                        'type': 'image_url',
-                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                    }
+            except Exception as img_err:
+                print(f"❌ Image encoding failed: {img_err}")
+                continue
+
+            # ==================================================================================
+            # STAGE 1: Patient Info & Header Extraction (High Precision for Metadata)
+            # ==================================================================================
+            print(f"👤 Step 1.1: Extracting Patient Info & Header (Page {idx})...")
+            yield f"data: {json.dumps({'percent': current_progress + 5, 'message': f'Reading patient details from page {idx}...'})}\n\n"
+            
+            patient_prompt = f"""You are a specialized Medical Record Clerk. Your ONLY task is to extract Patient Demographics and Header Info from this page ({idx}/{total_pages}).
+Do NOT extract medical test results yet.
+
+⚠️ CRITICAL RULES FOR ACCURACY:
+1. **Patient Name (اسم المريض)**:
+   - Look for "Patient Name", "Name", "المريض", "اسم المريض".
+   - **ARABIC NAMES**: If the name is in Arabic (e.g., "رئيسة"), transcribe it EXACTLY. Do NOT change it to a similar looking name (like "نزيهة").
+   - If both Arabic and English are present, prefer the one that is clearer.
+2. **Gender (الجنس)**:
+   - "أنثى" / "انثى" = "Female".
+   - "ذكر" = "Male".
+   - **VERIFY**: Look at the text. Do not guess.
+3. **DOB vs Age**:
+   - Extract "Date of Birth" / "تاريخ الميلاد" exactly (e.g., "01/05/1975").
+   - **Priority**: Trust DOB over Age. If DOB is 1975, Age is ~50.
+4. **Doctor (الطبيب)**:
+   - Look for "Doctor", "Dr.", "الطبيب", "المحول".
+   - It is often in the LEFT table or Header.
+
+OUTPUT JSON ONLY:
+{{
+  "patient_name": "Exact Name Found",
+  "patient_gender": "Male/Female",
+  "patient_dob": "DD/MM/YYYY",
+  "patient_age": "Number",
+  "doctor_names": "Doctor Name",
+  "report_date": "YYYY-MM-DD",
+  "report_type": "Lab Report"
+}}
+"""
+            # Execute Stage 1
+            extracted_patient_data = {}
+            
+            try:
+                content_p = [
+                    {'type': 'text', 'text': patient_prompt},
+                    {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
                 ]
                 
-                completion = ollama_client.chat.completions.create(
+                completion_p = ollama_client.chat.completions.create(
                     model=Config.OLLAMA_MODEL,
-                    messages=[{'role': 'user', 'content': content}],
+                    messages=[{'role': 'user', 'content': content_p}],
                     temperature=0.1,
                     response_format={"type": "json_object"},
-                    max_tokens=2500,
-                    timeout=120.0
+                    max_tokens=1000,
+                    timeout=60.0
                 )
-                response_text = completion.choices[0].message.content.strip()
-                print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
-                
-                extracted_data = {}
-                for attempt in range(2):
-                    try:
-                        import re
-                        start_idx = response_text.find('{')
-                        end_idx = response_text.rfind('}')
-                        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                            json_str = response_text[start_idx:end_idx+1]
-                            extracted_data = json.loads(json_str)
-                            print(f"✅ JSON extracted for Image {idx} (attempt {attempt+1})")
-                        else:
-                            print(f"⚠️ No JSON brackets found in response for Image {idx} (attempt {attempt+1})")
-                            print(f"RAW: {response_text[:200]}...")
-                    except Exception as json_err:
-                        print(f"⚠️ JSON Parsing Failed for Image {idx} (attempt {attempt+1}): {json_err}")
-                        print(f"RAW RESPONSE: {response_text}")
-                    
-                    if extracted_data.get('medical_data') or attempt == 1:
-                        break
-                    
-                    print(f"🔁 Retrying extraction for Image {idx} with table-focused prompt...")
-                    table_only_prompt = f"""You are a medical AI expert specializing in table extraction (Page {idx}/{total_pages}).
-Your ONLY goal is to extract the TABLE rows correctly.
+                resp_p = completion_p.choices[0].message.content.strip()
+                extracted_patient_data = json.loads(resp_p) if '{' in resp_p else {}
+                print(f"✅ Patient Info Extracted: {extracted_patient_data.get('patient_name', 'N/A')}")
+            except Exception as e:
+                print(f"⚠️ Stage 1 Error: {e}")
 
-⚠️ STRICT ROW-BY-ROW EXTRACTION RULES:
-1. **Vertical Alignment**: Trace the invisible horizontal line for each row.
-2. **Isolation**: Read values ONLY from the current row. NEVER borrow from neighbors.
-3. **Empty Values**: If a cell is empty, has "*", "-", or "—", return "".
-4. **Swapping Prevention**: 
-   - Ensure the 'Result' belongs to the 'Test Name' in the SAME row.
-   - Do NOT mix up values (e.g. ALT vs AST).
-   - **CHECK**: Does the value align perfectly with the test name?
+            # ==================================================================================
+            # STAGE 2: Medical Table Extraction (Row-by-Row "Genius" Mode)
+            # ==================================================================================
+            print(f"🧪 Step 1.2: Extracting Medical Table Data (Page {idx})...")
+            yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Extracting test results from page {idx}...'})}\n\n"
+            
+            table_prompt = f"""You are a genius Medical AI specializing in analyzing complex, handwritten, or skewed lab reports.
+Your task is to extract the MEDICAL RESULTS TABLE from Page {idx}/{total_pages} with 100% precision.
 
-⚠️ EMPTY VALUE HANDLING:
-- Symbols like "*", "-", "—", "( - )", "N/A", ".", ".." -> MUST BE RETURNED AS "" (Empty String).
-- Do NOT hallucinate a number if the cell is effectively empty. If unsure, return "".
+⚠️ ROW-BY-ROW EXTRACTION PROTOCOL (Prevent Swapping):
+1. **Visualize Rows**: Draw an invisible line across each row.
+2. **Strict Alignment**: For every "Test Name", read the value strictly to its RIGHT in the same row.
+   - **NEVER** take a value from the row above or below.
+   - **Example**: If 'Lymphocytes' is on Row 5, do NOT read the value from Row 4 (Neutrophils).
+3. **Empty/Symbol Handling**:
+   - If a Result cell contains "*", "-", "--", "—", or is blank -> Output "" (Empty String).
+   - **Example**: If 'Basophils' has a '*' in the result column, its value is "". Do NOT grab '2.9' from the row above.
+4. **Ranges**:
+   - Extract the Normal Range exactly as written for that row.
+   - If the cell is empty or has '*', output "".
 
-Return JSON:
+OUTPUT JSON ONLY:
 {{
   "medical_data": [
     {{
       "field_name": "Test Name",
       "field_value": "Result (or \"\")",
-      "field_unit": "Unit (or \"\")",
+      "field_unit": "Unit",
       "normal_range": "Range (or \"\")",
       "is_normal": true/false/null,
       "category": "Section Name"
@@ -499,27 +472,40 @@ Return JSON:
   ]
 }}
 """
-                    content = [
-                        {'type': 'text', 'text': table_only_prompt},
-                        {
-                            'type': 'image_url',
-                            'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                        }
-                    ]
-                    completion = ollama_client.chat.completions.create(
-                        model=Config.OLLAMA_MODEL,
-                        messages=[{'role': 'user', 'content': content}],
-                        temperature=0.1,
-                        response_format={"type": "json_object"},
-                        max_tokens=2500,
-                        timeout=90.0
-                    )
-                    response_text = completion.choices[0].message.content.strip()
-                    print(f"🔍 RAW RESPONSE (retry) for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
+            # Execute Stage 2
+            extracted_table_data = {}
+            try:
+                content_t = [
+                    {'type': 'text', 'text': table_prompt},
+                    {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
+                ]
                 
+                completion_t = ollama_client.chat.completions.create(
+                    model=Config.OLLAMA_MODEL,
+                    messages=[{'role': 'user', 'content': content_t}],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                    max_tokens=3000,
+                    timeout=120.0
+                )
+                resp_t = completion_t.choices[0].message.content.strip()
+                
+                # Parse JSON (robust)
+                start_idx = resp_t.find('{')
+                end_idx = resp_t.rfind('}')
+                if start_idx != -1 and end_idx != -1:
+                    extracted_table_data = json.loads(resp_t[start_idx:end_idx+1])
+                    print(f"✅ Medical Table Extracted: {len(extracted_table_data.get('medical_data', []))} items")
+                else:
+                     print(f"⚠️ No JSON in Stage 2 response")
+                     
+            except Exception as e:
+                print(f"⚠️ Stage 2 Error: {e}")
 
+            # Merge Data for downstream processing
+            extracted_data = {**extracted_patient_data, **extracted_table_data}
 
-
+            try:
                 if extracted_data.get('is_medical_report') is False:
                      error_msg = extracted_data.get('reason', 'The uploaded file does not appear to be a valid medical report.')
                      print(f"⛔ Rejected as non-medical: {error_msg}")
