@@ -411,4 +411,55 @@ FINAL CRITICAL REMINDERS
    - Use common sense (does this value make sense for this test?)
 
 Now carefully extract the data from the image and return the JSON.
-""""
+"""
+
+def get_table_retry_prompt(idx, total_pages):
+    return f"""You are reading a medical LAB REPORT image (page {idx}/{total_pages}). 
+The report may be in ENGLISH or ARABIC or BOTH.
+Tables may have handwritten lines, slanted lines, or unclear alignment.
+
+⚠️ CRITICAL - READ SLOWLY AND CAREFULLY:
+1. Process ONE row at a time - do NOT mix rows
+2. Follow the horizontal line of EACH row carefully (even if slanted)
+3. If a cell in THIS row is empty, it's EMPTY - do NOT take value from row above/below
+4. If normal_range cell is "-", "(-)", "*", or blank, return "" - do NOT invent values
+
+HOW TO READ TABLES:
+- Identify column headers first: "الفحص", "النتيجة", "الوحدة", "المعدل الطبيعي" (Arabic) or "Test", "Result", "Unit", "Normal Range" (English)
+- For EACH row, trace the horizontal line from left to right
+- Read values ONLY from cells that align with THIS row's horizontal line
+
+EXTRACTION RULES FOR EACH ROW:
+1. field_name: Read from test name column in THIS ROW
+2. field_value: Read from result column in THIS ROW (same horizontal line as field_name)
+   - If empty, "-", "*", blank → return ""
+   - Do NOT use value from row above or below
+3. field_unit: Read from unit column in THIS ROW
+4. normal_range: Read from range column in THIS ROW
+   - If empty, "-", "(-)", "*", or any symbol without numbers → return ""
+   - DO NOT copy from another row
+   - DO NOT invent range values
+5. is_normal: 
+   - null if field_value is "" OR normal_range is ""
+   - true/false ONLY if both have valid numbers
+
+EMPTY DETECTION:
+- field_value is EMPTY if: blank, "-", "--", "*", ".", "N/A", "n/a"
+- normal_range is EMPTY if: blank, "-", "(-)", "*", any symbol without numbers
+- When empty, return "" (empty string), do NOT guess
+
+Return JSON with this structure only:
+{{
+  "medical_data": [
+    {{
+      "field_name": "Test name (prefer English if available)",
+      "field_value": "numeric value as string, or \"\" if empty/missing",
+      "field_unit": "unit string, or \"\"",
+      "normal_range": "range like \"(12-16)\", or \"\" if missing/empty",
+      "is_normal": true or false or null (null if missing range or value),
+      "category": "section name like \"HEMATOLOGY\" or \"\"",
+      "notes": "any notes or \"\""
+    }}
+  ]
+}}
+Return ONLY this JSON object, no markdown."""
