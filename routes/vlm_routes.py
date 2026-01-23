@@ -18,6 +18,13 @@ from models import db, User, Report, ReportField, ReportFile, MedicalSynonym
 from config import ollama_client, Config
 from utils.medical_validator import validate_medical_data, MedicalValidator
 from utils.medical_mappings import add_new_alias
+from utils.vlm_extraction_validator import (
+    validate_and_clean_extraction,
+    filter_empty_values,
+    clean_ranges,
+    normalize_units,
+    validate_page_2_extraction
+)
 from ollama import Client
 
 # Create namespace
@@ -452,7 +459,15 @@ OUTPUT JSON ONLY:
             print(f"🧪 Step 1.2: Extracting Medical Table Data (Page {idx})...")
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Extracting test results from page {idx}...'})}\n\n"
             
-            table_prompt = f"""You are a "Smart Scanner" Medical AI. Your goal is 100% VISUAL ACCURACY.
+            # Choose page-specific prompt (page 2 gets stricter validation)
+            page_num = image_info.get('page_number', idx)
+            if page_num == 2 or idx == 2:
+                # Page 2 often has Hematology/CBC - use specialized prompt
+                from utils.vlm_page_specific_prompts import get_hematology_focused_prompt
+                table_prompt = get_hematology_focused_prompt(idx, total_pages)
+            else:
+                # Default prompt for other pages
+                table_prompt = f"""You are a "Smart Scanner" Medical AI. Your goal is 100% VISUAL ACCURACY.
 Scan the MEDICAL RESULTS TABLE on Page {idx}/{total_pages} line-by-line.
 
 ⚠️ **STRICT SCANNING PROTOCOL (Line-by-Line)**:
@@ -924,6 +939,44 @@ OUTPUT JSON ONLY:
         print(f"   Age: '{cleaned_age}'")
         print(f"   DOB: '{cleaned_dob}'")
         print(f"{'='*80}\n")
+        
+        # ========================================
+        # POST-EXTRACTION VALIDATION AND CLEANING
+        # ========================================
+        print(f"🔍 Starting post-extraction validation...")
+        print(f"   Total items before validation: {len(final_data.get('medical_data', []))}")
+        
+        # Step 1: Filter out items with empty field_values (marked with * or -)
+        cleaned_medical_data = filter_empty_values(final_data.get('medical_data', []))
+        print(f"   Items after filtering empty values: {len(cleaned_medical_data)}")
+        
+        # Step 2: Clean ranges and units
+        cleaned_medical_data = clean_ranges(cleaned_medical_data)
+        cleaned_medical_data = normalize_units(cleaned_medical_data)
+        print(f"   Items after cleaning ranges/units: {len(cleaned_medical_data)}")
+        
+        # Step 3: Full validation and reporting
+        validation_result = validate_and_clean_extraction(
+            {'medical_data': cleaned_medical_data},
+            page_num=0,
+            total_pages=total_pages
+        )
+        
+        # Update final_data with cleaned medical_data
+        final_data['medical_data'] = validation_result['medical_data']
+        
+        # Log validation report
+        if validation_result['validation_report']['issues_found']:
+            print(f"\n⚠️ VALIDATION ISSUES FOUND:")
+            for issue in validation_result['validation_report']['issues_found'][:10]:  # Show first 10
+                print(f"   - {issue.get('type')}: {issue.get('test', 'N/A')}")
+        
+        print(f"✅ POST-EXTRACTION VALIDATION COMPLETE:")
+        print(f"   Input: {validation_result['validation_report']['total_items_input']} items")
+        print(f"   Removed (empty values): {validation_result['validation_report']['items_removed_empty_value']}")
+        print(f"   Removed (invalid ranges): {validation_result['validation_report']['items_removed_hallucinated_range']}")
+        print(f"   Removed (other issues): {validation_result['validation_report']['items_removed_symbol_unit'] + validation_result['validation_report']['items_removed_copied_from_neighbor']}")
+        print(f"   Final output: {len(final_data.get('medical_data', []))} items\n")
         
         # Validation Logic (Call utils)
         try:
