@@ -2,210 +2,250 @@
 
 def get_hematology_focused_prompt(idx, total_pages):
     """
-    Specialized prompt for Hematology/CBC tables with common issues on page 2.
-    This handles the second page issues where:
-    - Values are misread or hallucinated
-    - Ranges are incorrect or missing
-    - Row alignment is critical
+    Specialized prompt for Hematology/CBC tables with no hardcoded values.
+    Focus on extraction directly from the image, line-by-line verification.
     """
-    return f"""🚨 HEMATOLOGY TABLE EXTRACTION - STRICT MODE 🚨
+    return f"""🚨 HEMATOLOGY TABLE EXTRACTION - STRICT IMAGE-ONLY MODE 🚨
 Page {idx}/{total_pages}
 
+CRITICAL INSTRUCTION: Extract ONLY what you see in the image. Do NOT invent or assume any values.
+
 YOU ARE EXTRACTING A HEMATOLOGY/COMPLETE BLOOD COUNT (CBC) TABLE.
-This table typically has 20-30 tests with results and reference ranges.
+The table has columns arranged left-to-right (or right-to-left for Arabic):
+  Column 1: Test/Parameter Name (e.g., "RBC", "Hemoglobin", "WBC", "Lymphocytes%")
+  Column 2: Test Result/Value (a number, percentage, or count visible in image)
+  Column 3: Unit of Measurement (e.g., "K/uL", "g/dL", "%", "M/uL")
+  Column 4: Reference Range (e.g., "(4.5-11)" or "(4-6)" - shown in image)
 
-🔴 CRITICAL RULES - FOLLOW EXACTLY:
+🔴 EXTRACTION RULES - FOLLOW EXACTLY:
 
-1. **ROW INDEPENDENCE** - Each value belongs to ONLY ONE test row:
-   - NEVER take a value from the row above or below
-   - NEVER fill in missing values from neighboring rows
-   - If a test has NO result (marked with *, blank, or dash), the value is EMPTY STRING
-   
-2. **EMPTY VALUE HANDLING** (THIS IS THE #1 ISSUE):
-   - If a test result cell shows: * or - or blank or empty space → field_value = ""
-   - DO NOT look at the next row's value and copy it
-   - DO NOT guess a value
-   - Return empty string "" if no value present
-   - SKIP COMPLETELY if field_value would be empty - do not include in medical_data array
-   
-3. **RANGE/NORMAL VALUE READING**:
-   - Read the normal range from the SAME ROW ONLY
-   - Common Hematology ranges:
-     * RBC: (4.0-5.5) or (4.2-5.4) M/uL
-     * Hemoglobin: (12-16) or (11.5-15.5) g/dL for females, (13.5-17.5) for males
-     * WBC: (4.5-11) or (4.5-11.0) K/uL
-     * Platelets: (150-400) or (140-400) K/uL
-     * Lymphocytes: Usually (20-40)% or specific count
-     * Neutrophils: Usually (50-70)% or specific count
-   - If the range column is empty/missing for this test, leave normal_range = ""
-   - NEVER invent ranges not shown in image
-   
-4. **UNIT VERIFICATION**:
-   - Read unit from the SAME ROW, same unit column
-   - Common Hematology units: K/uL, M/uL, g/dL, %, cells/L, x10^3/uL, x10^6/uL
-   - If no unit shown, leave field_unit = ""
-   - Symbol-only units like "*", "-" or "—" mean the cell is empty → field_unit = ""
-   
-5. **VERIFICATION CHECKLIST FOR EACH ROW**:
-   - Does this row have a test name? If NO → skip row
-   - Does this row have a result value? If NO → skip row (don't include in output)
-   - Does this row have a unit? If YES → include it, if NO → leave empty ""
-   - Does this row have a range? If YES → include it, if NO → leave empty ""
-   
-6. **CRITICAL - Line by Line Alignment**:
-   - Imagine drawing a horizontal line across ONE test row only
-   - Keep your eye on that horizontal band
-   - Scan left to right (or right to left if Arabic): Test Name → Value → Unit → Range
-   - Do NOT cross the horizontal boundaries into adjacent rows
-   - If you see misalignment (value looks like a unit, range looks like a number), STOP and recheck
+1. **READ EVERY ROW FROM THE IMAGE ITSELF**:
+   - Start at the TOP of the table and scan downward
+   - For EACH visible row in the table:
+     a) Look at Column 1: What is the test name shown in the image?
+     b) Look at Column 2: What value/result is shown in the image for this test?
+     c) Look at Column 3: What unit is shown in the image for this test?
+     d) Look at Column 4: What reference range is shown in the image?
+   - Write down EXACTLY what you see - no modifications, no assumptions
 
-7. **Percentage Tests** (VERY COMMON ON PAGE 2):
-   - If test name is "Lymphocytes%", "Neutrophils%", "Monocytes%", etc.
-   - These show PERCENTAGE values like "57.8", "41.1", "1.1"
-   - Do NOT confuse the % symbol with empty markers
-   - Range might be shown as percentage like "(20-40)" NOT "(20-40)%"
-   - Examples:
-     * "Lymphocytes%" = "57.8" (range might be "(20-40)" or "(20-40)%")
-     * "Neutrophils%" = "41.1" (range might be "(50-70)%")
-     * "Monocytes%" = "1.1" (range might be "(0-10)%" or "(2-8)%")
+2. **CRITICAL - EMPTY VALUE DETECTION**:
+   - If Column 2 (Value) shows: * (star), - (dash), — (line), or is blank/empty
+     → This test has NO RESULT
+     → DO NOT EXTRACT THIS ROW
+     → Skip this row completely - do not include in medical_data array
+   - NEVER guess or fill in a value for empty results
+   - NEVER copy a value from the row above or below
+   - If value is empty, the row is not included in output
 
-8. **COUNT VERIFICATION**:
-   - Before returning, count your medical_data items
-   - You should have 20-35 items (typical CBC = 25-30 tests)
-   - If you have < 10 items, you MISSED DATA - go back and extract more
+3. **LINE-BY-LINE HORIZONTAL ALIGNMENT VERIFICATION**:
+   - For EACH row you extract:
+     → Draw an imaginary horizontal line across the entire row
+     → Verify all 4 columns are aligned horizontally
+     → Verify the value in Column 2 belongs to the test in Column 1 (same row)
+     → Verify the unit in Column 3 is for the test in Column 1 (same row)
+     → Verify the range in Column 4 is for the test in Column 1 (same row)
+   - If misalignment detected → STOP and recheck the row alignment
+   - If certain the alignment is correct → Extract the row
 
-🔍 EXTRACTION PROCESS:
-Starting from the first test at the top of the table:
+4. **HANDLE PERCENTAGE TESTS CORRECTLY**:
+   - Some tests have "%" in their name (e.g., "Lymphocytes%", "Neutrophils%", "Monocytes%")
+   - These tests show percentage values (e.g., 57.8, 41.1, 0.1, 1.1)
+   - The "%" in the test name does NOT mean the result is empty
+   - The "%" is PART OF THE TEST NAME, not an empty marker
+   - Extract these normally with their percentage values
+   - The range might show as "(20-40)" or with % symbol - extract exactly as shown
 
-Row 1: Extract test_name, test_value, unit, range → validate alignment
-Row 2: Extract test_name, test_value, unit, range → validate alignment
-Row 3: Extract test_name, test_value, unit, range → validate alignment
-...continue until last visible row...
+5. **UNIT READING**:
+   - Read unit EXACTLY as shown in image (e.g., "K/uL", "M/uL", "g/dL", "%", "cells/L")
+   - Do NOT modify or "correct" units
+   - If Column 3 is empty for a test → leave field_unit as empty string ""
+   - If Column 3 shows only symbols like "*" or "-" → that means no unit, leave as ""
 
-For EACH row, ask yourself:
-  ✅ Can I clearly see a test name? (e.g., "WBC", "RBC", "Hemoglobin", "Lymphocytes%")
-  ✅ Can I clearly see a value? (a number, percentage, or count - NOT a symbol like *)
-  ✅ Is there a unit? (extract if present, "" if not)
-  ✅ Is there a range? (extract if present like "(4-11)", "" if not)
-  ❌ If ANY answer is NO (especially value), skip this row entirely
+6. **RANGE READING**:
+   - Read reference range EXACTLY as shown in image (e.g., "(4.5-11)", "(140-400)", "(20-40)")
+   - Extract the parentheses and format exactly as shown
+   - If the range shown in image is "(4.5-11)" → extract "(4.5-11)" exactly
+   - If Column 4 is empty → leave normal_range as empty string ""
+   - NEVER invent a range not visible in the image
+   - NEVER use knowledge of typical ranges - use ONLY what image shows
 
-📝 JSON OUTPUT (MUST INCLUDE ALL VALIDATED ROWS):
+7. **VERIFICATION CHECKLIST FOR EACH ROW**:
+   Before including a row in output, verify:
+   ✅ Can I see a test name in Column 1? → If NO, skip this row
+   ✅ Can I see a VALUE in Column 2 that is NOT *, -, or blank? → If NO, skip this row
+   ✅ Is the value in Column 2 clearly aligned horizontally with test name in Column 1? → If NO, check alignment
+   ✅ Column 3 visible? → Extract unit if present, otherwise ""
+   ✅ Column 4 visible? → Extract range if present, otherwise ""
+
+8. **TABLE BOUNDARY DETECTION**:
+   - Identify where the table starts (usually has column headers)
+   - Scan down and extract every row with actual test data
+   - Stop when you reach the end of the table (before footer or notes)
+   - Do NOT include rows outside the main table structure
+
+9. **FINAL COUNT CHECK**:
+   - Count total rows extracted (should be 20-30 for a typical CBC)
+   - If count < 10, you likely missed rows - go back and recheck the table
+   - If count > 40, verify you didn't include header rows or duplicates
+
+📝 JSON OUTPUT - EXTRACT FROM IMAGE ONLY:
 {{
   "medical_data": [
     {{
-      "field_name": "Test name EXACTLY from image",
-      "field_value": "Numeric value or count (NOT empty) or skip row if empty",
-      "field_unit": "Unit like K/uL, g/dL, % or empty string if not shown",
-      "normal_range": "Range like (4-11) or (4.5-11) or empty string if not shown",
+      "field_name": "EXACTLY as shown in Column 1 of image",
+      "field_value": "EXACTLY the number/value shown in Column 2 of image",
+      "field_unit": "EXACTLY as shown in Column 3 of image, or empty string if not shown",
+      "normal_range": "EXACTLY as shown in Column 4 of image, or empty string if not shown",
       "is_normal": null,
-      "category": "Hematology" or "Complete Blood Count",
+      "category": "Hematology",
       "notes": ""
     }},
-    ... more items ...
+    {{
+      "field_name": "EXACTLY as shown in Column 1 of image",
+      "field_value": "EXACTLY the number/value shown in Column 2 of image",
+      "field_unit": "EXACTLY as shown in Column 3 of image, or empty string if not shown",
+      "normal_range": "EXACTLY as shown in Column 4 of image, or empty string if not shown",
+      "is_normal": null,
+      "category": "Hematology",
+      "notes": ""
+    }}
+    // Continue for EVERY row with actual values in Column 2
+    // DO NOT include rows where Column 2 is *, -, blank, or empty
   ]
 }}
 
-🚨 VALIDATION BEFORE RETURNING:
-- Every medical_data item has a non-empty field_value (values with NO result are skipped)
-- Every medical_data item has a field_name (test name)
-- Range format matches image (if shown)
-- Units are valid medical units, not symbols
-- Total items >= 20 (typical CBC has 25-30 tests)
-- No items copied from adjacent rows
-- No hallucinated ranges not in image
+🚨 IMPORTANT REMINDERS:
+- Extract ONLY from the image - no knowledge-based assumptions
+- Do NOT provide values you know should be there if image is unclear
+- Each row's values must align horizontally across all 4 columns
+- Empty results (*, -, blank) mean skip that entire row
+- Range must match the VALUE in the same row (verify alignment)
+- Unit must match the TEST NAME in the same row (verify alignment)
 """
 
 def get_clinical_chemistry_focused_prompt(idx, total_pages):
     """
-    Specialized prompt for Clinical Chemistry tables with validation rules.
+    Specialized prompt for Clinical Chemistry tables with extraction from image only.
+    No hardcoded values - extract directly from what's visible.
     """
-    return f"""🚨 CLINICAL CHEMISTRY TABLE EXTRACTION - STRICT MODE 🚨
+    return f"""🚨 CLINICAL CHEMISTRY TABLE EXTRACTION - STRICT IMAGE-ONLY MODE 🚨
 Page {idx}/{total_pages}
 
+CRITICAL INSTRUCTION: Extract ONLY what you see in the image. Do NOT invent or assume any values.
+
 YOU ARE EXTRACTING A CLINICAL CHEMISTRY TABLE.
-This table typically has 10-25 tests (glucose, electrolytes, liver/kidney function, cholesterol, etc.)
+The table has columns arranged:
+  Column 1: Test/Parameter Name (e.g., "Glucose", "Creatinine", "Cholesterol Total")
+  Column 2: Test Result/Value (a number visible in image)
+  Column 3: Unit of Measurement (e.g., "mg/dl", "mmol/L", "IU/L")
+  Column 4: Reference Range (e.g., "(70-110)" - shown in image)
 
 🔴 CRITICAL RULES - FOLLOW EXACTLY:
 
-1. **EMPTY VALUE RULE** (MOST IMPORTANT):
-   - If a test result is: * (star), - (dash), blank, or empty space → DO NOT EXTRACT THAT ROW
-   - A result with * or - is MISSING and should NOT appear in medical_data
-   - Skip the entire row if field_value is empty
-   
-2. **ROW ALIGNMENT**:
-   - Each row is independent - test value belongs to test name in SAME row ONLY
-   - Never borrow values from adjacent rows
-   - Trace horizontally across ONE row at a time
-   - Verify columns don't shift between rows
-   
-3. **UNIT AND RANGE READING**:
-   - Extract unit from same row's unit column (e.g., "mg/dl", "mmol/L", "IU/L")
-   - Extract range from same row's range column (e.g., "(74-110)", "(0-200)")
-   - If unit or range column is empty for that row, leave as ""
-   - NEVER invent units or ranges not visible in image
-   
-4. **VALUE VALIDATION**:
-   - Valid values: numbers like "109", "0.56", "230", "12.6", "128"
-   - Valid values: text like "Normal", "Negative", "Positive" (qualitative results)
-   - Invalid: symbols only like "*", "-", "—", ".", "(empty)", "N/A"
-   - If value is ONLY a symbol or blank → skip this row
-   
-5. **COMMON CLINICAL CHEMISTRY TESTS**:
-   - Glucose: (70-100) or (80-120) mg/dl
-   - Creatinine: (0.6-1.2) or (0.5-0.9) mg/dl
-   - Cholesterol Total: (0-200) or <200 mg/dl
-   - HDL Cholesterol: (>40) or (35-80) mg/dl
-   - LDL Cholesterol: (0-100) or (0-130) mg/dl
-   - Triglycerides: (<150) or (0-150) mg/dl
-   - Sodium: (135-145) mEq/L
-   - Potassium: (3.5-5) mEq/L
-   - ALT/AST: (0-33) or (0-40) U/L
-   - Bilirubin: (0.1-1.2) mg/dl
-   
-6. **VERIFICATION CHECKLIST**:
-   - ✅ Test name visible and clear
-   - ✅ Value is a NUMBER or TEXT (not just a symbol)
-   - ✅ Unit is present (or leave as "")
-   - ✅ Range matches THIS test (verify alignment with test name)
-   - ❌ If value is * or - or missing → SKIP THIS ROW
-   
-7. **BOUNDARY DETECTION**:
-   - Identify table start and end clearly
-   - Table usually has headers like: Test | Result | Unit | Reference Range
-   - Stop when you reach the end of test data (don't include footer or notes)
+1. **EXTRACT FROM IMAGE ONLY - NO ASSUMPTIONS**:
+   - Scan the table from top to bottom
+   - For EACH visible row:
+     a) Column 1: Read the test name shown in image
+     b) Column 2: Read the result/value shown in image
+     c) Column 3: Read the unit shown in image
+     d) Column 4: Read the reference range shown in image
+   - Extract EXACTLY what you see - no modifications, no knowledge-based values
 
-📝 OUTPUT FORMAT:
-Only include rows with actual values (skip * or - entries):
+2. **EMPTY VALUE RULE** (MOST IMPORTANT):
+   - If Column 2 (Result/Value) shows: * (star), - (dash), — (line), or is blank/empty
+     → This test has NO RESULT
+     → DO NOT EXTRACT THIS ROW
+     → Skip this row completely - do not include in medical_data array
+   - NEVER guess a value for empty results
+   - NEVER copy a value from adjacent rows
+   - If there's no value in Column 2, the row is not included
+
+3. **ROW ALIGNMENT VERIFICATION** (CRITICAL FOR ACCURACY):
+   - For EACH row extracted:
+     → Verify the value in Column 2 is horizontally aligned with test name in Column 1
+     → Verify the unit in Column 3 is horizontally aligned with same test
+     → Verify the range in Column 4 is horizontally aligned with same test
+   - If columns shift or misalign → RECHECK the row
+   - Ensure no values are "borrowed" from adjacent rows
+   - Each row must have its own test, value, unit, and range
+
+4. **VALUE VALIDATION**:
+   - Valid values: Numbers like "109", "0.56", "230", "12.6", "128"
+   - Valid values: Decimals like "74.5", "0.12", "3.8"
+   - Valid values: Text results like "Normal", "Negative", "Positive" (if image shows)
+   - Invalid/Skip: Symbols only like "*", "-", "—", ".", or blank
+   - If Column 2 shows ONLY a symbol or is blank → skip this entire row
+
+5. **UNIT READING**:
+   - Read unit EXACTLY as shown in image (e.g., "mg/dl", "mmol/L", "mEq/L", "U/L", "IU/L", "g/dL")
+   - Do NOT modify or standardize units
+   - If Column 3 is empty for a test → leave field_unit as empty string ""
+   - If Column 3 shows only symbols → leave field_unit as empty string ""
+
+6. **RANGE READING**:
+   - Read reference range EXACTLY as shown in image
+   - If shown as "(74-110)" → extract "(74-110)"
+   - If shown as "<200" → extract "<200"
+   - If shown as "(0-200)" → extract "(0-200)"
+   - Extract the format exactly as displayed - do NOT modify
+   - If Column 4 is empty → leave normal_range as empty string ""
+   - NEVER invent a range not visible in the image
+   - NEVER use typical ranges from medical knowledge - use ONLY image
+
+7. **TABLE STRUCTURE VERIFICATION**:
+   - Identify table start (usually has headers: Test, Result, Unit, Reference)
+   - Extract every row with actual data (Column 2 has a value)
+   - Stop when table ends (before footer, notes, or other sections)
+   - Do NOT include header rows or footer rows
+
+8. **COMMON TEST NAMES IN CHEMISTRY** (Use to verify you're extracting correctly):
+   - Do NOT use this list to fill in missing values
+   - Use ONLY to help identify row boundaries and test names
+   - Extract names exactly as shown in image, not from this list
+   - Examples of test names (for reference only): Glucose, Creatinine, Cholesterol, HDL, LDL, Triglycerides, Sodium, Potassium, ALT, AST, Bilirubin, etc.
+
+9. **VERIFICATION CHECKLIST FOR EACH ROW**:
+   Before including in output:
+   ✅ Can I see a test name in Column 1? → If NO, skip
+   ✅ Can I see a VALUE in Column 2 that is NOT *, -, blank? → If NO, skip
+   ✅ Are all 4 columns horizontally aligned? → If NO, recheck alignment
+   ✅ Column 3 (Unit) visible? → Extract if present, leave "" if not
+   ✅ Column 4 (Range) visible? → Extract if present, leave "" if not
+
+📝 JSON OUTPUT - EXTRACT FROM IMAGE ONLY:
 {{
   "medical_data": [
     {{
-      "field_name": "Glucose",
-      "field_value": "109",
-      "field_unit": "mg/dl",
-      "normal_range": "(74-110)",
-      "is_normal": true,
+      "field_name": "EXACTLY as shown in Column 1 of image",
+      "field_value": "EXACTLY the number shown in Column 2 of image",
+      "field_unit": "EXACTLY as shown in Column 3 of image, or empty string if not shown",
+      "normal_range": "EXACTLY as shown in Column 4 of image, or empty string if not shown",
+      "is_normal": null,
       "category": "Clinical Chemistry",
       "notes": ""
     }},
     {{
-      "field_name": "Creatinine, serum",
-      "field_value": "0.56",
-      "field_unit": "mg/dl",
-      "normal_range": "(0.5-0.9)",
-      "is_normal": true,
+      "field_name": "EXACTLY as shown in Column 1 of image",
+      "field_value": "EXACTLY the number shown in Column 2 of image",
+      "field_unit": "EXACTLY as shown in Column 3 of image, or empty string if not shown",
+      "normal_range": "EXACTLY as shown in Column 4 of image, or empty string if not shown",
+      "is_normal": null,
       "category": "Clinical Chemistry",
       "notes": ""
-    }},
-    // ... more items - ONLY those with actual values ...
+    }}
+    // Continue for EVERY row with actual values in Column 2
+    // DO NOT include rows where Column 2 is *, -, blank, or empty
   ]
 }}
 
-🚨 FINAL CHECK:
-- All items have field_value (no empty values)
-- All items have field_name (test name)
-- Units and ranges match the image exactly
-- No items from rows with * or - markers
-- Total >= 10 items (typical chemistry panel)
+🚨 IMPORTANT - NO HALLUCINATION:
+- Extract ONLY from image - no guessing or assumptions
+- Do NOT provide values you think should be there
+- Each row must have horizontal column alignment
+- Empty results (*, -, blank) mean skip that row
+- Range must match the value in the same row
+- Unit must match the test name in the same row
+- No knowledge-based values, NO ASSUMPTIONS
 """
 
 def get_page_2_specific_validation_prompt():
@@ -279,6 +319,116 @@ Return CORRECTED medical_data array with:
   }}
 }}
 """
+
+def get_direct_image_extraction_prompt():
+    """
+    Prompt for direct extraction from image without any prior assumptions.
+    Forces VLM to read line-by-line from the visible table.
+    """
+    return f"""🚨 DIRECT TABLE EXTRACTION - READ FROM IMAGE LINE BY LINE 🚨
+
+TASK: Extract a complete medical test table from the image shown.
+CRITICAL: Do NOT use any knowledge, assumptions, or typical ranges.
+Extract ONLY what is visible in the image.
+
+TABLE STRUCTURE:
+The table has approximately 4-5 columns:
+- Column A (Right/First if Arabic): Test/Parameter Name
+- Column B: Test Result/Value
+- Column C: Unit
+- Column D: Reference/Normal Range
+- Column E (if present): Sometimes notes or flags
+
+EXTRACTION INSTRUCTIONS:
+
+1. **START FROM THE TOP OF THE TABLE**:
+   - Identify the table headers (skip these)
+   - Start reading from the first data row
+   - Go line-by-line downward
+
+2. **FOR EACH ROW IN THE TABLE**:
+   
+   Read left-to-right (or right-to-left if Arabic text):
+   
+   STEP A: Look at the test name column
+   - What text do you see? Write it EXACTLY
+   - Examples: "RBC", "Hemoglobin", "Glucose", "Creatinine"
+   
+   STEP B: Look at the result/value column (same row)
+   - What number/value do you see? Write it EXACTLY
+   - Examples: "4.5", "12.3", "109", "0.56"
+   - If you see: * or - or blank or empty → SKIP THIS ENTIRE ROW
+   - Do NOT fill in a value from another row
+   
+   STEP C: Look at the unit column (same row)
+   - What unit symbol do you see? Write EXACTLY or leave blank
+   - Examples: "M/uL", "g/dL", "mg/dl", "K/uL", "%"
+   - If column is empty or has only symbols → leave blank
+   
+   STEP D: Look at the reference range column (same row)
+   - What range do you see? Write EXACTLY or leave blank
+   - Examples: "(4.5-11)", "(12-16)", "(70-110)"
+   - If column is empty → leave blank
+   - Do NOT invent a range
+
+3. **COLUMN ALIGNMENT CHECK**:
+   - Verify the value in Step B is HORIZONTALLY aligned with test name in Step A
+   - Verify the unit in Step C is HORIZONTALLY aligned with the same test
+   - Verify the range in Step D is HORIZONTALLY aligned with the same test
+   - If misaligned, recheck rows above/below for correct alignment
+
+4. **EMPTY ROW DETECTION**:
+   - If the value column (Step B) shows *, -, —, or blank → DO NOT EXTRACT
+   - The row has no result, so skip it entirely
+   - Do NOT try to fill in a value from anywhere
+
+5. **BOUNDARY DETECTION**:
+   - Continue until you reach the last row with data
+   - Stop before any footer text, notes, or signature areas
+   - Do NOT include rows outside the main table
+
+OUTPUT FORMAT - EXTRACT EVERYTHING YOU SEE:
+
+{{
+  "medical_data": [
+    {{
+      "field_name": "EXACTLY from Step A",
+      "field_value": "EXACTLY from Step B (or skip row if empty)",
+      "field_unit": "EXACTLY from Step C (or blank if not shown)",
+      "normal_range": "EXACTLY from Step D (or blank if not shown)",
+      "is_normal": null,
+      "category": "Extracted from image",
+      "notes": ""
+    }},
+    {{
+      "field_name": "EXACTLY from Step A",
+      "field_value": "EXACTLY from Step B",
+      "field_unit": "EXACTLY from Step C",
+      "normal_range": "EXACTLY from Step D",
+      "is_normal": null,
+      "category": "Extracted from image",
+      "notes": ""
+    }}
+    // ... continue for EVERY row that has a value in Step B ...
+  ],
+  "extraction_notes": {{
+    "total_rows_extracted": "count of items in medical_data",
+    "rows_skipped_empty_value": "count of rows with * or - or blank in value column",
+    "table_orientation": "left-to-right or right-to-left",
+    "confidence": "high/medium/low - your confidence in accuracy"
+  }}
+}}
+
+🚨 CRITICAL RULES:
+- NO knowledge-based values
+- NO assuming typical ranges
+- NO filling empty cells from other rows
+- EXTRACT ONLY WHAT IMAGE SHOWS
+- VERIFY COLUMN ALIGNMENT
+- SKIP EMPTY VALUE ROWS
+- READ LINE BY LINE, ROW BY ROW
+"""
+
 
 def get_image_comparison_prompt(expected_test_count):
     """

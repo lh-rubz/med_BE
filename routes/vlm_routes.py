@@ -29,6 +29,11 @@ from utils.vlm_line_by_line_verifier import (
     verify_extracted_fields_against_image,
     generate_verification_summary_for_user
 )
+from utils.vlm_page_specific_prompts import (
+    get_hematology_focused_prompt,
+    get_clinical_chemistry_focused_prompt,
+    get_direct_image_extraction_prompt
+)
 from ollama import Client
 
 # Create namespace
@@ -467,46 +472,11 @@ OUTPUT JSON ONLY:
             page_num = image_info.get('page_number', idx)
             if page_num == 2 or idx == 2:
                 # Page 2 often has Hematology/CBC - use specialized prompt
-                from utils.vlm_page_specific_prompts import get_hematology_focused_prompt
                 table_prompt = get_hematology_focused_prompt(idx, total_pages)
             else:
-                # Default prompt for other pages
-                table_prompt = f"""You are a "Smart Scanner" Medical AI. Your goal is 100% VISUAL ACCURACY.
-Scan the MEDICAL RESULTS TABLE on Page {idx}/{total_pages} line-by-line.
-
-⚠️ **STRICT SCANNING PROTOCOL (Line-by-Line)**:
-1. **Identify the Grid**: Locate the main table columns: Test Name, Result, Unit, Range.
-2. **Read Row by Row**:
-   - Start at the FIRST test. Read horizontally (Left to Right).
-   - **DO NOT JUMP ROWS**: Never take a value from the row above or below.
-   - **DO NOT GUESS**: If a value is missing, it is MISSING.
-3. **Empty / Star (*) Handling**:
-   - Look STRICTLY at the "Result" column for the current row.
-   - If the cell is **BLANK**, contains `*`, `-`, or just whitespace: **VALUE IS EMPTY ("")**.
-   - **CRITICAL**: Do NOT grab the number from the neighbor row. Output "" (Empty String).
-4. **Normal Range**:
-   - Extract the text EXACTLY as printed (e.g., "13.0-17.0").
-   - If the range column is empty or has `-`, output "".
-   - **Check Alignment**: Ensure the range belongs to THIS test, not the one above.
-
-⚠️ **DATA CLEANING**:
-- If a row has NO result and NO range (just a header or empty line), **SKIP IT**.
-- Only return rows that contain actual medical test data.
-
-OUTPUT JSON ONLY:
-{{
-  "medical_data": [
-    {{
-      "field_name": "Exact Test Name (e.g. WBC)",
-      "field_value": "Exact Result (e.g. 5.2) or \"\"",
-      "field_unit": "Unit",
-      "normal_range": "Range or \"\"",
-      "is_normal": true/false/null,
-      "category": "Section Name"
-    }}
-  ]
-}}
-"""
+                # Use direct image extraction for other pages
+                table_prompt = get_direct_image_extraction_prompt()
+            
             # Execute Stage 2
             extracted_table_data = {}
             try:
