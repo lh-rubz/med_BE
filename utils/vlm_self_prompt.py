@@ -3,7 +3,7 @@ import json
 
 def get_report_analysis_prompt(idx, total_pages):
     """Ask the model to analyze the report and create a custom extraction prompt."""
-    return f"""🚨 MEDICAL REPORT ANALYSIS TASK 🚨
+    return f"""🚨 DETAILED MEDICAL REPORT ANALYSIS TASK 🚨
 
 You are analyzing page {idx}/{total_pages} of a medical lab report.
 
@@ -26,21 +26,40 @@ For EACH row, also note:
 ⚠️ THIS IS PAGE {idx} OF {total_pages} - CONTINUE EXTRACTION ACROSS ALL PAGES!
 ⚠️ DO NOT INVENT NORMAL RANGES - if empty in image, leave it empty in JSON!
 
-STEP 2 - ANALYZE THE TABLE STRUCTURE:
+STEP 3 - CREATE DETAILED ROW ANALYSIS:
+For EACH row in the medical table, identify:
+- Row has TEST NAME? (Yes/No) - if Yes, write it
+- Row has VALUE? (Yes/No) - if Yes, write it, if No write "EMPTY"
+- Row has UNIT? (Yes/No) - if Yes, write it, if No write "NO UNIT"
+- Row has NORMAL RANGE? (Yes/No) - if Yes, write it, if No write "NO RANGE"
+
+Example:
+Row 1: "Glucose" | Value: "109" | Unit: "mg/dl" | Range: "(74-110)" ✓ COMPLETE
+Row 2: "Hemoglobin" | Value: "12.6" | Unit: "g/dL" | Range: "(12-16)" ✓ COMPLETE
+Row 3: "Some Test" | Value: "EMPTY" | Unit: "mg/dL" | Range: "NO RANGE" ✗ SKIP (empty value)
+Row 4: "WBC" | Value: "7.1" | Unit: "cells/L" | Range: "(4.6-11)" ✓ COMPLETE
+
+Count how many rows are COMPLETE (have all 4 parts) vs INCOMPLETE (missing value or range)
 1. Language: Is it Arabic, English, or bilingual?
 2. Column positions (right-to-left or left-to-right?):
    - Which column has TEST NAMES?
    - Which column has RESULTS/VALUES?
    - Which column has UNITS?
    - Which column has NORMAL RANGES?
-3. Patient info location:
-   - Where is patient name? (after 'اسم المريض' or 'Patient Name') - NOTE THE EXACT TEXT AND LANGUAGE
+3. Patient info location (MUST NOT CONFUSE WITH DOCTOR):
+   - Where is PATIENT NAME? (look for 'اسم المريض' = Patient name, then read THE NAME AFTER IT)
+   - Pattern: "اسم المريض: [ACTUAL PATIENT NAME HERE]" - Extract ONLY the name part
    - Where is gender? (If Arabic: ذكر=Male, أنثى=Female) - CONVERT TO ENGLISH
    - Where is date?
-4. Doctor/Lab info location:
-   - Where is doctor name? (look for 'دكتور', 'طبيب', 'Doctor', 'DR', 'Dr.' or signature) - IMPORTANT: MUST RETURN THIS
+4. Doctor/Lab info location (COMPLETELY SEPARATE from patient):
+   - Where is DOCTOR NAME? (look for 'دكتور', 'طبيب', 'Doctor', 'DR:', 'Dr.' THEN read the name AFTER it)
+   - Pattern: "الدكتور: [DOCTOR NAME HERE]" or "Doctor: [DOCTOR NAME HERE]" - Extract ONLY doctor name
+   - NOT the patient name! They are DIFFERENT people!
    - Where is lab name or clinic name?
-   - Is there a signature area at bottom or top?
+   - Is there a signature or seal at bottom?
+
+🚨 CRITICAL: Patient name and Doctor name are DIFFERENT FIELDS from DIFFERENT LOCATIONS!
+Patient Name location != Doctor Name location
 
 STEP 3 - CREATE ROW-BY-ROW EXTRACTION MAP:
 List the FIRST 5 ROWS and LAST 5 ROWS you can see:
@@ -48,13 +67,26 @@ First 5:
 1. [Test name from row 1]
 2. [Test name from row 2]
 3. [Test name from row 3]
-4. [Test name from row 4]
-5. [Test name from row 5]
-
-Last 5:
-[N-4]. [Test name]
-[N-3]. [Test name]
-[N-2]. [Test name]
+4. complete_rows": 20,
+  "incomplete_rows": 4,
+  "report_language": "Arabic/English/Bilingual",
+  "table_reading_direction": "Right-to-left" or "Left-to-right",
+  "column_map": {{
+    "test_name_column": "Rightmost column",
+    "value_column": "Second from right",
+    "unit_column": "Third from right",
+    "range_column": "Leftmost column"
+  }},
+  "patient_info": {{
+    "name_location": "Top-right area after 'اسم المريض:'",
+    "patient_name_text": "Exact text you see: e.g., 'رئيسي خضر طالب خطيب'",
+    "gender_location": "Header section after 'الجنس:'",
+    "gender_value": "ذكر or أنثى (will convert to Male/Female)"
+  }},
+  "doctor_info": {{
+    "name_location": "Bottom area or header section after 'دكتور:' or 'Doctor:'",
+    "doctor_name_text": "Exact doctor name you see (NOT the patient name!)",
+    "clinic_name": "Clinic or lab name if visible
 [N-1]. [Test name]
 [N]. [Test name]
 
