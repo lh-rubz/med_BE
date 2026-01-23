@@ -18,35 +18,10 @@ from models import db, User, Report, ReportField, ReportFile, MedicalSynonym
 from config import ollama_client, Config
 from utils.medical_validator import validate_medical_data, MedicalValidator
 from utils.medical_mappings import add_new_alias
-from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_personal_info_prompt
-from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt, generate_prompt_enhancement_request
-from utils.vlm_self_prompt import get_report_analysis_prompt, get_custom_extraction_prompt
 from ollama import Client
 
 # Create namespace
 vlm_ns = Namespace('vlm', description='VLM and Report operations')
-
-# Helper function to normalize gender values
-def normalize_gender(gender_value):
-    """Convert any gender representation to English Male/Female."""
-    if not gender_value:
-        return ''
-    gender_str = str(gender_value).strip()
-    gender_lower = gender_str.lower()
-    
-    # Male variations
-    if gender_lower in ['male', 'm', 'ذكر', 'ذكر ', ' ذكر']:
-        return 'Male'
-    # Female variations
-    elif gender_lower in ['female', 'f', 'أنثى', 'انثى', 'أنثي', 'انثي']:
-        return 'Female'
-    # If it's already correct, return it
-    elif gender_str in ['Male', 'Female']:
-        return gender_str
-    # Unknown format
-    else:
-        print(f"⚠️ Unknown gender format: '{gender_str}' - clearing")
-        return ''
 
 # Standardized Report Types
 REPORT_TYPES = [
@@ -389,535 +364,354 @@ class ChatResource(Resource):
                 print(f"📖 PDF Page: {image_info['page_number']}/{image_info.get('total_pages', '?')}")
             print(f"{'='*80}\n")
             
-            # Step 1: Extract Personal Information (Name, Gender, Age, etc.)
-            print(f"🤖 Step 1: Extracting patient personal information...")
-            yield f"data: {json.dumps({'percent': current_progress + 5, 'message': f'Extracting patient info from page {idx}...'})}\n\n"
+            # Step 1: VLM Processing (Native Vision)
+            print(f"🤖 Step 1: Structuring data with Qwen2-VL (native vision)...")
+            yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Extracting medical values from page {idx}...'})}\n\n"
             
-            personal_info_prompt = get_personal_info_prompt(idx, total_pages)
-            personal_data = {}
-            correction_pass = 0
-            max_correction_passes = 5
-            
+            prompt_text = f"""You are a genius medical AI expert. Your task is to digitize this medical report (Page {idx}/{total_pages}) with 100% ACCURACY.
+This report may be complex, handwritten, skewed, or contain mixed Arabic/English text.
+
+⚠️ CRITICAL INSTRUCTIONS - READ CAREFULLY:
+
+1. **HEADER & PATIENT INFO (Top Priority)**:
+   - **Scanning**: Look at the top section. Identify "Ministry of Health" (وزارة الصحة) or Lab headers.
+   - **Tables**: Often there are two tables side-by-side. 
+     * **RIGHT Table**: Patient Info (Name, Gender, DOB).
+     * **LEFT Table**: Request Info (Doctor, Date).
+   - **Gender (الجنس)**: 
+     * **CRITICAL**: Check for "أنثى"/"انثى" (Female) vs "ذكر" (Male).
+     * If the report says "انثى", output "Female". Do NOT default to Male.
+   - **Age/DOB**: 
+     * Extract "تاريخ الميلاد" (DOB) exactly (e.g., "01/05/1975"). 
+     * **Priority**: DOB > Age. If DOB is 1975, Age MUST be consistent (approx ~50, NOT 28).
+   - **Doctor (الطبيب)**: Look in the LEFT table, often the last cell. Return the name found there (e.g. "Jihad...").
+
+2. **TABLE EXTRACTION (Row-by-Row Precision)**:
+   - **Alignment**: The image might be tilted. Trace the invisible line for EACH row.
+   - **Values**: Match "Test Name" to "Result" in the EXACT SAME ROW.
+   - **Swapping Error**: **NEVER** take a value from the row above or below. 
+     * Example: If 'ALT' is on row X, its value MUST be on row X. Do NOT read the value from row X-1.
+   - **Columns**: Identify [Test Name] | [Result] | [Unit] | [Normal Range].
+
+3. **EMPTY VALUES & SYMBOLS (Zero Hallucination)**:
+   - **Empty Indicators**: If a cell has "*", "-", "--", "—", "( - )", "N/A", or is blank -> RETURN "" (Empty String).
+   - **Ranges**: If the range is specific to gender (e.g., "M: 0-40, F: 0-30"), pick the one matching the PATIENT'S gender.
+   - **NEVER** fill a missing value with a number from your head.
+
+4. **SPECIAL HANDLING**:
+   - **Clinical Chemistry**: Watch out for crowded numbers.
+   - **Handwritten**: Do your best to decipher handwritten text in the header/footer.
+   - **Arabic Text**: Handle mixed Arabic/English correctly.
+
+OUTPUT FORMAT:
+Return a SINGLE JSON object. No text before or after.
+{{
+  "patient_name": "Full Name",
+  "patient_gender": "Male" or "Female",
+  "patient_dob": "DD/MM/YYYY" or "YYYY-MM-DD",
+  "patient_age": "Number",
+  "doctor_names": "Doctor Name",
+  "report_date": "YYYY-MM-DD",
+  "report_type": "Lab Report",
+  "medical_data": [
+    {{
+      "field_name": "Test Name (e.g. Glucose)",
+      "field_value": "Result (e.g. 109)",
+      "field_unit": "Unit (e.g. mg/dl)",
+      "normal_range": "Range (e.g. 74-110)",
+      "is_normal": true/false/null,
+      "category": "Section Name (e.g. Chemistry)"
+    }}
+  ]
+}}
+"""
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                 image_format = image_info['format']
                 
-                # Variables for enhanced prompt
-                enhanced_prompt = None
-                key_observations = []
+                content = [
+                    {'type': 'text', 'text': prompt_text},
+                    {
+                        'type': 'image_url',
+                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                    }
+                ]
                 
-                # ITERATIVE CORRECTION LOOP: Keep fixing until no errors
-                while correction_pass < max_correction_passes:
-                    correction_pass += 1
-                    print(f"\n🔄 Personal Info Extraction Pass {correction_pass}/{max_correction_passes}")
+                completion = ollama_client.chat.completions.create(
+                    model=Config.OLLAMA_MODEL,
+                    messages=[{'role': 'user', 'content': content}],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                    max_tokens=2500,
+                    timeout=120.0
+                )
+                response_text = completion.choices[0].message.content.strip()
+                print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
+                
+                extracted_data = {}
+                for attempt in range(2):
+                    try:
+                        import re
+                        start_idx = response_text.find('{')
+                        end_idx = response_text.rfind('}')
+                        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                            json_str = response_text[start_idx:end_idx+1]
+                            extracted_data = json.loads(json_str)
+                            print(f"✅ JSON extracted for Image {idx} (attempt {attempt+1})")
+                        else:
+                            print(f"⚠️ No JSON brackets found in response for Image {idx} (attempt {attempt+1})")
+                            print(f"RAW: {response_text[:200]}...")
+                    except Exception as json_err:
+                        print(f"⚠️ JSON Parsing Failed for Image {idx} (attempt {attempt+1}): {json_err}")
+                        print(f"RAW RESPONSE: {response_text}")
                     
-                    if correction_pass == 1:
-                        # First pass: Use main prompt
-                        prompt_to_use = personal_info_prompt
-                    else:
-                        # Subsequent passes: Analyze and enhance
-                        analysis = analyze_extraction_issues(personal_data)
-                        if not analysis['has_issues']:
-                            print(f"✅ No issues found in personal info - extraction complete!")
-                            break
-                        
-                        print(f"⚠️ Found {analysis['issue_count']} issue(s), generating enhanced prompt...")
-                        for issue in analysis['issues'][:5]:
-                            print(f"   - {issue['type']}: {issue['reason']}")
-                        
-                        # On second pass, ask model to enhance the prompt for this specific report
-                        if correction_pass == 2 and not enhanced_prompt:
-                            print(f"🧠 Generating report-specific enhanced prompt...")
-                            enhancement_request = generate_prompt_enhancement_request(
-                                personal_info_prompt, personal_data, analysis
-                            )
-                            
-                            enhancement_content = [
-                                {'type': 'text', 'text': enhancement_request},
-                                {
-                                    'type': 'image_url',
-                                    'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                                }
-                            ]
-                            
-                            try:
-                                enhancement_completion = ollama_client.chat.completions.create(
-                                    model=Config.OLLAMA_MODEL,
-                                    messages=[{'role': 'user', 'content': enhancement_content}],
-                                    temperature=0.2,
-                                    response_format={"type": "json_object"},
-                                    max_tokens=1500,
-                                    timeout=60.0
-                                )
-                                enhancement_response = enhancement_completion.choices[0].message.content.strip()
-                                
-                                # Parse enhancement response
-                                start_idx = enhancement_response.find('{')
-                                end_idx = enhancement_response.rfind('}')
-                                if start_idx != -1 and end_idx != -1:
-                                    enhancement_data = json.loads(enhancement_response[start_idx:end_idx+1])
-                                    enhanced_prompt = enhancement_data.get('enhanced_prompt', '')
-                                    key_observations = enhancement_data.get('key_observations', [])
-                                    
-                                    print(f"✅ Enhanced prompt generated!")
-                                    print(f"📝 Key observations:")
-                                    for obs in key_observations[:3]:
-                                        print(f"   - {obs}")
-                            except Exception as enh_err:
-                                print(f"⚠️ Prompt enhancement failed: {enh_err}, using standard correction")
-                        
-                        # Generate corrective prompt (uses enhanced prompt if available)
-                        prompt_to_use = generate_corrective_prompt(
-                            personal_data, analysis, idx, total_pages, 
-                            enhanced_prompt=enhanced_prompt,
-                            original_prompt=personal_info_prompt
-                        )
+                    if extracted_data.get('medical_data') or attempt == 1:
+                        break
                     
+                    print(f"🔁 Retrying extraction for Image {idx} with table-focused prompt...")
+                    table_only_prompt = f"""You are a medical AI expert specializing in table extraction (Page {idx}/{total_pages}).
+Your ONLY goal is to extract the TABLE rows correctly.
+
+⚠️ STRICT ROW-BY-ROW EXTRACTION RULES:
+1. **Vertical Alignment**: Trace the invisible horizontal line for each row.
+2. **Isolation**: Read values ONLY from the current row. NEVER borrow from neighbors.
+3. **Empty Values**: If a cell is empty, has "*", "-", or "—", return "".
+4. **Swapping Prevention**: 
+   - Ensure the 'Result' belongs to the 'Test Name' in the SAME row.
+   - Do NOT mix up values (e.g. ALT vs AST).
+   - **CHECK**: Does the value align perfectly with the test name?
+
+⚠️ EMPTY VALUE HANDLING:
+- Symbols like "*", "-", "—", "( - )", "N/A", ".", ".." -> MUST BE RETURNED AS "" (Empty String).
+- Do NOT hallucinate a number if the cell is effectively empty. If unsure, return "".
+
+Return JSON:
+{{
+  "medical_data": [
+    {{
+      "field_name": "Test Name",
+      "field_value": "Result (or \"\")",
+      "field_unit": "Unit (or \"\")",
+      "normal_range": "Range (or \"\")",
+      "is_normal": true/false/null,
+      "category": "Section Name"
+    }}
+  ]
+}}
+"""
                     content = [
-                        {'type': 'text', 'text': prompt_to_use},
+                        {'type': 'text', 'text': table_only_prompt},
                         {
                             'type': 'image_url',
                             'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
                         }
                     ]
-                    
                     completion = ollama_client.chat.completions.create(
                         model=Config.OLLAMA_MODEL,
                         messages=[{'role': 'user', 'content': content}],
                         temperature=0.1,
                         response_format={"type": "json_object"},
-                        max_tokens=800,
-                        timeout=60.0
+                        max_tokens=2500,
+                        timeout=90.0
                     )
                     response_text = completion.choices[0].message.content.strip()
-                    print(f"✅ Response (Pass {correction_pass}):\n{'-'*40}\n{response_text[:200]}...\n{'-'*40}")
+                    print(f"🔍 RAW RESPONSE (retry) for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
+                
+
+
+
+                if extracted_data.get('is_medical_report') is False:
+                     error_msg = extracted_data.get('reason', 'The uploaded file does not appear to be a valid medical report.')
+                     print(f"⛔ Rejected as non-medical: {error_msg}")
+                     continue
+                
+                if extracted_data.get('medical_data'):
+                    new_items = extracted_data['medical_data']
                     
+                    unique_new_items = []
+                    existing_test_names = {str(item.get('field_name', '')).lower() for item in all_extracted_data}
+                    
+                    for item in new_items:
+                        raw_test_name = item.get('field_name', '')
+                        raw_test_val = item.get('field_value', '')
+                        
+                        test_name = str(raw_test_name).strip() if raw_test_name is not None else ''
+                        test_val = str(raw_test_val).strip() if raw_test_val is not None else ''
+                        
+                        if not test_name or test_name.lower() in ['test name', 'test', 'الفحص', 'الاختبار']:
+                            continue
+                            
+                        if test_name.lower() in existing_test_names:
+                            print(f"⚠️ Duplicate test skipped: {test_name}")
+                            continue
+                        
+                        # Enhanced empty value detection - recognize all empty indicators
+                        empty_indicators = {'', ' ', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
+                                          'nil', 'none', 'unknown', 'null', 'nul', 'not available', '.', '..',
+                                          'غير متوفر', 'غير موجود'}
+                        test_val_cleaned = test_val.strip() if test_val else ''
+                        test_val_lower = test_val_cleaned.lower()
+                        
+                        # Also check normal_range for empty indicators
+                        normal_range_raw = str(item.get('normal_range', '') or '').strip()
+                        normal_range_lower = normal_range_raw.lower()
+                        
+                        # Clean normal_range if it's an empty indicator
+                        if normal_range_raw in ['-', '--', '—', '*', '(-)', '.'] or normal_range_lower in empty_indicators:
+                            # Check if it actually contains numbers - if not, it's empty
+                            if not any(ch.isdigit() for ch in normal_range_raw):
+                                item['normal_range'] = ''
+                                print(f"⚠️ Cleaned empty normal_range for {test_name}: '{normal_range_raw}' -> ''")
+                        
+                        # If value is an empty indicator, set it to empty string but still process the field
+                        if test_val_lower in empty_indicators or not test_val_cleaned:
+                            # Set field_value to empty string - don't skip the field entirely
+                            item['field_value'] = ''
+                            # Still add the field but mark it as having no value
+                            unique_new_items.append(item)
+                            existing_test_names.add(test_name.lower())
+                            continue
+                        
+                        # Check for qualitative results (normal/abnormal text)
+                        qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
+                        is_qualitative = any(token in test_val_lower for token in qualitative_tokens)
+                        
+                        # Check if value contains numbers
+                        has_digit = any(ch.isdigit() for ch in test_val_cleaned)
+                        
+                        # Accept if it has digits OR is a qualitative result
+                        if has_digit or is_qualitative:
+                            unique_new_items.append(item)
+                            existing_test_names.add(test_name.lower())
+                        else:
+                            # Value doesn't look like a valid medical result - skip
+                            print(f"⚠️ Skipping invalid test value: {test_name} = '{test_val_cleaned}'")
+                    
+                    all_extracted_data.extend(unique_new_items)
+                    print(f"✅ Extracted {len(unique_new_items)} UNIQUE field(s) from page {idx}")
+                
+                # Capture patient info - merge intelligently, prefer most complete data
+                new_name = str(extracted_data.get('patient_name', '') or '').strip()
+                new_gender = str(extracted_data.get('patient_gender', '') or '').strip()
+                new_age = str(extracted_data.get('patient_age', '') or '').strip()
+                new_dob = str(extracted_data.get('patient_dob', '') or '').strip()
+                new_doctor = str(extracted_data.get('doctor_names', '') or '').strip()
+                new_report_date = str(extracted_data.get('report_date', '') or '').strip()
+                
+                # Debug: Print what we extracted from this page
+                print(f"📋 Page {idx} - Extracted patient info:")
+                print(f"   Name: '{new_name}' (length: {len(new_name)})")
+                print(f"   Gender: '{new_gender}'")
+                print(f"   Age: '{new_age}', DOB: '{new_dob}'")
+                print(f"   Doctor: '{new_doctor}'")
+                
+                current_name = str(patient_info.get('patient_name', '') or '').strip()
+                current_gender = str(patient_info.get('patient_gender', '') or '').strip()
+                current_age = str(patient_info.get('patient_age', '') or '').strip()
+                current_dob = str(patient_info.get('patient_dob', '') or '').strip()
+                
+                # SMART FIX: If patient_name is rejected as label but doctor_names looks like a real person name,
+                # swap them - this handles the common VLM mistake of mixing up patient and doctor names
+                name_reject_patterns = [
+                    # Arabic labels
+                    'رقم المريض', 'اسم المريض', 'المريض', 'الاسم', 
+                    'دكتور', 'طبيب', 'الطبيب', 'الموظف',
+                    # English labels
+                    'doctor', 'dr.', 'employee', 'patient name', 'patient id', 'patient number',
+                    'name', 'id number', 'gender', 'sex', 'date of birth', 'dob',
+                    # Partial matches
+                    'patient', 'رقم', 'اسم'
+                ]
+                
+                new_name_is_label = False
+                if new_name:
+                    name_lower = new_name.lower().strip()
+                    # Check if name matches any reject pattern exactly or starts with it
+                    for pattern in name_reject_patterns:
+                        if name_lower == pattern.lower() or name_lower.startswith(pattern.lower() + ':'):
+                            print(f"⚠️ Rejected suspicious patient name (label): {new_name}")
+                            new_name_is_label = True
+                            new_name = ''
+                            break
+                    # Also reject if name is too short or looks like a number only
+                    if new_name and (len(new_name) < 3 or new_name.strip().isdigit()):
+                        print(f"⚠️ Rejected suspicious patient name (too short/numeric): {new_name}")
+                        new_name_is_label = True
+                        new_name = ''
+                
+                # SMART CORRECTION: If patient_name was rejected but doctor_names looks like a real person name
+                # (contains multiple words, looks like Arabic/English name, not a label), swap them
+                if new_name_is_label and new_doctor:
+                    doctor_lower = new_doctor.lower().strip()
+                    # Check if doctor name looks like a real person name (not a label)
+                    is_doctor_a_label = any(pattern in doctor_lower for pattern in name_reject_patterns)
+                    # Check if it looks like a real name (has multiple words or is Arabic name with spaces)
+                    has_multiple_words = len(new_doctor.split()) >= 2
+                    looks_like_real_name = has_multiple_words and not is_doctor_a_label and len(new_doctor) > 5
+                    
+                    if looks_like_real_name:
+                        print(f"🔄 SMART FIX: Swapping - doctor_names '{new_doctor}' looks like patient name")
+                        print(f"   Moving '{new_doctor}' from doctor_names to patient_name")
+                        new_name = new_doctor  # Use doctor name as patient name
+                        new_doctor = ''  # Clear doctor name as it was probably the patient name
+                
+                # Merge patient info: use new data if current is empty, or if new is longer/more complete
+                # Only update if new value is actually valid (not empty, not a label)
+                if new_name and len(new_name) > 2:  # At least 3 characters
+                    if not current_name or (len(new_name) > len(current_name) and len(new_name) > 3):
+                        patient_info['patient_name'] = new_name
+                        print(f"✅ Updated patient_name: {new_name}")
+                    
+                # Gender: only accept Male/Male equivalents or Female/Female equivalents
+                valid_genders = {'male', 'female', 'ذكر', 'أنثى', 'انثى', 'm', 'f'}
+                if new_gender and new_gender.lower() in valid_genders:
+                    if not current_gender or current_gender.lower() not in valid_genders:
+                        patient_info['patient_gender'] = new_gender
+                        print(f"✅ Updated patient_gender: {new_gender}")
+                    
+                # Age: validate it's a reasonable number
+                if new_age:
                     try:
-                        start_idx = response_text.find('{')
-                        end_idx = response_text.rfind('}')
-                        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                            json_str = response_text[start_idx:end_idx+1]
-                            personal_data = json.loads(json_str)
-                            
-                            # POST-PROCESSING: Normalize gender
-                            original_gender = personal_data.get('patient_gender', '')
-                            if original_gender:
-                                normalized_gender = normalize_gender(original_gender)
-                                if normalized_gender != original_gender:
-                                    print(f"🔧 Normalized gender: '{original_gender}' -> '{normalized_gender}'")
-                                personal_data['patient_gender'] = normalized_gender
-                            
-                            print(f"✅ Personal info extracted for Page {idx} (Pass {correction_pass})")
-                    except Exception as json_err:
-                        print(f"⚠️ JSON Parsing Failed (Pass {correction_pass}): {json_err}")
-                        personal_data = {}
-                        break
-                
-                # Final check
-                if correction_pass >= max_correction_passes:
-                    final_analysis = analyze_extraction_issues(personal_data)
-                    if final_analysis['has_issues']:
-                        print(f"⚠️ Max correction passes reached with {final_analysis['issue_count']} remaining issue(s)")
-                        
-            except Exception as e:
-                print(f"⚠️ Personal info extraction error (Page {idx}): {str(e)}")
-                personal_data = {}
-            
-            print(f"📋 Final Personal Info: Name='{personal_data.get('patient_name')}', Gender='{personal_data.get('patient_gender')}', Doctor='{personal_data.get('doctor_names')}'")
-            
-            # Step 2: SELF-PROMPTING APPROACH - Let model analyze and create its own prompt
-            print(f"🤖 Step 2: Analyzing report structure and creating custom extraction prompt...")
-            yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Analyzing report structure on page {idx}...'})}\n\n"
-            
-            medical_extracted = {}
-            report_analysis = {}
-            
-            try:
-                image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
-                image_format = image_info['format']
-                
-                # STEP 1: Ask model to analyze the report and create custom extraction instructions
-                print(f"🧠 STEP 1: Asking model to analyze report structure...")
-                analysis_prompt = get_report_analysis_prompt(idx, total_pages)
-                
-                analysis_content = [
-                    {'type': 'text', 'text': analysis_prompt},
-                    {
-                        'type': 'image_url',
-                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                    }
-                ]
-                
-                analysis_completion = ollama_client.chat.completions.create(
-                    model=Config.OLLAMA_MODEL,
-                    messages=[{'role': 'user', 'content': analysis_content}],
-                    temperature=0.2,
-                    response_format={"type": "json_object"},
-                    max_tokens=2500,
-                    timeout=90.0
-                )
-                
-                analysis_response = analysis_completion.choices[0].message.content.strip()
-                print(f"📊 Analysis response received:\n{'-'*60}\n{analysis_response}\n{'-'*60}")
-                
-                # Parse analysis
-                try:
-                    start_idx = analysis_response.find('{')
-                    end_idx = analysis_response.rfind('}')
-                    if start_idx != -1 and end_idx != -1:
-                        report_analysis = json.loads(analysis_response[start_idx:end_idx+1])
-                        total_rows = report_analysis.get('total_test_rows', 20)
-                        print(f"✅ Report analyzed:")
-                        print(f"   - Language: {report_analysis.get('report_language')}")
-                        print(f"   - Total test rows: {total_rows}")
-                        print(f"   - First 5 tests: {report_analysis.get('first_5_test_names', [])}")
-                        print(f"   - Last 5 tests: {report_analysis.get('last_5_test_names', [])}")
-                        print(f"   - Column map: {report_analysis.get('column_map', {})}")
-                except Exception as parse_err:
-                    print(f"⚠️ Failed to parse analysis: {parse_err}")
-                
-                # STEP 2: Use the custom instructions to extract data
-                print(f"\n🔍 STEP 2: Extracting data using custom instructions...")
-                total_rows_text = report_analysis.get("total_test_rows", "all")
-                yield f"data: {json.dumps({'percent': current_progress + 15, 'message': f'Extracting {total_rows_text} medical tests from page {idx}...'})}\n\n"
-                
-                custom_prompt = get_custom_extraction_prompt(report_analysis, idx, total_pages)
-                
-                extraction_content = [
-                    {'type': 'text', 'text': custom_prompt},
-                    {
-                        'type': 'image_url',
-                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                    }
-                ]
-                
-                extraction_completion = ollama_client.chat.completions.create(
-                    model=Config.OLLAMA_MODEL,
-                    messages=[{'role': 'user', 'content': extraction_content}],
-                    temperature=0.1,
-                    response_format={"type": "json_object"},
-                    max_tokens=5000,
-                    timeout=180.0
-                )
-                
-                extraction_response = extraction_completion.choices[0].message.content.strip()
-                print(f"📦 Extraction response received:\n{'-'*60}\n{extraction_response[:500]}...\n{'-'*60}")
-                
-                # Parse extraction
-                try:
-                    start_idx = extraction_response.find('{')
-                    end_idx = extraction_response.rfind('}')
-                    if start_idx != -1 and end_idx != -1:
-                        json_str = extraction_response[start_idx:end_idx+1]
-                        medical_extracted = json.loads(json_str)
-                        
-                        item_count = len(medical_extracted.get('medical_data', []))
-                        expected_count = report_analysis.get('total_test_rows', 0)
-                        print(f"✅ Extracted {item_count} medical items (expected: {expected_count})")
-                        
-                        if item_count < expected_count:
-                            print(f"⚠️⚠️⚠️ CRITICAL: Only extracted {item_count}/{expected_count} items!")
-                            print(f"   ANALYSIS FOUND {expected_count} ROWS BUT EXTRACTION ONLY GOT {item_count}!")
-                            print(f"   First 3 items: {[item.get('field_name', 'N/A') for item in medical_extracted.get('medical_data', [])[:3]]}")
-                            print(f"   Last 3 items: {[item.get('field_name', 'N/A') for item in medical_extracted.get('medical_data', [])[-3:]]}")
-                        elif item_count == 9 and expected_count > 15:
-                            print(f"🚨🚨🚨 SEVERE UNDER-EXTRACTION: Analysis found {expected_count} rows but got only 9!")
-                            print(f"   This is likely the model stopping early!")
-                        
-                        # Check for name confusion
-                        extracted_patient = str(medical_extracted.get('patient_name', '')).strip()
-                        extracted_doctor = str(medical_extracted.get('doctor_names', '')).strip()
-                        if extracted_patient and extracted_doctor:
-                            # Check if they're too similar (might be mixed up)
-                            if extracted_patient.lower() in extracted_doctor.lower() or extracted_doctor.lower() in extracted_patient.lower():
-                                print(f"⚠️ WARNING: Patient and Doctor names might be mixed up!")
-                                print(f"   Patient: '{extracted_patient}'")
-                                print(f"   Doctor: '{extracted_doctor}'")
-                except Exception as json_err:
-                    print(f"⚠️ JSON parsing failed: {json_err}")
-                    medical_extracted = {}
-                
-                # Use the extracted medical data
-                extracted_data = medical_extracted
-                
-            except Exception as e:
-                print(f"⚠️ Medical data extraction error (Page {idx}): {str(e)}")
-                extracted_data = {}
-            
-            # Debug: Print what we got
-            print(f"📊 Extracted data keys: {list(extracted_data.keys()) if extracted_data else 'EMPTY'}")
-            print(f"📊 Has medical_data key: {extracted_data.get('medical_data') is not None}")
-            if extracted_data.get('medical_data'):
-                print(f"📊 Medical data count: {len(extracted_data['medical_data'])} items")
-            
-            # Continue processing the extracted data
-            if extracted_data.get('is_medical_report') is False:
-                error_msg = extracted_data.get('reason', 'The uploaded file does not appear to be a valid medical report.')
-                print(f"⛔ Rejected as non-medical: {error_msg}")
-                continue
-            
-            unique_new_items = []  # Initialize outside to avoid scope error
-            
-            if extracted_data.get('medical_data'):
-                new_items = extracted_data['medical_data']
-                
-                existing_test_names = {str(item.get('field_name', '')).lower() for item in all_extracted_data}
-                
-                for item in new_items:
-                    raw_test_name = item.get('field_name', '')
-                    raw_test_val = item.get('field_value', '')
-                    raw_test_unit = item.get('field_unit', '')
-                    raw_test_range = item.get('normal_range', '')
+                        age_num = int(new_age)
+                        if 1 <= age_num <= 120:
+                            if not current_age or current_age != new_age:
+                                patient_info['patient_age'] = new_age
+                                print(f"✅ Updated patient_age: {new_age}")
+                    except (ValueError, TypeError):
+                        pass
                     
-                    test_name = str(raw_test_name).strip() if raw_test_name is not None else ''
-                    test_val = str(raw_test_val).strip() if raw_test_val is not None else ''
-                    test_unit = str(raw_test_unit).strip() if raw_test_unit is not None else ''
-                    test_range = str(raw_test_range).strip() if raw_test_range is not None else ''
+                # Date of birth
+                if new_dob and len(new_dob) >= 8:  # At least YYYY-MM-DD format
+                    if not current_dob:
+                        patient_info['patient_dob'] = new_dob
+                        print(f"✅ Updated patient_dob: {new_dob}")
                     
-                    # SKIP IF: field_name is empty or is a header label
-                    if not test_name or test_name.lower() in ['test name', 'test', 'الفحص', 'الاختبار']:
-                        print(f"⚠️ Skipping row with empty/label field_name: '{test_name}'")
-                        continue
-                    
-                    # SKIP IF: duplicate test name already processed
-                    if test_name.lower() in existing_test_names:
-                        print(f"⚠️ Duplicate test skipped: {test_name}")
-                        continue
-                    
-                    # CRITICAL: Detect misalignment - value looks like a unit or range
-                    # Be STRICT about catching corruption but don't be overly paranoid
-                    unit_symbols = {'%', 'mg/dl', 'mg/dL', 'U/L', 'K/uL', 'M/uL', 'g/dL', 'fL', 'pg', 'cells/L', 'cells/uL', 'mmol/L'}
-                    
-                    # Check 1: Is value a unit symbol (OBVIOUS corruption)
-                    is_value_a_unit = test_val in unit_symbols
-                    
-                    # Check 2: Is value a range like "(4-11)" (OBVIOUS corruption)
-                    is_value_a_range = test_val.startswith('(') and test_val.endswith(')') and '-' in test_val
-                    
-                    # Check 3: Is unit all digits (OBVIOUS corruption - value leak into unit column)
-                    is_unit_a_value = test_unit and test_unit.replace('.', '').isdigit()
-                    
-                    # Check 4: Is unit a parenthesized range (OBVIOUS corruption)
-                    is_unit_a_range = test_unit.startswith('(') and test_unit.endswith(')') and '-' in test_unit
-                    
-                    # Check 5: Is range a single number without dashes (OBVIOUS corruption - value leaked)
-                    is_range_a_value = test_range and not test_range.startswith('(') and not '-' in test_range and test_range.replace('.', '').isdigit()
-                    
-                    # Check 6: Is range just a unit symbol (OBVIOUS corruption)
-                    is_range_a_unit = test_range in unit_symbols
-                    
-                    if is_value_a_unit or is_value_a_range or is_unit_a_value or is_unit_a_range or is_range_a_value or is_range_a_unit:
-                        print(f"🚨 MISALIGNMENT DETECTED in row '{test_name}':")
-                        if is_value_a_unit:
-                            print(f"   Value is unit symbol: '{test_val}'")
-                        if is_value_a_range:
-                            print(f"   Value is range format: '{test_val}'")
-                        if is_unit_a_value:
-                            print(f"   Unit is numeric: '{test_unit}'")
-                        if is_unit_a_range:
-                            print(f"   Unit is range format: '{test_unit}'")
-                        if is_range_a_value:
-                            print(f"   Range is single number: '{test_range}'")
-                        if is_range_a_unit:
-                            print(f"   Range is unit symbol: '{test_range}'")
-                        print(f"   SKIPPING to avoid data corruption")
-                        continue
-
-                    
-                    # Enhanced empty value detection - recognize all empty indicators
-                    empty_indicators = {'', ' ', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
-                                      'nil', 'none', 'unknown', 'null', 'nul', 'not available', '.', '..',
-                                      'غير متوفر', 'غير موجود'}
-                    test_val_cleaned = test_val.strip() if test_val else ''
-                    test_val_lower = test_val_cleaned.lower()
-                    
-                    # SKIP rows with EMPTY field_value (as per original logic)
-                    if test_val_lower in empty_indicators or not test_val_cleaned:
-                        print(f"⚠️ Skipping row with empty field_value: {test_name}")
-                        continue
-                    
-                    # Also check normal_range for empty indicators (but don't skip - allow missing ranges)
-                    normal_range_raw = str(item.get('normal_range', '') or '').strip()
-                    normal_range_lower = normal_range_raw.lower()
-                    
-                    # Clean normal_range if it's an empty indicator - convert to empty string
-                    if normal_range_raw in ['-', '--', '—', '*', '(-)', '.'] or normal_range_lower in empty_indicators:
-                        # Check if it actually contains numbers - if not, it's empty
-                        if not any(ch.isdigit() for ch in normal_range_raw):
-                            item['normal_range'] = ''
-                            print(f"⚠️ Cleaned empty normal_range for {test_name}: '{normal_range_raw}' -> ''")
-
-                    
-                    # Check for qualitative results (normal/abnormal text)
-                    qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
-                    is_qualitative = any(token in test_val_lower for token in qualitative_tokens)
-                    
-                    # Check if value contains numbers
-                    has_digit = any(ch.isdigit() for ch in test_val_cleaned)
-                    
-                    # Accept if it has digits OR is a qualitative result
-                    if has_digit or is_qualitative:
-                        unique_new_items.append(item)
-                        existing_test_names.add(test_name.lower())
-                        print(f"✅ Added field: {test_name} = '{test_val_cleaned}' {test_unit}")
-                    else:
-                        # Value doesn't look like a valid medical result - skip
-                        print(f"⚠️ Skipping invalid test value: {test_name} = '{test_val_cleaned}'")
-            
-            all_extracted_data.extend(unique_new_items)
-            print(f"✅ Extracted {len(unique_new_items)} field(s) from page {idx}")
-            
-            # Merge personal info: Use the dedicated personal_info extraction (Step 1)
-            # This is more accurate than trying to extract it with medical data
-            personal_name = str(personal_data.get('patient_name', '') or '').strip()
-            personal_gender = normalize_gender(personal_data.get('patient_gender', ''))
-            personal_age = str(personal_data.get('patient_age', '') or '').strip()
-            personal_dob = str(personal_data.get('patient_dob', '') or '').strip()
-            personal_doctor = str(personal_data.get('doctor_names', '') or '').strip()
-            personal_report_date = str(personal_data.get('report_date', '') or '').strip()
-            
-            # Also extract from medical_data prompt as fallback
-            fallback_name = str(extracted_data.get('patient_name', '') or '').strip()
-            fallback_gender = normalize_gender(extracted_data.get('patient_gender', ''))
-            fallback_age = str(extracted_data.get('patient_age', '') or '').strip()
-            fallback_dob = str(extracted_data.get('patient_dob', '') or '').strip()
-            fallback_doctor = str(extracted_data.get('doctor_names', '') or '').strip()
-            fallback_report_date = str(extracted_data.get('report_date', '') or '').strip()
-            
-            # PRIORITY: Use personal_data (from dedicated personal info prompt) first,
-            # fallback to medical_data extraction if personal_data is empty
-            new_name = personal_name or fallback_name
-            new_gender = personal_gender or fallback_gender
-            new_age = personal_age or fallback_age
-            new_dob = personal_dob or fallback_dob
-            new_doctor = personal_doctor or fallback_doctor
-            new_report_date = personal_report_date or fallback_report_date
-            
-            # Smart detection: If new_name starts with "Dr", "Doctor", "دكتور", etc, it might be doctor name
-            doctor_prefixes = ['dr', 'doctor', 'dr.', 'دكتور', 'طبيب', 'د.']
-            name_lower = new_name.lower() if new_name else ''
-            if any(name_lower.startswith(prefix) for prefix in doctor_prefixes):
-                # This is likely a doctor name, extract actual name and use as doctor
-                cleaned_doctor_name = re.sub(r'^(dr\.?|doctor|دكتور|طبيب|د\.)\s*', '', new_name, flags=re.IGNORECASE).strip()
-                print(f"⚠️ Detected doctor name in patient field: '{new_name}' -> using as doctor")
-                new_doctor = cleaned_doctor_name or new_doctor
-                new_name = ''  # Clear this so we don't use doctor name as patient name
-            
-            # Debug: Print what we extracted from this page
-            print(f"📋 Page {idx} - Extracted patient info:")
-            print(f"   Name: '{new_name}' (from {'personal' if personal_name else 'fallback'})")
-            print(f"   Gender: '{new_gender}' (from {'personal' if personal_gender else 'fallback'})")
-            print(f"   Age: '{new_age}', DOB: '{new_dob}'")
-            print(f"   Doctor: '{new_doctor}' (from {'personal' if personal_doctor else 'fallback'})")
-            print(f"   Report Date: '{new_report_date}'")
-            
-            current_name = str(patient_info.get('patient_name', '') or '').strip()
-            current_gender = str(patient_info.get('patient_gender', '') or '').strip()
-            current_age = str(patient_info.get('patient_age', '') or '').strip()
-            current_dob = str(patient_info.get('patient_dob', '') or '').strip()
-            current_doctor = str(patient_info.get('doctor_names', '') or '').strip()
-            
-            # Note: With dedicated personal info extraction, we should have cleaner data
-            # The previous "SMART FIX" for swapping patient/doctor names should be less necessary
-            
-            # Merge patient info: use new data if current is empty, or if new is longer/more complete
-            # Since personal_data comes from dedicated prompt, it should be cleaner than fallback data
-            if new_name and len(new_name) > 2:  # At least 3 characters
-                if not current_name or (len(new_name) > len(current_name) and len(new_name) > 3):
-                    patient_info['patient_name'] = new_name
-            
-            # Merge doctor names: Combine if we have both
-            if new_doctor and len(new_doctor) > 2:
-                if not current_doctor:
-                    patient_info['doctor_names'] = new_doctor
-                    print(f"✅ Set doctor name: '{new_doctor}'")
-                elif new_doctor != current_doctor and len(new_doctor) > 2:
-                    # Combine doctor names if different (might be from different pages)
-                    patient_info['doctor_names'] = f"{current_doctor} / {new_doctor}"
-                    print(f"✅ Updated doctor name: '{patient_info['doctor_names']}'")
-            else:
-                if new_doctor:
-                    print(f"⚠️ Doctor name too short, skipping: '{new_doctor}'")
-                    print(f"✅ Updated patient_name: {new_name}")
-                
-            # Gender: At this point new_gender should already be normalized to "Male" or "Female"
-            if new_gender in ['Male', 'Female']:
-                if not current_gender or current_gender != new_gender:
-                    patient_info['patient_gender'] = new_gender
-                    print(f"✅ Updated patient_gender: {new_gender}")
-                
-            # Age: validate it's a reasonable number
-            if new_age:
-                try:
-                    age_num = int(new_age)
-                    if 1 <= age_num <= 120:
-                        if not current_age or current_age != new_age:
-                            patient_info['patient_age'] = new_age
-                            print(f"✅ Updated patient_age: {new_age}")
-                except (ValueError, TypeError):
-                    pass
-                
-            # Date of birth
-            if new_dob and len(new_dob) >= 8:  # At least YYYY-MM-DD format
-                if not current_dob:
-                    patient_info['patient_dob'] = new_dob
-                    print(f"✅ Updated patient_dob: {new_dob}")
-                
-            # Doctor names - separate field
-            if new_doctor and len(new_doctor) > 2:
-                if not patient_info.get('doctor_names'):
-                    patient_info['doctor_names'] = new_doctor
-                elif new_doctor != patient_info.get('doctor_names') and new_doctor.lower() not in patient_info.get('doctor_names', '').lower():
-                    # Append if different
-                    existing = patient_info.get('doctor_names', '')
-                    if existing:
-                        patient_info['doctor_names'] = f"{existing}, {new_doctor}"
-                    else:
+                # Doctor names - separate field, can have multiple
+                if new_doctor and len(new_doctor) > 2:
+                    if not patient_info.get('doctor_names'):
                         patient_info['doctor_names'] = new_doctor
+                    elif new_doctor != patient_info.get('doctor_names') and new_doctor.lower() not in patient_info.get('doctor_names', '').lower():
+                        # Append if different
+                        existing = patient_info.get('doctor_names', '')
+                        if existing:
+                            patient_info['doctor_names'] = f"{existing}, {new_doctor}"
+                        else:
+                            patient_info['doctor_names'] = new_doctor
+                        
+                if new_report_date and len(new_report_date) >= 8:
+                    if not patient_info.get('report_date'):
+                        patient_info['report_date'] = new_report_date
                     
-            if new_report_date and len(new_report_date) >= 8:
-                # Extract only YYYY-MM-DD part if timestamp is present
-                date_only = new_report_date[:10] if ' ' in new_report_date or 'T' in new_report_date else new_report_date
-                if not patient_info.get('report_date'):
-                    patient_info['report_date'] = date_only
-                    print(f"✅ Updated report_date: {date_only}")
-                
-            # Keep report_type if not set
-            if not patient_info.get('report_type') and extracted_data.get('report_type'):
-                patient_info['report_type'] = extracted_data.get('report_type')
+                # Keep report_type if not set
+                if not patient_info.get('report_type') and extracted_data.get('report_type'):
+                    patient_info['report_type'] = extracted_data.get('report_type')
 
-            print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")
+                print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")
+                     
+            except Exception as e:
+                print(f"❌ VLM Error on page {idx}: {e}")
 
-        # VALIDATION: Check if we massively under-extracted
-        fields_found = len(all_extracted_data)
-        print(f"\n{'='*80}")
-        print(f"📊 EXTRACTION SUMMARY AFTER ALL PAGES:")
-        print(f"   Total fields extracted: {fields_found}")
-        if fields_found <= 10 and fields_found > 0:
-            print(f"   ⚠️⚠️⚠️ WARNING: Only extracted {fields_found} fields")
-            print(f"   This seems too low! Check if extraction is stopping early!")
-        print(f"{'='*80}\n")
-
-        # FINAL VALIDATION: Check if doctor name is mixed up with patient name
-        final_patient = str(patient_info.get('patient_name', '')).strip()
-        final_doctor = str(patient_info.get('doctor_names', '')).strip()
-        
-        if final_patient and final_doctor:
-            # Check for contamination: doctor name contains patient name or vice versa
-            patient_words = set(final_patient.lower().split())
-            doctor_words = set(final_doctor.lower().split())
-            overlap = patient_words.intersection(doctor_words)
-            
-            if len(overlap) > 0:
-                print(f"⚠️ WARNING: Patient and Doctor names have overlap: {overlap}")
-                print(f"   Patient: '{final_patient}'")
-                print(f"   Doctor: '{final_doctor}'")
-                
-                # If they're suspiciously similar, clear doctor name
-                if final_patient.lower().strip() == final_doctor.lower().strip():
-                    print(f"🚨 CRITICAL: Patient and Doctor names are IDENTICAL - clearing doctor name!")
-                    patient_info['doctor_names'] = ''
-                    final_doctor = ''
+        # Check if we have ANY data after processing all pages
         if not all_extracted_data:
              error_msg = 'No valid medical data found in any of the uploaded images.'
              yield f"data: {json.dumps({'error': error_msg, 'code': 'NO_DATA_FOUND'})}\n\n"
@@ -962,7 +756,7 @@ class ChatResource(Resource):
                 name_lower = cleaned_name.replace(':', '').replace('-', '').strip().lower()
                 
                 # Reject if name is actually a label or too short/numeric
-                if name_lower in ['اسم المريض', 'patient name', 'name', 'المريض', 'المرضى', 'الاسم', 'رقم المريض', 'رقم', 'اسم', 'patient', 'patients', '']:
+                if name_lower in ['اسم المريض', 'patient name', 'name', 'المريض', 'الاسم', 'رقم المريض', 'رقم', 'اسم', '']:
                     cleaned_name = ''
                 elif len(cleaned_name) < 3 or cleaned_name.strip().isdigit():
                     cleaned_name = ''
@@ -1055,18 +849,20 @@ class ChatResource(Resource):
         cleaned_gender = ''
         
         # Very strict matching - only accept clear gender indicators
-        # Convert to ENGLISH: Male/Female (not Arabic)
-        male_indicators = ['ذكر', 'male', 'm']
-        female_indicators = ['أنثى', 'انثى', 'انتى', 'أنتى', 'female', 'f']
+        # Arabic: ذكر = Male, أنثى/انثى = Female
+        # English: Male/M = Male, Female/F = Female
+        male_indicators = ['ذكر', 'male']
+        female_indicators = ['أنثى', 'انثى', 'female']
         
-        # Check for male (must match exactly or start with one of these)
-        if any(gender_lower == ind.lower() for ind in male_indicators) or any(gender_lower.startswith(ind.lower()) for ind in male_indicators if len(ind) > 1):
-            if not any(gender_lower.startswith(fem.lower()) for fem in female_indicators):
-                cleaned_gender = 'Male'  # ENGLISH, not Arabic
+        # Check for male (must start with or be exactly one of these)
+        if gender_lower in male_indicators or any(gender_lower.startswith(ind) for ind in male_indicators):
+            # Double check it's not a false positive (e.g., "Male" in "Males")
+            if not any(gender_lower.startswith(fem) for fem in female_indicators):
+                cleaned_gender = 'ذكر'
                 print(f"✅ Cleaned gender: {raw_gender} -> {cleaned_gender}")
         # Check for female
-        elif any(gender_lower == ind.lower() for ind in female_indicators) or any(gender_lower.startswith(ind.lower()) for ind in female_indicators if len(ind) > 1):
-            cleaned_gender = 'Female'  # ENGLISH, not Arabic
+        elif gender_lower in female_indicators or any(gender_lower.startswith(ind) for ind in female_indicators):
+            cleaned_gender = 'أنثى'
             print(f"✅ Cleaned gender: {raw_gender} -> {cleaned_gender}")
         elif raw_gender:
             # If we have a gender value but it doesn't match, log it for debugging
@@ -1103,8 +899,6 @@ class ChatResource(Resource):
         print(f"   Gender: '{cleaned_gender}'")
         print(f"   Age: '{cleaned_age}'")
         print(f"   DOB: '{cleaned_dob}'")
-        print(f"   Doctor: '{patient_info.get('doctor_names', '')}'")
-        print(f"   Total fields extracted: {len(all_extracted_data)}")
         print(f"{'='*80}\n")
         
         # Validation Logic (Call utils)

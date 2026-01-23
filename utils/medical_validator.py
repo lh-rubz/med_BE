@@ -67,7 +67,7 @@ class MedicalValidator:
         Parse normal range string into min/max tuple
         
         Args:
-            range_str: Range string like "13.5-17.5", "(74-110)", "150000-410000", etc.
+            range_str: Range string like "13.5-17.5" or "150000-410000"
             
         Returns:
             Tuple of (min, max) or None if cannot parse
@@ -75,14 +75,11 @@ class MedicalValidator:
         if not range_str or not isinstance(range_str, str):
             return None
         
-        # Clean the string - remove parentheses and whitespace
+        # Clean the string
         range_str = range_str.strip()
-        # Remove common formatting: parentheses, brackets, etc.
-        range_str = re.sub(r'^[\(\[<]|[\)\]>]$', '', range_str).strip()
         
-        # Pattern: number-number or number - number (with optional parentheses)
-        # Use search instead of match to find pattern anywhere in string
-        match = re.search(r'([-+]?\d*\.?\d+)\s*-\s*([-+]?\d*\.?\d+)', range_str)
+        # Pattern: number-number or number - number
+        match = re.match(r'([-+]?\d*\.?\d+)\s*-\s*([-+]?\d*\.?\d+)', range_str)
         if match:
             try:
                 min_val = float(match.group(1))
@@ -92,7 +89,7 @@ class MedicalValidator:
                 pass
         
         # Pattern: < number (upper limit only)
-        match = re.search(r'<\s*([-+]?\d*\.?\d+)', range_str)
+        match = re.match(r'<\s*([-+]?\d*\.?\d+)', range_str)
         if match:
             try:
                 max_val = float(match.group(1))
@@ -101,7 +98,7 @@ class MedicalValidator:
                 pass
         
         # Pattern: > number (lower limit only)
-        match = re.search(r'>\s*([-+]?\d*\.?\d+)', range_str)
+        match = re.match(r'>\s*([-+]?\d*\.?\d+)', range_str)
         if match:
             try:
                 min_val = float(match.group(1))
@@ -113,129 +110,51 @@ class MedicalValidator:
     
     @staticmethod
     def calculate_is_normal(field_value: str, normal_range: str, 
-                           current_is_normal: Optional[bool] = None,
-                           patient_gender: Optional[str] = None) -> Optional[bool]:
+                           current_is_normal: Optional[bool] = None) -> bool:
         """
         Deterministically calculate if a value is within normal range
         
         Args:
             field_value: The measured value
             normal_range: The normal range string
-            current_is_normal: VLM's guess (used as fallback, but ignored if no range)
+            current_is_normal: VLM's guess (used as fallback)
             
         Returns:
-            True if normal, False if abnormal, None if cannot determine
+            True if normal, False if abnormal
         """
-        # Check if field_value is empty or an empty indicator
-        empty_indicators = {'', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
-                          'nil', 'none', 'unknown', 'null', 'غير متوفر', 'غير موجود'}
-        value_str = str(field_value).strip() if field_value else ''
-        value_lower = value_str.lower()
+        # Handle qualitative results
+        value_lower = str(field_value).lower().strip()
         
-        # If value is empty or an empty indicator, return None (cannot determine)
-        if not value_str or value_lower in empty_indicators:
-            return None
-        
-        # Handle qualitative results (only if we have a meaningful text value)
+        # Check if it's a qualitative normal result
         if any(pattern in value_lower for pattern in MedicalValidator.NORMAL_QUALITATIVE):
             return True
         
+        # Check if it's a qualitative abnormal result
         if any(pattern in value_lower for pattern in MedicalValidator.ABNORMAL_QUALITATIVE):
             return False
         
-        # CRITICAL: Only calculate is_normal if we have a valid numeric normal_range
-        # If normal_range is missing, empty, or non-numeric, return None
-        if not normal_range or not isinstance(normal_range, str):
-            return None
-        
-        normal_range_clean = normal_range.strip()
-        empty_range_indicators = {'', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
-                                 'nil', 'none', 'unknown', 'null', 'غير متوفر'}
-        if not normal_range_clean or normal_range_clean.lower() in empty_range_indicators:
-            return None
-        
-        # Check if normal_range contains numeric pattern (e.g., "12-16", "(0-200)", "<10")
-        has_numeric_range = bool(re.search(r'[-+]?\d*\.?\d+\s*[-<>=]+\s*[-+]?\d*\.?\d+', normal_range_clean))
-        has_numeric_range = has_numeric_range or bool(re.search(r'[<>]\s*[-+]?\d*\.?\d+', normal_range_clean))
-        
-        # If no numeric range found, return None (cannot determine without valid range)
-        if not has_numeric_range:
-            return None
-        
-        # Try numeric comparison with valid range
-        # Some ranges contain multiple sub-ranges like "Male: 13-17, Female: 12-16"
-        # Or Arabic: "ذكر: 13-17, أنثى: 12-16"
-        # Split on delimiters and evaluate against each numeric interval
-        # If patient_gender is provided, prioritize matching gender-specific range
-        
-        # Extract numeric value from field_value
-        try:
-            numeric_match = re.search(r'[-+]?\d*\.?\d+', value_str)
-            value = float(numeric_match.group()) if numeric_match else None
-        except (ValueError, TypeError, AttributeError):
-            value = None
-        
-        # If we have a numeric value, compare against ranges
-        if value is not None:
-            found_valid_range = False
-            value_in_range = False
-            
-            # Normalize gender for matching
-            gender_normalized = None
-            if patient_gender:
-                gender_str = str(patient_gender).lower().strip()
-                if any(g in gender_str for g in ['male', 'ذكر', 'm']):
-                    gender_normalized = 'male'
-                elif any(g in gender_str for g in ['female', 'أنثى', 'انثى', 'f']):
-                    gender_normalized = 'female'
-            
-            # Check for gender-specific ranges first (if gender is known)
-            if gender_normalized:
-                # Look for patterns like "Male: 13-17" or "ذكر: 13-17" or "Female: 12-16" or "أنثى: 12-16"
-                gender_patterns = {
-                    'male': [r'male\s*:?\s*', r'ذكر\s*:?\s*'],
-                    'female': [r'female\s*:?\s*', r'أنثى\s*:?\s*', r'انثى\s*:?\s*']
-                }
-                
-                for pattern in gender_patterns[gender_normalized]:
-                    match = re.search(pattern + r'([-+]?\d*\.?\d+\s*-\s*[-+]?\d*\.?\d+)', normal_range_clean, re.IGNORECASE)
-                    if match:
-                        range_str = match.group(1)
-                        range_tuple = MedicalValidator.parse_range(range_str)
-                        if range_tuple:
-                            min_val, max_val = range_tuple
-                            found_valid_range = True
-                            if min_val <= value <= max_val:
-                                return True
-                            else:
-                                return False  # Value is outside gender-specific range
-            
-            # If no gender-specific range found or gender not provided, check all ranges
-            # Split on common delimiters (comma, semicolon, slash)
-            segments = re.split(r'[;,/]+', normal_range_clean)
-            
-            # Check all segments to see if value fits any range
-            for segment in segments:
-                # Skip gender labels in segments
-                segment_clean = re.sub(r'^\s*(male|female|ذكر|أنثى|انثى)\s*:?\s*', '', segment, flags=re.IGNORECASE).strip()
-                range_tuple = MedicalValidator.parse_range(segment_clean)
-                if range_tuple:
-                    found_valid_range = True
-                    min_val, max_val = range_tuple
-                    if min_val <= value <= max_val:
-                        value_in_range = True
-                        break  # Value fits at least one range, so it's normal
-            
-            # If we found valid range(s) and value fits at least one, it's normal
-            if found_valid_range and value_in_range:
-                return True
-            # If we found valid range(s) but value doesn't fit any, it's abnormal
-            elif found_valid_range and not value_in_range:
-                return False
-        
-        # If we have a numeric range but couldn't extract numeric value from field_value,
-        # and it's not qualitative, return None (cannot determine)
-        return None
+        # Try numeric comparison
+        if normal_range:
+            # Some ranges contain multiple sub-ranges like "Male: 13-17, Female: 12-16"
+            # Split on delimiters and evaluate against each numeric interval; if value
+            # fits ANY interval, treat as normal.
+            segments = re.split(r'[;,/]+', normal_range)
+            try:
+                numeric_match = re.search(r'[-+]?\d*\.?\d+', str(field_value))
+                value = float(numeric_match.group()) if numeric_match else None
+            except (ValueError, TypeError):
+                value = None
+
+            if value is not None:
+                for segment in segments:
+                    range_tuple = MedicalValidator.parse_range(segment)
+                    if range_tuple:
+                        min_val, max_val = range_tuple
+                        if min_val <= value <= max_val:
+                            return True
+
+        # Fallback to VLM's guess or default to True
+        return current_is_normal if current_is_normal is not None else True
     
     @staticmethod
     def extract_doctor_names(text: str) -> str:
@@ -335,7 +254,7 @@ class MedicalValidator:
         return deduplicated
     
     @staticmethod
-    def validate_and_normalize_field(field: Dict[str, Any], patient_gender: Optional[str] = None) -> Dict[str, Any]:
+    def validate_and_normalize_field(field: Dict[str, Any]) -> Dict[str, Any]:
         """
         Validate and normalize a single medical field
         
@@ -347,71 +266,33 @@ class MedicalValidator:
         """
         validated = field.copy()
         
-        # Detect and normalize empty values - be very strict
-        empty_indicators = {'', ' ', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
-                          'nil', 'none', 'unknown', 'null', 'nul', 'not available', '.', '..',
-                          'غير متوفر', 'غير موجود'}
-        raw_field_value = validated.get('field_value', '')
-        field_value_str = str(raw_field_value).strip() if raw_field_value else ''
-        field_value_lower = field_value_str.lower()
-        
-        # If value is an empty indicator or suspiciously short/non-numeric, set to empty string
-        if not field_value_str or field_value_lower in empty_indicators:
-            validated['field_value'] = ''
-            field_value = ''
+        # Normalize field value (preserve decimal precision)
+        field_value = validated.get('field_value', '')
+        if field_value:
+            normalized = MedicalValidator.normalize_decimal(str(field_value))
+            validated['field_value'] = normalized
+            field_value = normalized
         else:
-            # Check if it's actually a valid number (not just random text that might be misaligned)
-            # If it contains digits, treat as potentially valid
-            has_digits = any(ch.isdigit() for ch in field_value_str)
-            if not has_digits and len(field_value_str) < 3:
-                # Suspicious: very short and no digits - might be misaligned
-                # Check if it's a known qualitative value
-                qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
-                is_qualitative = any(token in field_value_lower for token in qualitative_tokens)
-                if not is_qualitative:
-                    validated['field_value'] = ''
-                    field_value = ''
-                else:
-                    # It's a qualitative value, keep it
-                    validated['field_value'] = field_value_str
-                    field_value = field_value_str
-            else:
-                # Normalize field value (preserve decimal precision) for non-empty values
-                normalized = MedicalValidator.normalize_decimal(field_value_str)
-                validated['field_value'] = normalized
-                field_value = normalized
+            # Ensure key exists even if empty
+            validated['field_value'] = ''
         
         # Normalize normal_range but preserve full descriptive text
-        # CRITICAL: Do NOT invent or create normal_range if it's missing/empty
         normal_range = str(validated.get('normal_range', ''))
+        unit = str(validated.get('field_unit', ''))
+        if unit and unit in normal_range:
+            # Only remove duplicated trailing unit occurrences like "mg/dl mg/dl"
+            pattern = rf'\b{re.escape(unit)}\b\s*\b{re.escape(unit)}\b'
+            normal_range = re.sub(pattern, unit, normal_range)
+            validated['normal_range'] = normal_range
         
-        # Check if normal_range is actually empty (not just whitespace)
-        empty_range_indicators = {'', '-', '--', '—', '*', '**', '***', 'n/a', 'na', 'n.a', 
-                                 'nil', 'none', 'unknown', 'null', 'غير متوفر', '(-)', '('}
-        normal_range_clean = normal_range.strip()
-        
-        # If normal_range is an empty indicator, set to empty string (do NOT invent values)
-        if not normal_range_clean or normal_range_clean.lower() in empty_range_indicators:
-            validated['normal_range'] = ''
-            normal_range = ''
-        else:
-            # Only process non-empty ranges
-            unit = str(validated.get('field_unit', ''))
-            if unit and unit in normal_range:
-                # Only remove duplicated trailing unit occurrences like "mg/dl mg/dl"
-                pattern = rf'\b{re.escape(unit)}\b\s*\b{re.escape(unit)}\b'
-                normal_range = re.sub(pattern, unit, normal_range)
-                validated['normal_range'] = normal_range
-        
-        # Recalculate is_normal deterministically (will return None for empty values or missing ranges)
+        # Recalculate is_normal deterministically
         normal_range = validated.get('normal_range', '')
         current_is_normal = validated.get('is_normal')
         
         validated['is_normal'] = MedicalValidator.calculate_is_normal(
             field_value,
             normal_range,
-            current_is_normal,
-            patient_gender
+            current_is_normal
         )
         
         # Ensure all required fields exist
@@ -435,15 +316,12 @@ class MedicalValidator:
         """
         processed = extracted_data.copy()
         
-        # Get patient gender for gender-specific range matching
-        patient_gender = processed.get('patient_gender', '')
-        
         # Validate and normalize each field
         medical_data = processed.get('medical_data', [])
         if medical_data:
-            # Validate each field with patient gender
+            # Validate each field
             validated_fields = [
-                MedicalValidator.validate_and_normalize_field(field, patient_gender)
+                MedicalValidator.validate_and_normalize_field(field)
                 for field in medical_data
             ]
             
