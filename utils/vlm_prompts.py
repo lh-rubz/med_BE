@@ -58,20 +58,24 @@ REPORT DATE (CRITICAL - DATE ONLY, NO TIMESTAMP)
 - Timestamp (time portion after date) must be REMOVED
 - Return: YYYY-MM-DD only, or "" if not found
 
-DOCTOR / PHYSICIAN (CRITICAL - SEARCH THOROUGHLY)
-- Arabic labels: "الطبيب", "طبيب", "الطبيب المعالج", "طبيب المعالجة", "المحيل", "الطبيب المسؤول"
-- English labels: "Doctor", "Physician", "Ref By", "Referred By", "Signature", "Doctor Name"
-- Search locations:
-  1. Header area (near patient name)
-  2. Side panels or right margin (Arabic text area)
-  3. SIGNATURE BLOCKS at bottom (check for "Dr. [Name]" or "الطبيب [الاسم]")
-  4. Footer referral info
-  5. Any line with doctor-related label
-- Extract: The NAME that immediately follows the doctor label
-- Clean: Remove ALL titles (Dr., Dr, Prof., Prof, د., دكتور, أ.د, الدكتور, أستاذ)
-- If multiple: Join with comma (e.g., "Ahmed Salem, Fatima Ali")
-- Validate: Must look like a person's name (3+ chars), not a facility or lab
-- Return: Clean name(s) or "" if no doctor field/name visible
+DOCTOR / PHYSICIAN (CRITICAL - SEARCH THOROUGHLY AND AGGRESSIVELY)
+- Arabic labels: "الطبيب", "طبيب", "الطبيب المعالج", "طبيب المعالجة", "المحيل", "الطبيب المسؤول", "اسم الطبيب"
+- English labels: "Doctor", "Physician", "Ref By", "Referred By", "Signature", "Doctor Name", "Treating Physician"
+- Search ALL locations in this order:
+  1. Header area - scan ENTIRE top section for doctor label + name
+  2. RIGHT margin - Arabic side (RTL text area on right)
+  3. LEFT margin - English side (LTR text area on left)
+  4. BOTTOM of page - signature blocks, footer area
+  5. SIDE panels - any information boxes
+  6. After any line containing "doctor", "physician", "Dr.", "د.", "طبيب"
+- Extract Rules:
+  * If you see "Dr. [Name]" or "الطبيب [الاسم]" → Extract the [Name] part
+  * If you see a label like "الطبيب:" or "Doctor:" → Extract the text IMMEDIATELY following
+  * Remove ALL titles and prefixes: Dr., Dr, Prof., Prof, د., دكتور, أ.د, الدكتور, أستاذ, البروفيسور
+  * Keep only the actual person name
+- Multiple doctors: If signature block shows multiple names, extract first doctor only or join with comma
+- Validate: Must be person name (3+ chars), not facility/lab/abbreviation
+- Return: Clean name or "" if truly not found after thorough search
 
 SELF-VALIDATION BEFORE RETURNING
 - patient_name: Real person name (3+ chars, not ID/number/facility). Return "" if doubt.
@@ -98,50 +102,59 @@ def get_main_vlm_prompt(idx, total_pages):
     return f"""You are an expert medical data digitizer for Arabic and English lab reports.
 
 You receive a medical report IMAGE (page {idx}/{total_pages}).
-Primary goal: Extract LAB DATA with PERFECT ROW ALIGNMENT. Do NOT extract patient info.
-Return exactly one JSON object (no markdown) with medical_data array.
+Primary goal: Extract LAB DATA with PERFECT ROW ALIGNMENT. Extract ALL visible test rows. Do NOT extract patient info.
+Return exactly one JSON object (no markdown) with medical_data array containing ALL available tests.
 
 CRITICAL RULES
-1) Row independence: All values in one entry come from the SAME row. Never mix rows.
-2) Empty is better than wrong: If uncertain, use "".
-3) Language: Handle Arabic (RTL) and English (LTR). Use the clearer test name.
-4) Units must be medical abbreviations, not symbols (*, -, .).
-5) Duplicate range note: If two tests share the EXACT same range but have different units (e.g., value vs %), keep both as-is. Re-check only if same unit and clearly mismatched with the row text.
+1) EXTRACT ALL ROWS: If you see a row with a test name and value, extract it. Do not skip rows.
+2) Row independence: All values in one entry come from the SAME row. Never mix rows.
+3) Empty is better than wrong: If a cell is truly empty/blank, use "".
+4) Language: Handle Arabic (RTL) and English (LTR). Use the clearer test name.
+5) Units must be medical abbreviations, not symbols (*, -, .).
+6) Duplicate range note: If two tests share the EXACT same range but have different units (e.g., value vs %), keep both as-is.
+7) MULTIPLE SECTIONS: If page has multiple test sections (Clinical Chemistry, Hematology, etc.), extract ALL sections.
 
 HOW TO READ TABLES
 - Typical headers Arabic: "الفحص", "النتيجة", "الوحدة", "المعدل الطبيعي".
 - Typical headers English: "Test", "Result", "Unit", "Normal Range".
 - Map by position: col1 test, col2 value, col3 unit, col4 range.
+- Multiple sections: Each section may have its own table. Extract all of them.
 
-ROW-BY-ROW PROTOCOL (for EACH row)
-CRITICAL: Use EXTREME caution with row boundaries. Trace horizontal lines precisely.
+ROW-BY-ROW PROTOCOL (for EACH row - BE THOROUGH)
+CRITICAL: Process EVERY visible row with a test name. Do not skip.
 
 1) Visual Row Boundary: Draw an imaginary horizontal line across THIS row ONLY. Do not look above or below.
-2) field_name: Read ONLY from the far left cell of THIS row's boundary.
-3) field_value: Trace straight RIGHT along THIS row's line to the NEXT column. STOP at the vertical boundary.
-   - Do NOT look at other rows' values.
+2) field_name: Read ONLY from the far left cell of THIS row's boundary. This is the test name.
+3) field_value: Trace straight RIGHT along THIS row's line to the VALUE column. STOP at the vertical boundary.
+   - Extract the numeric or qualitative result value.
    - If there is NO value in this cell for THIS row, return "".
 4) field_unit: Continue RIGHT along THIS row's line to the UNIT column. STOP at vertical boundary.
    - Extract the unit symbol from THIS row ONLY.
-   - If blank or symbol, return "".
+   - If blank or empty, return "".
 5) normal_range: Continue RIGHT along THIS row to the RANGE column. STOP at vertical boundary.
    - Extract the numeric range from THIS row ONLY.
-   - If blank, return "" (never invent).
-6) is_normal: Calculate ONLY using THIS row's value and range.
-7) category: Section header for THIS row's section, else "".
+   - If cell is blank or empty, return "".
+   - IMPORTANT: If normal_range is blank/empty, DO NOT invent one. Return "" exactly.
+6) is_normal: Calculate ONLY using THIS row's value and range. null if range empty.
+7) category: Section header for THIS row's section (e.g., "Clinical Chemistry", "Hematology"), else "".
 8) notes: Flags in THIS row ONLY, else "".
 
 RED FLAGS that indicate misalignment (REDO the row if found):
-- field_value looks like a unit (e.g., "%" or "K/uL")
+- field_value looks like a unit symbol (e.g., "%" or "K/uL") - NOT a number
 - field_unit looks like a range (e.g., "(4-11)")
-- normal_range looks like a value (e.g., "5.2" or "109")
+- normal_range looks like a single value (e.g., "5.2" or "109") with no range format
 - The extracted value is physically in a different row than the test name in the image
-- Units don't match the test type (e.g., "%" for RBC which should be M/uL or cells/L)
 
 VALIDATION BEFORE RETURN
-- Every row has field_name (no empty field_names).
-- Every row has field_value (skip rows with empty/blank values).
-- Units are not symbols and not numbers.
+- Extract ALL rows: Complete count of tests visible in the image.
+- Every row MUST have field_name (no empty field_names).
+- If field_value is empty, still include the row (do not skip).
+- Units are abbreviations, not symbols or numbers.
+- normal_range: If cell is empty in the image, return "" (do NOT invent or copy from elsewhere).
+- If range present, it must be in range format or empty.
+- AFTER extraction: Count total rows. Report should show 20+ tests or more if multiple sections present.
+- Do NOT delete rows. Do NOT invent data. If something is blank, keep it blank.
+
 - If range present, it contains numbers (if range truly absent, leave empty; never invent).
 - CRITICAL: Normal_range must NOT look like a value, and field_value must NOT look like a unit or range.
 - Duplicate ranges allowed when units differ or the source shows the same range; re-check only if same unit and the range clearly belongs to another row.

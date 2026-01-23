@@ -567,13 +567,27 @@ class ChatResource(Resource):
                         
                         # CRITICAL: Detect misalignment - value looks like a unit or range
                         # Example: value="%" or value="(4-11)" or unit="5.2" or range="cells/L"
+                        # BUT: Be careful not to reject valid data (e.g., ranges like "(4-11)" and "0-130" are both valid)
                         unit_symbols = {'%', 'mg/dl', 'mg/dL', 'U/L', 'K/uL', 'M/uL', 'g/dL', 'fL', 'pg', 'cells/L', 'cells/uL', 'mmol/L'}
-                        is_value_a_unit = any(sym in test_val for sym in unit_symbols) or test_val in ['%', '-', '*']
-                        is_value_a_range = test_val.startswith('(') and test_val.endswith(')')
-                        is_unit_a_value = test_unit and (any(ch.isdigit() for ch in test_unit) or test_unit in ['%', '-', '*'])
-                        is_unit_a_range = test_unit.startswith('(') and test_unit.endswith(')')
-                        is_range_a_value = test_range and not test_range.startswith('(') and not any(ch in test_range for ch in ['-', ','])
-                        is_range_a_unit = any(sym in test_range for sym in unit_symbols)
+                        
+                        # Check 1: Is value a unit symbol (very obvious corruption)
+                        is_value_a_unit = test_val in unit_symbols or (test_val == '%' and 'cholesterol' not in test_name_lower)
+                        
+                        # Check 2: Is value a parenthesized range (looks like "(X-Y)")
+                        is_value_a_range = test_val.startswith('(') and test_val.endswith(')') and '-' in test_val
+                        
+                        # Check 3: Is unit a value (contains mostly digits)
+                        is_unit_a_value = test_unit and all(ch.isdigit() or ch == '.' for ch in test_unit.replace(' ', ''))
+                        
+                        # Check 4: Is unit a parenthesized range
+                        is_unit_a_range = test_unit.startswith('(') and test_unit.endswith(')') and '-' in test_unit
+                        
+                        # Check 5: Is range actually a single value (no dashes, no parentheses, no commas - just digits)
+                        # More lenient: allow ranges without parentheses like "4-11" or "0-130"
+                        is_range_a_value = test_range and not test_range.startswith('(') and not any(ch in test_range for ch in ['-', ',', '/']) and all(ch.isdigit() or ch == '.' for ch in test_range.replace(' ', ''))
+                        
+                        # Check 6: Is range a unit symbol
+                        is_range_a_unit = test_range and any(sym in test_range for sym in unit_symbols) and not any(ch in test_range for ch in ['-', ','])
                         
                         # Additional check: known tests with expected unit types
                         expected_units_map = {
@@ -584,8 +598,8 @@ class ChatResource(Resource):
                             'cholesterol': ['mg/dl', 'mmol/l'],
                             'red blood cell': ['m/ul', 'k/ul'],
                             'rbc': ['m/ul', 'k/ul'],
-                            'white blood cell': ['k/ul', 'm/ul'],
-                            'wbc': ['k/ul', 'm/ul'],
+                            'white blood cell': ['k/ul', 'm/ul', 'cells/l'],
+                            'wbc': ['k/ul', 'm/ul', 'cells/l'],
                             'hemoglobin': ['g/dl'],
                             'hgb': ['g/dl'],
                             'hematocrit': ['%'],
@@ -593,9 +607,11 @@ class ChatResource(Resource):
                             'mean cell volume': ['fl'],
                             'mcv': ['fl'],
                             'platelets': ['k/ul'],
-                            'lymphocytes': ['%', 'cells/ul'],
-                            'monocytes': ['%', 'cells/ul'],
-                            'neutrophils': ['%', 'cells/ul'],
+                            'lymphocytes': ['%', 'cells/ul', 'k/ul'],
+                            'monocytes': ['%', 'cells/ul', 'k/ul'],
+                            'neutrophils': ['%', 'cells/ul', 'k/ul'],
+                            'eosinophils': ['%', 'cells/ul', 'k/ul'],
+                            'basophils': ['%', 'cells/ul', 'k/ul'],
                         }
                         
                         # Check if extracted unit contradicts known expected units for this test
@@ -604,10 +620,13 @@ class ChatResource(Resource):
                         for known_test, expected_unit_list in expected_units_map.items():
                             if known_test in test_name_lower and test_unit:
                                 unit_lower = test_unit.lower()
-                                # Check if unit contains digits mixed with letters (corruption sign)
-                                if any(ch.isdigit() for ch in unit_lower) and not any(ch.isdigit() for ch in test_val):
-                                    unit_conflict = True
-                                    break
+                                # Only flag if unit is COMPLETELY wrong (not in expected list AND doesn't look like a unit at all)
+                                # More lenient: accept cells/L even if not in list, accept variations
+                                if unit_lower not in [u.lower() for u in expected_unit_list]:
+                                    # Check if it's a reasonable variant or numeric corruption
+                                    if any(ch.isdigit() for ch in unit_lower) and '/' not in unit_lower:
+                                        unit_conflict = True
+                                        break
                         
                         if is_value_a_unit or is_value_a_range or is_unit_a_value or is_unit_a_range or is_range_a_value or is_range_a_unit or unit_conflict:
                             print(f"🚨 MISALIGNMENT DETECTED in row '{test_name}':")
@@ -624,21 +643,24 @@ class ChatResource(Resource):
                         test_val_cleaned = test_val.strip() if test_val else ''
                         test_val_lower = test_val_cleaned.lower()
                         
-                        # CRITICAL: SKIP rows with EMPTY field_value (as per updated prompts)
-                        if test_val_lower in empty_indicators or not test_val_cleaned:
-                            print(f"⚠️ Skipping row with empty field_value: {test_name}")
-                            continue
+                        # NOTE: We now accept rows with empty field_value (prompt extracts all rows)
+                        # If field_value is empty, we'll still include it if field_name is valid
+                        # This allows us to capture incomplete tests and see what's missing
+                        
+                        # Only skip if field_value is one of the empty indicators
+                        # Actually, let's be lenient and NOT skip - include all rows
                         
                         # Also check normal_range for empty indicators (but don't skip - allow missing ranges)
                         normal_range_raw = str(item.get('normal_range', '') or '').strip()
                         normal_range_lower = normal_range_raw.lower()
                         
-                        # Clean normal_range if it's an empty indicator
+                        # Clean normal_range if it's an empty indicator - convert to empty string
                         if normal_range_raw in ['-', '--', '—', '*', '(-)', '.'] or normal_range_lower in empty_indicators:
                             # Check if it actually contains numbers - if not, it's empty
                             if not any(ch.isdigit() for ch in normal_range_raw):
                                 item['normal_range'] = ''
                                 print(f"⚠️ Cleaned empty normal_range for {test_name}: '{normal_range_raw}' -> ''")
+
                         
                         # Check for qualitative results (normal/abnormal text)
                         qualitative_tokens = MedicalValidator.NORMAL_QUALITATIVE.union(MedicalValidator.ABNORMAL_QUALITATIVE)
@@ -647,17 +669,24 @@ class ChatResource(Resource):
                         # Check if value contains numbers
                         has_digit = any(ch.isdigit() for ch in test_val_cleaned)
                         
-                        # Accept if it has digits OR is a qualitative result
-                        if has_digit or is_qualitative:
+                        # Accept row if:
+                        # 1) Has digits (numeric value)
+                        # 2) Is qualitative result (text result)
+                        # 3) Has a test name (field_name) - even if value is empty
+                        # This allows us to extract all available tests
+                        if has_digit or is_qualitative or test_name:
                             unique_new_items.append(item)
                             existing_test_names.add(test_name.lower())
-                            print(f"✅ Added field: {test_name} = '{test_val_cleaned}' {test_unit}")
+                            if test_val_cleaned:
+                                print(f"✅ Added field: {test_name} = '{test_val_cleaned}' {test_unit}")
+                            else:
+                                print(f"✅ Added field: {test_name} (empty value)")
                         else:
-                            # Value doesn't look like a valid medical result - skip
-                            print(f"⚠️ Skipping invalid test value: {test_name} = '{test_val_cleaned}'")
+                            # No test name - definitely skip
+                            print(f"⚠️ Skipping row with no test name")
                     
                     all_extracted_data.extend(unique_new_items)
-                    print(f"✅ Extracted {len(unique_new_items)} UNIQUE field(s) from page {idx}")
+                    print(f"✅ Extracted {len(unique_new_items)} field(s) from page {idx}")
                 
                 # Merge personal info: Use the dedicated personal_info extraction (Step 1)
                 # This is more accurate than trying to extract it with medical data
