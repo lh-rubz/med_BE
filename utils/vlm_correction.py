@@ -1,6 +1,7 @@
 """Self-correction analysis and corrective prompt generation for VLM extraction."""
 
 import json
+import re
 from typing import Dict, List, Any
 
 
@@ -41,6 +42,14 @@ def analyze_extraction_issues(extracted_data: Dict[str, Any], original_image_con
                 'field': 'patient_name',
                 'value': name,
                 'reason': f'Patient name too short ("{name}") - likely incorrect extraction'
+            })
+        # Check for common wrong extractions (device names, facility names, etc.)
+        elif any(keyword in name.lower() for keyword in ['device', 'جهاز', 'treatment', 'lab', 'clinic', 'hospital', 'facility', 'equipment']):
+            issues.append({
+                'type': 'wrong_extraction_type',
+                'field': 'patient_name',
+                'value': name,
+                'reason': f'Extracted value appears to be a device/facility name ("{name}"), not a patient name. Search for actual person name in header.'
             })
     
     if 'doctor_names' in extracted_data:
@@ -116,13 +125,54 @@ def analyze_extraction_issues(extracted_data: Dict[str, Any], original_image_con
                     'reason': 'Test value is empty - should not include rows with no value'
                 })
             
+            # Check for symbol-only units (corruption indicator)
+            if test_unit in ['*', '-', '--', '—']:
+                issues.append({
+                    'type': 'invalid_unit_symbol',
+                    'field': f'medical_data[{idx}].field_unit',
+                    'value': f"unit='{test_unit}'",
+                    'reason': f'Unit is just a symbol ("{test_unit}") - {test_name} should have a proper medical unit'
+                })
+            
+            # Check for unusual/wrong units
+            if test_unit and not re.match(r'^[\w\/%\-\.]+$', test_unit):
+                issues.append({
+                    'type': 'invalid_unit_format',
+                    'field': f'medical_data[{idx}].field_unit',
+                    'value': f"unit='{test_unit}'",
+                    'reason': f'Unit format looks wrong ("{test_unit}") for {test_name}'
+                })
+            
+            # Check for value/range contradictions
+            if test_val and test_range:
+                try:
+                    # Extract numeric value
+                    val_match = re.search(r'[\d.]+', test_val)
+                    range_matches = re.findall(r'[\d.]+', test_range)
+                    
+                    if val_match and len(range_matches) >= 2:
+                        val_num = float(val_match.group())
+                        range_min = float(range_matches[0])
+                        range_max = float(range_matches[1])
+                        
+                        # Check if value is way outside range (suggests misalignment)
+                        if val_num < range_min * 0.1 or val_num > range_max * 10:
+                            issues.append({
+                                'type': 'value_range_mismatch',
+                                'field': f'medical_data[{idx}]',
+                                'value': f"{test_name}: value={test_val}, range={test_range}",
+                                'reason': f'Value {test_val} is extremely outside range {test_range} - likely misalignment'
+                            })
+                except:
+                    pass
+            
             # Check for misalignment patterns
             if '%' in test_val and test_unit and test_unit not in ['%']:
                 issues.append({
                     'type': 'value_unit_swap',
                     'field': f'medical_data[{idx}]',
                     'value': f"value='{test_val}' unit='{test_unit}'",
-                    'reason': f'Value contains unit symbol (%) - possible column misalignment: {test_name}'
+                    'reason': f'Value contains % but unit is different - column misalignment: {test_name}'
                 })
             
             if test_val.startswith('(') and test_val.endswith(')') and not test_range:
@@ -170,21 +220,25 @@ CRITICAL: The previous extraction had these ERRORS that must be FIXED:
 
 YOUR TASK: Extract the SAME fields again, but CORRECTLY this time.
 
-BEFORE RETURNING YOUR ANSWER, VALIDATE:
-1) patient_name: Must be an actual person's name (not "patient", "name", or empty)
-2) doctor_names: Must be an actual doctor's name (not "doctor", "physician", or empty) - search signature blocks!
-3) report_date: Must be YYYY-MM-DD format ONLY (no timestamp like "10:00:02")
-4) Medical test names: Must have actual values, not empty or symbols
-5) Test values: Must be numbers, not unit symbols or ranges
-6) Test units: Must be medical abbreviations (not numbers or values)
-7) Test ranges: Must be in range format like (X-Y), not single numbers
+COMMON MISTAKES TO AVOID:
+1) Patient name: Do NOT extract device names, facility names, or labels. Extract the PERSON'S actual name.
+2) Doctor name: Search signature blocks, footer, header - extract the actual physician name, not a label.
+3) Units: Do NOT use symbols like "*" or "-". Use proper medical abbreviations (mg/dl, g/dL, %, etc.).
+4) Values: Check that values are reasonable for the test. If value is 10x smaller/larger than range, re-check alignment.
+5) When value is outside range: Re-read that row carefully - you likely mixed columns from different rows.
 
-IF PREVIOUS EXTRACTION HAD THESE SPECIFIC ERRORS:
-- Empty patient name → Search RIGHT side (Arabic) AND LEFT side (English) of header
-- Empty doctor name → Check signature blocks at BOTTOM of page, check for "Dr. [Name]" pattern
-- Timestamp in date → Extract ONLY the date portion before any space/time
-- Value looks like unit → Re-trace row boundaries, find the actual numeric value
-- Unit contains digits → Re-read the unit column, value may have shifted
+BEFORE RETURNING YOUR ANSWER, VALIDATE:
+1) patient_name: Must be an actual person's name (3+ chars), not a device/facility/label
+2) doctor_names: Must be an actual doctor's name (3+ chars), not a label
+3) report_date: Must be YYYY-MM-DD format ONLY (no timestamp)
+4) Medical test units: Must be abbreviations like mg/dl, g/dL, %, fL, pg - NOT symbols or wrong codes
+5) Medical test values: Must be realistic compared to normal range
+6) If a value seems far outside its range, RECHECK that row - you may have mixed columns
+
+EXTRACTION RULES:
+- Only accept tests where field_name AND field_value are both non-empty
+- Use correct medical units (never "*", "-", or random characters)
+- If unsure about a unit, try to infer from the test name
 
 EXTRACT EVERYTHING AGAIN. Return EXACTLY the same JSON structure as before, but with CORRECTED values:
 
