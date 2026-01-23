@@ -368,7 +368,7 @@ class ChatResource(Resource):
             print(f"🤖 Step 1: Structuring data with Qwen2-VL (native vision)...")
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Extracting medical values from page {idx}...'})}\n\n"
             
-        prompt_text = f"""You are an expert medical data digitizer specializing in Arabic and English medical reports.
+            prompt_text = f"""You are an expert medical data digitizer specializing in Arabic and English medical reports.
 
 You receive a medical report IMAGE (page {idx}/{total_pages}). The report may be:
 - Arabic, English, or mixed language
