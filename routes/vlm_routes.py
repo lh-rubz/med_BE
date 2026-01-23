@@ -617,16 +617,22 @@ class ChatResource(Resource):
                         
                         if item_count < expected_count:
                             print(f"⚠️⚠️⚠️ CRITICAL: Only extracted {item_count}/{expected_count} items!")
+                            print(f"   ANALYSIS FOUND {expected_count} ROWS BUT EXTRACTION ONLY GOT {item_count}!")
                             print(f"   First 3 items: {[item.get('field_name', 'N/A') for item in medical_extracted.get('medical_data', [])[:3]]}")
                             print(f"   Last 3 items: {[item.get('field_name', 'N/A') for item in medical_extracted.get('medical_data', [])[-3:]]}")
+                        elif item_count == 9 and expected_count > 15:
+                            print(f"🚨🚨🚨 SEVERE UNDER-EXTRACTION: Analysis found {expected_count} rows but got only 9!")
+                            print(f"   This is likely the model stopping early!")
                         
-                        # Normalize gender if present
-                        if medical_extracted.get('patient_gender'):
-                            original_gender = medical_extracted['patient_gender']
-                            normalized_gender = normalize_gender(original_gender)
-                            if normalized_gender != original_gender:
-                                print(f"🔧 Normalized gender in medical data: '{original_gender}' -> '{normalized_gender}'")
-                            medical_extracted['patient_gender'] = normalized_gender
+                        # Check for name confusion
+                        extracted_patient = str(medical_extracted.get('patient_name', '')).strip()
+                        extracted_doctor = str(medical_extracted.get('doctor_names', '')).strip()
+                        if extracted_patient and extracted_doctor:
+                            # Check if they're too similar (might be mixed up)
+                            if extracted_patient.lower() in extracted_doctor.lower() or extracted_doctor.lower() in extracted_patient.lower():
+                                print(f"⚠️ WARNING: Patient and Doctor names might be mixed up!")
+                                print(f"   Patient: '{extracted_patient}'")
+                                print(f"   Doctor: '{extracted_doctor}'")
                 except Exception as json_err:
                     print(f"⚠️ JSON parsing failed: {json_err}")
                     medical_extracted = {}
@@ -882,7 +888,36 @@ class ChatResource(Resource):
 
             print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")
 
-        # Check if we have ANY data after processing all pages
+        # VALIDATION: Check if we massively under-extracted
+        fields_found = len(all_extracted_data)
+        print(f"\n{'='*80}")
+        print(f"📊 EXTRACTION SUMMARY AFTER ALL PAGES:")
+        print(f"   Total fields extracted: {fields_found}")
+        if fields_found <= 10 and fields_found > 0:
+            print(f"   ⚠️⚠️⚠️ WARNING: Only extracted {fields_found} fields")
+            print(f"   This seems too low! Check if extraction is stopping early!")
+        print(f"{'='*80}\n")
+
+        # FINAL VALIDATION: Check if doctor name is mixed up with patient name
+        final_patient = str(patient_info.get('patient_name', '')).strip()
+        final_doctor = str(patient_info.get('doctor_names', '')).strip()
+        
+        if final_patient and final_doctor:
+            # Check for contamination: doctor name contains patient name or vice versa
+            patient_words = set(final_patient.lower().split())
+            doctor_words = set(final_doctor.lower().split())
+            overlap = patient_words.intersection(doctor_words)
+            
+            if len(overlap) > 0:
+                print(f"⚠️ WARNING: Patient and Doctor names have overlap: {overlap}")
+                print(f"   Patient: '{final_patient}'")
+                print(f"   Doctor: '{final_doctor}'")
+                
+                # If they're suspiciously similar, clear doctor name
+                if final_patient.lower().strip() == final_doctor.lower().strip():
+                    print(f"🚨 CRITICAL: Patient and Doctor names are IDENTICAL - clearing doctor name!")
+                    patient_info['doctor_names'] = ''
+                    final_doctor = ''
         if not all_extracted_data:
              error_msg = 'No valid medical data found in any of the uploaded images.'
              yield f"data: {json.dumps({'error': error_msg, 'code': 'NO_DATA_FOUND'})}\n\n"
