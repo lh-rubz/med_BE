@@ -463,14 +463,18 @@ Your task is to extract the MEDICAL RESULTS TABLE from Page {idx}/{total_pages} 
    - Extract the Normal Range exactly as written for that row.
    - If the cell is empty or has '*', output "".
 
+⚠️ IMPORTANT: Replace placeholders with ACTUAL text from the image.
+- Do NOT output "Test Name" or "Result".
+- Extract the real values (e.g., "Hemoglobin", "14.5").
+
 OUTPUT JSON ONLY:
 {{
   "medical_data": [
     {{
-      "field_name": "Test Name",
-      "field_value": "Result (or \"\")",
-      "field_unit": "Unit",
-      "normal_range": "Range (or \"\")",
+      "field_name": "Actual Test Name (e.g. Hemoglobin)",
+      "field_value": "Actual Result (e.g. 13.5 or \"\")",
+      "field_unit": "Unit (e.g. g/dL)",
+      "normal_range": "Range (e.g. 12-16 or \"\")",
       "is_normal": true/false/null,
       "category": "Section Name"
     }}
