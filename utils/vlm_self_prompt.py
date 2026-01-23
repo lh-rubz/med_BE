@@ -1,48 +1,88 @@
 """Self-prompting: Let the model create its own extraction prompt after analyzing the report."""
+import json
 
 def get_report_analysis_prompt(idx, total_pages):
     """Ask the model to analyze the report and create a custom extraction prompt."""
-    return f"""You are an expert medical report analyst. Look at this medical report image (page {idx}/{total_pages}).
+    return f"""🚨 MEDICAL REPORT ANALYSIS TASK 🚨
 
-YOUR TASK: Analyze this report and create a CUSTOM extraction prompt for it.
+You are analyzing page {idx}/{total_pages} of a medical lab report.
 
-STEP 1 - ANALYZE THE REPORT:
-1. What language(s) is it in? (Arabic, English, bilingual?)
-2. How many rows are in the medical data table? COUNT them carefully.
-3. What are the column headers? (Test name, Value, Unit, Normal Range, etc.)
-4. Where is the patient information? (name, gender, age, date)
-5. What is the table structure? (Which column has what?)
-6. Are normal ranges in parentheses like (10-15) or another format?
+🎯 YOUR MISSION: COUNT EVERY SINGLE ROW IN THE MEDICAL TABLE
 
-STEP 2 - CREATE A CUSTOM EXTRACTION PROMPT:
-Write detailed instructions on HOW to extract data from THIS specific report, including:
-- Where exactly the patient name is located
-- Where the gender field is (convert Arabic to English: ذكر->Male, أنثى->Female)
-- The exact number of rows in the table
-- Which column contains test names (column 1? column 4?)
-- Which column contains values
-- Which column contains units
-- Which column contains normal ranges
-- Any special formatting in this report
+STEP 1 - COUNT THE ROWS:
+Look at the medical data table in the image. Starting from the first test row, COUNT each row:
+- Row 1: [what test?]
+- Row 2: [what test?]
+- Row 3: [what test?]
+...continue until the last row
 
-Return a JSON object:
+⚠️ DO NOT STOP AT 5 OR 10 ROWS - COUNT THEM ALL!
+⚠️ If you see 24+ rows, your answer should be 24+, not 6!
+⚠️ THIS IS PAGE {idx} OF {total_pages} - CONTINUE EXTRACTION ACROSS ALL PAGES!
+
+STEP 2 - ANALYZE THE TABLE STRUCTURE:
+1. Language: Is it Arabic, English, or bilingual?
+2. Column positions (right-to-left or left-to-right?):
+   - Which column has TEST NAMES?
+   - Which column has RESULTS/VALUES?
+   - Which column has UNITS?
+   - Which column has NORMAL RANGES?
+3. Patient info location:
+   - Where is patient name? (after 'اسم المريض' or 'Patient Name')
+   - Where is gender? (If Arabic: ذكر=Male, أنثى=Female)
+   - Where is date?
+4. Doctor/Lab info location:
+   - Where is doctor name? (look for 'دكتور', 'طبيب', 'Doctor', 'DR', 'Dr.' or lab signature)
+   - Where is lab name or clinic name?
+
+STEP 3 - CREATE ROW-BY-ROW EXTRACTION MAP:
+List the FIRST 5 ROWS and LAST 5 ROWS you can see:
+First 5:
+1. [Test name from row 1]
+2. [Test name from row 2]
+3. [Test name from row 3]
+4. [Test name from row 4]
+5. [Test name from row 5]
+
+Last 5:
+[N-4]. [Test name]
+[N-3]. [Test name]
+[N-2]. [Test name]
+[N-1]. [Test name]
+[N]. [Test name]
+
+Return JSON:
 {{
+  "total_test_rows": 24,
   "report_language": "Arabic/English/Bilingual",
-  "total_test_rows": 25,
-  "patient_info_location": "Top header section",
-  "table_structure": "Column 1: Test names (right side), Column 2: Values, Column 3: Units, Column 4: Normal ranges",
-  "gender_value_seen": "أنثى (means Female)",
-  "special_notes": "Any unique observations",
-  "extraction_instructions": "Detailed step-by-step instructions:
-1. Patient name is in top-right after 'اسم المريض'
-2. Gender is in the header table, convert 'أنثى' to 'Female'
-3. The medical table has 25 rows starting from row X
-4. For each row: Read test name from rightmost column, value from next column, etc.
-5. Normal ranges are in parentheses format (X-Y)
-6. Extract ALL 25 rows from top to bottom"
+  "table_reading_direction": "Right-to-left" or "Left-to-right",
+  "column_map": {{
+    "test_name_column": "Rightmost column",
+    "value_column": "Second from right",
+    "unit_column": "Third from right",
+    "range_column": "Leftmost column"
+  }},
+  "doctor_name_location": "Found at [location] or [exact text]",
+  "lab_name_location": "Found at [location] or [exact text]",
+  "first_5_test_names": ["Test 1", "Test 2", "Test 3", "Test 4", "Test 5"],
+  "last_5_test_names": ["Test 20", "Test 21", "Test 22", "Test 23", "Test 24"],
+  "patient_gender_value": "أنثى (=Female)" or "ذكر (=Male)",
+  "extraction_instructions": "DETAILED step-by-step:
+1. Patient name is at [exact location]
+2. Gender field shows '[value]' which means [Male/Female]
+3. Medical table starts at [location] with [total_test_rows] rows
+4. For EACH of the [total_test_rows] rows:
+   - Column [X]: Test name
+   - Column [Y]: Result value  
+   - Column [Z]: Unit
+   - Column [W]: Normal range in format (X-Y) o
+7. Extract doctor_names from [location found in analysis]
+8. Extract lab_name or clinic_name if visibler (X-Y) mg/dL
+5. Extract ALL [total_test_rows] rows sequentially from top to bottom
+6. Do NOT skip any rows, even if value is empty"
 }}
 
-Be very specific and detailed. This will be used to extract the data correctly.
+🚨 REMEMBER: If the table has 24 rows, you MUST report total_test_rows: 24, not 6!
 """
 
 
@@ -50,46 +90,76 @@ def get_custom_extraction_prompt(analysis, idx, total_pages):
     """Generate extraction prompt based on the analysis."""
     instructions = analysis.get('extraction_instructions', '')
     total_rows = analysis.get('total_test_rows', 20)
-    table_structure = analysis.get('table_structure', '')
+    column_map = analysis.get('column_map', {})
+    first_5_tests = analysis.get('first_5_test_names', [])
+    last_5_tests = analysis.get('last_5_test_names', [])
     
-    return f"""Extract medical data from this report (page {idx}/{total_pages}) following these CUSTOM INSTRUCTIONS:
+    return f"""🚨 EXTRACT ALL {total_rows} MEDICAL TEST ROWS 🚨
 
-REPORT ANALYSIS:
+Page {idx}/{total_pages} - You ALREADY analyzed this report and found {total_rows} rows.
+
+📋 YOUR ANALYSIS RESULTS:
+- Total rows to extract: {total_rows}
 - Language: {analysis.get('report_language', 'Unknown')}
-- Total test rows in table: {total_rows}
-- Table structure: {table_structure}
-- Patient info: {analysis.get('patient_info_location', '')}
+- Table direction: {analysis.get('table_reading_direction', 'Unknown')}
+- Column positions: {json.dumps(column_map, ensure_ascii=False)}
+- First 5 test names you saw: {json.dumps(first_5_tests, ensure_ascii=False)}
+- Last 5 test names you saw: {json.dumps(last_5_tests, ensure_ascii=False)}
+- Doctor name location: {analysis.get('doctor_name_location', 'Not found')}
+- Lab name location: {analysis.get('lab_name_location', 'Not found')}
 
-EXTRACTION INSTRUCTIONS (specific to THIS report):
+🎯 CUSTOM EXTRACTION INSTRUCTIONS FOR THIS REPORT:
 {instructions}
 
-CRITICAL REQUIREMENTS:
-1. Extract ALL {total_rows} rows from the medical table
-2. Read normal ranges EXACTLY as shown in the image - do not invent or guess
-3. Convert gender to English: ذكر -> "Male", أنثى -> "Female"
-4. Return date as YYYY-MM-DD only (no time)
+⚠️⚠️⚠️ CRITICAL REQUIREMENTS ⚠️⚠️⚠️
+1. Extract EXACTLY {total_rows} items in medical_data array
+2. Start from row 1 (first test: "{first_5_tests[0] if first_5_tests else 'see image'}") 
+3. Continue through ALL rows until row {total_rows} (last test: "{last_5_tests[-1] if last_5_tests else 'see image'}")
+4. For EACH row, even if a value is empty or blank:
+   - Extract field_name (test name)
+   - Extract field_value (result, write "N/A" if blank)
+   - Extract field_unit (unit of measurement, "" if none)
+   - Extract normal_range EXACTLY from image (format: "(X-Y)" or "(X-Y) unit")
+   - Set is_normal: true/false/null based on comparison
+5. Gender: Convert {analysis.get('patient_gender_value', 'ذكر/أنثى')} to English "Male" or "Female"
+6. Normal ranges: Read from IMAGE, not from memory! If range says "(10-15)", write "(10-15)", NOT "(0-0.75)"!
 
-VALIDATION BEFORE RETURNING:
-- Does your medical_data array have {total_rows} items? If not, you missed rows!
-- Are all normal ranges read from the image (not from your memory)?
-- Is gender in English ("Male" or "Female")?
+🔍 ROW-BY-ROW EXTRACTION CHECKLIST:
+As you extract, verify:
+✓ Row 1: {first_5_tests[0] if first_5_tests else '[First test name]'}
+✓ Row 2: {first_5_tests[1] if len(first_5_tests) > 1 else '[Second test name]'}
+✓ Row 3: {first_5_tests[2] if len(first_5_tests) > 2 else '[Third test name]'}
+...
+✓ Row {total_rows-2}: {last_5_tests[-3] if len(last_5_tests) > 2 else '[Third from last]'}
+✓ Row {total_rows-1}: {last_5_tests[-2] if len(last_5_tests) > 1 else '[Second from last]'}  
+✓ Row {total_rows}: {last_5_tests[-1] if last_5_tests else '[Last test name]'}
 
-Return JSON:
-{{
-  "patient_name": "",
-  "patient_age": "",
-  "patient_dob": "",
-  "patient_gender": "",
-  "report_date": "",
+🔄 MULTI-PAGE REMINDER: You're analyzing page {idx}/{total_pages}. Extract ALL data from THIS page.
+
+📦 FINAL VALIDATION BEFORE RETURNING:
+❌ If medical_data.length < {total_rows}, you FAILED - go back and extract missing rows!
+❌ If any normal_range looks like "(0-0.75)" but doesn't match image, you HALLUCINATED!
+❌ If gender is "ذكر" or "أنثى", you FAILED to convert to English!
+✅ Only return when you have ALL {total_rows} items with correct ranges!
+
+Return JSON:Full patient name from image",
+  "patient_age": "Age in years",
+  "patient_dob": "Birth date YYYY-MM-DD",
+  "patient_gender": "Male" or "Female",
+  "report_date": "YYYY-MM-DD",
+  "doctor_names": "Doctor name(s) if visible on report",
+  "lab_name": "Lab or clinic name if visible "Male" or "Female",
+  "report_date": "YYYY-MM-DD",
   "doctor_names": "",
   "medical_data": [
+    // Array of {total_rows} objects:
     {{
-      "field_name": "",
-      "field_value": "",
-      "field_unit": "",
-      "normal_range": "",
-      "is_normal": null,
-      "category": "",
+      "field_name": "Test name from image",
+      "field_value": "Result value from image or N/A",
+      "field_unit": "Unit from image",
+      "normal_range": "EXACT range from image like (10-15) or (10-15) mg/dL",
+      "is_normal": true/false/null,
+      "category": "Clinical Chemistry / Hematology / etc",
       "notes": ""
     }}
   ]

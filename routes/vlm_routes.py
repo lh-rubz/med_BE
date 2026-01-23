@@ -553,12 +553,12 @@ class ChatResource(Resource):
                     messages=[{'role': 'user', 'content': analysis_content}],
                     temperature=0.2,
                     response_format={"type": "json_object"},
-                    max_tokens=1500,
-                    timeout=60.0
+                    max_tokens=2500,
+                    timeout=90.0
                 )
                 
                 analysis_response = analysis_completion.choices[0].message.content.strip()
-                print(f"📊 Analysis response received:\n{'-'*40}\n{analysis_response[:300]}...\n{'-'*40}")
+                print(f"📊 Analysis response received:\n{'-'*60}\n{analysis_response}\n{'-'*60}")
                 
                 # Parse analysis
                 try:
@@ -570,7 +570,9 @@ class ChatResource(Resource):
                         print(f"✅ Report analyzed:")
                         print(f"   - Language: {report_analysis.get('report_language')}")
                         print(f"   - Total test rows: {total_rows}")
-                        print(f"   - Table structure: {report_analysis.get('table_structure', '')[:100]}...")
+                        print(f"   - First 5 tests: {report_analysis.get('first_5_test_names', [])}")
+                        print(f"   - Last 5 tests: {report_analysis.get('last_5_test_names', [])}")
+                        print(f"   - Column map: {report_analysis.get('column_map', {})}")
                 except Exception as parse_err:
                     print(f"⚠️ Failed to parse analysis: {parse_err}")
                 
@@ -594,12 +596,12 @@ class ChatResource(Resource):
                     messages=[{'role': 'user', 'content': extraction_content}],
                     temperature=0.1,
                     response_format={"type": "json_object"},
-                    max_tokens=3000,
-                    timeout=120.0
+                    max_tokens=5000,
+                    timeout=180.0
                 )
                 
                 extraction_response = extraction_completion.choices[0].message.content.strip()
-                print(f"📦 Extraction response received:\n{'-'*40}\n{extraction_response[:300]}...\n{'-'*40}")
+                print(f"📦 Extraction response received:\n{'-'*60}\n{extraction_response[:500]}...\n{'-'*60}")
                 
                 # Parse extraction
                 try:
@@ -612,6 +614,11 @@ class ChatResource(Resource):
                         item_count = len(medical_extracted.get('medical_data', []))
                         expected_count = report_analysis.get('total_test_rows', 0)
                         print(f"✅ Extracted {item_count} medical items (expected: {expected_count})")
+                        
+                        if item_count < expected_count:
+                            print(f"⚠️⚠️⚠️ CRITICAL: Only extracted {item_count}/{expected_count} items!")
+                            print(f"   First 3 items: {[item.get('field_name', 'N/A') for item in medical_extracted.get('medical_data', [])[:3]]}")
+                            print(f"   Last 3 items: {[item.get('field_name', 'N/A') for item in medical_extracted.get('medical_data', [])[-3:]]}")
                         
                         # Normalize gender if present
                         if medical_extracted.get('patient_gender'):
@@ -780,6 +787,16 @@ class ChatResource(Resource):
             new_doctor = personal_doctor or fallback_doctor
             new_report_date = personal_report_date or fallback_report_date
             
+            # Smart detection: If new_name starts with "Dr", "Doctor", "دكتور", etc, it might be doctor name
+            doctor_prefixes = ['dr', 'doctor', 'dr.', 'دكتور', 'طبيب', 'د.']
+            name_lower = new_name.lower() if new_name else ''
+            if any(name_lower.startswith(prefix) for prefix in doctor_prefixes):
+                # This is likely a doctor name, extract actual name and use as doctor
+                cleaned_doctor_name = re.sub(r'^(dr\.?|doctor|دكتور|طبيب|د\.)\s*', '', new_name, flags=re.IGNORECASE).strip()
+                print(f"⚠️ Detected doctor name in patient field: '{new_name}' -> using as doctor")
+                new_doctor = cleaned_doctor_name or new_doctor
+                new_name = ''  # Clear this so we don't use doctor name as patient name
+            
             # Debug: Print what we extracted from this page
             print(f"📋 Page {idx} - Extracted patient info:")
             print(f"   Name: '{new_name}' (from {'personal' if personal_name else 'fallback'})")
@@ -792,6 +809,7 @@ class ChatResource(Resource):
             current_gender = str(patient_info.get('patient_gender', '') or '').strip()
             current_age = str(patient_info.get('patient_age', '') or '').strip()
             current_dob = str(patient_info.get('patient_dob', '') or '').strip()
+            current_doctor = str(patient_info.get('doctor_names', '') or '').strip()
             
             # Note: With dedicated personal info extraction, we should have cleaner data
             # The previous "SMART FIX" for swapping patient/doctor names should be less necessary
@@ -801,6 +819,16 @@ class ChatResource(Resource):
             if new_name and len(new_name) > 2:  # At least 3 characters
                 if not current_name or (len(new_name) > len(current_name) and len(new_name) > 3):
                     patient_info['patient_name'] = new_name
+            
+            # Merge doctor names: Combine if we have both
+            if new_doctor and len(new_doctor) > 2:
+                if not current_doctor:
+                    patient_info['doctor_names'] = new_doctor
+                    print(f"✅ Set doctor name: '{new_doctor}'")
+                elif new_doctor != current_doctor and len(new_doctor) > 2:
+                    # Combine doctor names if different (might be from different pages)
+                    patient_info['doctor_names'] = f"{current_doctor} / {new_doctor}"
+                    print(f"✅ Updated doctor name: '{patient_info['doctor_names']}'")
                     print(f"✅ Updated patient_name: {new_name}")
                 
             # Gender: At this point new_gender should already be normalized to "Male" or "Female"
