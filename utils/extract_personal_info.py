@@ -54,20 +54,32 @@ def extract_medical_data(text: str) -> Dict[str, Dict[str, str]]:
     medical_data = {}
 
     # Example patterns for medical data extraction
-    lab_result_pattern = r'(?P<field>[\w\s]+):\s*(?P<value>[\d\.]+)?\s*(?:\(Normal Range:\s*(?P<normal_range>[\d\.\-]+)?\))?\s*(?P<is_normal>is_normal:\s*(Yes|No))?'
+    lab_result_pattern = r'(?P<field>[\w\s%]+):\s*(?P<value>[\d\.\*]+)?\s*(?:\((?P<normal_range>[\d\.\-]+)?\))?'
 
     for match in re.finditer(lab_result_pattern, text, re.IGNORECASE):
         field = match.group("field").strip()
         value = match.group("value")
         normal_range = match.group("normal_range")
-        is_normal = match.group("is_normal")
+
+        # Determine is_normal based on value and normal range
+        is_normal = "-"
+        if value and normal_range:
+            try:
+                value_float = float(value.replace("*", ""))
+                range_parts = normal_range.split("-")
+                if len(range_parts) == 2:
+                    lower_bound = float(range_parts[0])
+                    upper_bound = float(range_parts[1])
+                    is_normal = "Yes" if lower_bound <= value_float <= upper_bound else "No"
+            except ValueError:
+                is_normal = "-"
 
         # Only add fields with at least a value or normal range
         if value or normal_range:
             medical_data[field] = {
                 "value": value if value else "",
                 "normal_range": normal_range if normal_range else "-",
-                "is_normal": is_normal.split(":")[-1].strip() if is_normal else "-"
+                "is_normal": is_normal
             }
 
     return medical_data
