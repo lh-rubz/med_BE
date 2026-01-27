@@ -10,6 +10,7 @@ import json
 import hashlib
 import os
 import fitz  # PyMuPDF
+import easyocr
 from PIL import Image
 import io
 import re
@@ -1476,17 +1477,17 @@ class ExtractMedicalInfoFile(Resource):
             return {"error": "No file provided."}, 400
 
         try:
-            # Determine file type and extract text
-            if uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-                # Process image file
-                image = Image.open(uploaded_file)
-                extracted_text = pytesseract.image_to_string(image)
-            elif uploaded_file.filename.lower().endswith('.pdf'):
-                # Process PDF file
+            extracted_text = ""
+            if uploaded_file.filename.lower().endswith('.pdf'):
+                # Process multi-page PDF files
                 pdf_document = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-                extracted_text = ""
                 for page in pdf_document:
                     extracted_text += page.get_text()
+            elif uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                # Process image files using easyocr
+                reader = easyocr.Reader(['en'])
+                result = reader.readtext(uploaded_file.read(), detail=0)
+                extracted_text = "\n".join(result)
             else:
                 return {"error": "Unsupported file type. Please upload a PDF or image."}, 400
 
