@@ -13,6 +13,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 import io
 import re
+import pytesseract
 
 from models import db, User, Report, ReportField, ReportFile, MedicalSynonym
 from config import ollama_client, Config
@@ -1423,3 +1424,39 @@ class ExtractPersonalInfo(Resource):
         extracted_info = extract_personal_info(report_text)
 
         return {"extracted_info": extracted_info}, 200
+
+@vlm_ns.route('/extract-personal-info-file')
+class ExtractPersonalInfoFile(Resource):
+    def post(self):
+        """
+        Extract personal information from an uploaded medical report file (image or PDF).
+        Accepts a file upload.
+        """
+        if 'file' not in request.files:
+            return {"error": "No file uploaded."}, 400
+
+        uploaded_file = request.files['file']
+        if not uploaded_file:
+            return {"error": "No file provided."}, 400
+
+        try:
+            # Determine file type and extract text
+            if uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                # Process image file
+                image = Image.open(uploaded_file)
+                extracted_text = pytesseract.image_to_string(image)
+            elif uploaded_file.filename.lower().endswith('.pdf'):
+                # Process PDF file
+                pdf_document = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+                extracted_text = ""
+                for page in pdf_document:
+                    extracted_text += page.get_text()
+            else:
+                return {"error": "Unsupported file type. Please upload a PDF or image."}, 400
+
+            # Extract personal information
+            extracted_info = extract_personal_info(extracted_text)
+            return {"extracted_info": extracted_info}, 200
+
+        except Exception as e:
+            return {"error": f"Failed to process file: {str(e)}"}, 500

@@ -342,6 +342,14 @@
             color: #999;
             font-style: italic;
         }
+
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
     </style>
 </head>
 
@@ -408,6 +416,16 @@
                     <div id="reportsList"></div>
                 </div>
             </div>
+        </div>
+
+        <!-- Personal Info Extraction Form -->
+        <div class="card">
+            <h1>Test Personal Info Extraction</h1>
+            <form id="uploadForm" enctype="multipart/form-data">
+                <input type="file" id="reportFile" accept=".png, .jpg, .jpeg, .pdf" style="margin-bottom: 10px;">
+                <button type="button" id="extractButton" style="margin-top: 10px;">Extract Personal Info</button>
+            </form>
+            <div id="result" class="result" style="display: none;"></div>
         </div>
     </div>
 
