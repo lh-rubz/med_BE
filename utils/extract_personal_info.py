@@ -61,26 +61,46 @@ def extract_medical_data(text: str) -> Dict[str, Dict[str, str]]:
         value = match.group("value")
         normal_range = match.group("normal_range")
 
+        # Skip fields where both value and normal range are missing
+        if not value and not normal_range:
+            continue
+
         # Determine is_normal based on value and normal range
         is_normal = "-"
         if value and normal_range:
             try:
-                value_float = float(value.replace("*", ""))
-                range_parts = normal_range.split("-")
-                if len(range_parts) == 2:
-                    lower_bound = float(range_parts[0])
-                    upper_bound = float(range_parts[1])
+                # Clean value and convert to float
+                clean_value = value.replace("*", "").replace("<", "").replace(">", "").strip()
+                value_float = float(clean_value)
+
+                # Parse normal range
+                lower_bound = float('-inf')
+                upper_bound = float('inf')
+                
+                # Handle "< 5.0" or "> 5.0" formats
+                if "<" in normal_range:
+                    upper_bound = float(normal_range.replace("<", "").strip())
+                elif ">" in normal_range:
+                    lower_bound = float(normal_range.replace(">", "").strip())
+                elif "-" in normal_range:
+                    range_parts = normal_range.split("-")
+                    if len(range_parts) == 2:
+                        lower_bound = float(range_parts[0].strip())
+                        upper_bound = float(range_parts[1].strip())
+                
+                # Check if normal
+                if lower_bound != float('-inf') or upper_bound != float('inf'):
                     is_normal = "Yes" if lower_bound <= value_float <= upper_bound else "No"
+                    
             except ValueError:
                 is_normal = "-"
 
-        # Only add fields with at least a value or normal range
-        if value or normal_range:
-            medical_data[field] = {
-                "value": value if value else "",
-                "normal_range": normal_range if normal_range else "-",
-                "is_normal": is_normal
-            }
+        # Add field to medical_data
+        medical_data[field] = {
+            "value": value if value else "",
+            "normal_range": normal_range if normal_range else "-",
+            "is_normal": is_normal
+        }
 
     return medical_data
 

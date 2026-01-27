@@ -14,7 +14,7 @@ import easyocr
 from PIL import Image
 import io
 import re
-import pytesseract
+
 
 from models import db, User, Report, ReportField, ReportFile, MedicalSynonym
 from config import ollama_client, Config
@@ -1442,16 +1442,22 @@ class ExtractPersonalInfoFile(Resource):
 
         try:
             # Determine file type and extract text
+            extracted_text = ""
+            reader = easyocr.Reader(['en'])
+            
             if uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-                # Process image file
-                image = Image.open(uploaded_file)
-                extracted_text = pytesseract.image_to_string(image)
+                # Process image file using easyocr
+                result = reader.readtext(uploaded_file.read(), detail=0)
+                extracted_text = "\n".join(result)
             elif uploaded_file.filename.lower().endswith('.pdf'):
-                # Process PDF file
+                # Process PDF file - Convert to images for robust OCR
                 pdf_document = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-                extracted_text = ""
-                for page in pdf_document:
-                    extracted_text += page.get_text()
+                for page_num in range(len(pdf_document)):
+                    page = pdf_document[page_num]
+                    pix = page.get_pixmap()
+                    img_data = pix.tobytes("png")
+                    result = reader.readtext(img_data, detail=0)
+                    extracted_text += "\n".join(result) + "\n"
             else:
                 return {"error": "Unsupported file type. Please upload a PDF or image."}, 400
 
@@ -1478,14 +1484,19 @@ class ExtractMedicalInfoFile(Resource):
 
         try:
             extracted_text = ""
+            reader = easyocr.Reader(['en'])
+
             if uploaded_file.filename.lower().endswith('.pdf'):
-                # Process multi-page PDF files
+                # Process multi-page PDF files using easyocr for robust text extraction
                 pdf_document = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-                for page in pdf_document:
-                    extracted_text += page.get_text()
+                for page_num in range(len(pdf_document)):
+                    page = pdf_document[page_num]
+                    pix = page.get_pixmap()
+                    img_data = pix.tobytes("png")
+                    result = reader.readtext(img_data, detail=0)
+                    extracted_text += "\n".join(result) + "\n"
             elif uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                 # Process image files using easyocr
-                reader = easyocr.Reader(['en'])
                 result = reader.readtext(uploaded_file.read(), detail=0)
                 extracted_text = "\n".join(result)
             else:
