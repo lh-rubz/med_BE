@@ -835,6 +835,82 @@
                 login();
             }
         });
+
+        // Handle the Medical Info Extraction Test
+        document.getElementById('extractButton').addEventListener('click', async function() {
+            const fileInput = document.getElementById('reportFile');
+            const resultDiv = document.getElementById('result');
+            
+            if (fileInput.files.length === 0) {
+                alert('Please select a file first.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<span class="loading"></span> Extracting data...';
+
+            try {
+                // Determine which endpoint to call - typically /vlm/extract-medical-info-file
+                // But we need to handle auth if required. The route definition didn't show @jwt_required
+                // so we'll try without header first, or use the token if we have it.
+                
+                const headers = {};
+                if (authToken) {
+                    headers['Authorization'] = `Bearer ${authToken}`;
+                }
+
+                const response = await fetch(`${API_BASE}/vlm/extract-medical-info-file`, {
+                    method: 'POST',
+                    headers: headers,
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Error ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                // Format the output
+                let html = '<h3>Extraction Results</h3>';
+                
+                // Personal Info
+                if (data.personal_info) {
+                    html += '<h4>Personal Info</h4><ul>';
+                    for (const [key, value] of Object.entries(data.personal_info)) {
+                        html += `<li><strong>${key}:</strong> ${value}</li>`;
+                    }
+                    html += '</ul>';
+                }
+
+                // Medical Info
+                if (data.medical_info) {
+                    html += '<h4>Medical Info</h4><table class="medical-data-table">';
+                    html += '<thead><tr><th>Field</th><th>Value</th><th>Range</th><th>Normal?</th></tr></thead><tbody>';
+                    
+                    for (const [key, details] of Object.entries(data.medical_info)) {
+                        const isNormal = details.is_normal === "Yes" ? "value-normal" : (details.is_normal === "No" ? "value-abnormal" : "value-unknown");
+                        html += `<tr>
+                            <td>${key}</td>
+                            <td>${details.value || ''}</td>
+                            <td>${details.normal_range || ''}</td>
+                            <td class="${isNormal}">${details.is_normal || '-'}</td>
+                        </tr>`;
+                    }
+                    html += '</tbody></table>';
+                }
+
+                html += '<h4>Raw JSON</h4><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+                
+                resultDiv.innerHTML = html;
+
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="status status-error">Error: ${error.message}</div>`;
+            }
+        });
     </script>
 </body>
 
