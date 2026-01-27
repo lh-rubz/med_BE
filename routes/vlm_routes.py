@@ -23,7 +23,7 @@ from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_p
 from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt, generate_prompt_enhancement_request
 from utils.vlm_self_prompt import get_report_analysis_prompt, get_custom_extraction_prompt
 from ollama import Client
-from utils.extract_personal_info import extract_personal_info
+from utils.extract_personal_info import extract_personal_info, extract_medical_data
 
 # Create namespace
 vlm_ns = Namespace('vlm', description='VLM and Report operations')
@@ -929,7 +929,7 @@ class ChatResource(Resource):
         yield f"data: {json.dumps({'percent': 75, 'message': 'Double-checking the results...'})}\n\n"
         print(f"🔍 Validating aggregated data ({len(all_extracted_data)} total items)...")
         
-        # Debug: Print final patient_info before cleaning
+        # Debug: Print final patient info before cleaning
         print(f"\n{'='*80}")
         print(f"📊 FINAL PATIENT INFO BEFORE CLEANING:")
         print(f"   Name: '{patient_info.get('patient_name', '')}'")
@@ -1457,6 +1457,54 @@ class ExtractPersonalInfoFile(Resource):
             # Extract personal information
             extracted_info = extract_personal_info(extracted_text)
             return {"extracted_info": extracted_info}, 200
+
+        except Exception as e:
+            return {"error": f"Failed to process file: {str(e)}"}, 500
+
+@vlm_ns.route('/extract-medical-info-file')
+class ExtractMedicalInfoFile(Resource):
+    def post(self):
+        """
+        Extract personal and medical information from an uploaded medical report file (image or PDF).
+        Accepts a file upload.
+        """
+        if 'file' not in request.files:
+            return {"error": "No file uploaded."}, 400
+
+        uploaded_file = request.files['file']
+        if not uploaded_file:
+            return {"error": "No file provided."}, 400
+
+        try:
+            # Determine file type and extract text
+            if uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                # Process image file
+                image = Image.open(uploaded_file)
+                extracted_text = pytesseract.image_to_string(image)
+            elif uploaded_file.filename.lower().endswith('.pdf'):
+                # Process PDF file
+                pdf_document = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+                extracted_text = ""
+                for page in pdf_document:
+                    extracted_text += page.get_text()
+            else:
+                return {"error": "Unsupported file type. Please upload a PDF or image."}, 400
+
+            # Extract personal and medical information
+            personal_info = extract_personal_info(extracted_text)
+            medical_info = extract_medical_data(extracted_text)
+
+            # Ensure fields are clean and consistent
+            cleaned_medical_info = {
+                field: details
+                for field, details in medical_info.items()
+                if details.get("value") or details.get("normal_range")
+            }
+
+            return {
+                "personal_info": personal_info,
+                "medical_info": cleaned_medical_info
+            }, 200
 
         except Exception as e:
             return {"error": f"Failed to process file: {str(e)}"}, 500
