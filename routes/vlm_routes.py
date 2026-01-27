@@ -22,6 +22,7 @@ from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_p
 from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt, generate_prompt_enhancement_request
 from utils.vlm_self_prompt import get_report_analysis_prompt, get_custom_extraction_prompt
 from ollama import Client
+from utils.extract_personal_info import extract_personal_info
 
 # Create namespace
 vlm_ns = Namespace('vlm', description='VLM and Report operations')
@@ -1406,3 +1407,19 @@ class ChatResource(Resource):
         except Exception as e:
             db.session.rollback()
             yield f"data: {json.dumps({'error': f'❌ Database Error: {str(e)}'})}\n\n"
+
+@vlm_ns.route('/extract-personal-info')
+class ExtractPersonalInfo(Resource):
+    def post(self):
+        """
+        Extract personal information from a medical report.
+        Expects a JSON payload with a 'report_text' field.
+        """
+        data = request.get_json()
+        if not data or 'report_text' not in data:
+            return {"error": "Missing 'report_text' in request body."}, 400
+
+        report_text = data['report_text']
+        extracted_info = extract_personal_info(report_text)
+
+        return {"extracted_info": extracted_info}, 200
