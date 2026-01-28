@@ -338,9 +338,11 @@ class ChatResource(Resource):
                         result = reader.readtext(img_data, detail=0, paragraph=True)
                         page_text = "\n".join(result)
                         extracted_text += f"\n--- Page {page_num + 1} ---\n{page_text}\n"
+                print(f"Page {page_num + 1} processed. Text length: {len(page_text)}")
                     else:
                         print(f"Page {page_num + 1}: extracted {len(text)} characters using native text extraction")
                         extracted_text += f"\n--- Page {page_num + 1} ---\n{text}\n"
+                    print(f"Page {page_num + 1} processed (Native). Text length: {len(text)}")
                         
             elif uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                 # Process image files using easyocr

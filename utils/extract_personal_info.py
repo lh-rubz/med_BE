@@ -83,8 +83,8 @@ def extract_medical_data(text: str) -> Dict[str, Dict[str, str]]:
     # Pattern 2: Table row style (Field Value [Unit] Range) - No colon, but stricter structure
     # Looks for: Text (at least 2 chars) + Space + Number + [Space + Unit(optional)] + Space + Range (optional)
     # STRICT SINGLE LINE MATCHING: [ \t] instead of \s
-    # Added (?P<unit>...)? group to capture unit if present (e.g. mg/dl, %, cells/L) between value and range
-    table_row_pattern = r'(?P<field>[A-Za-z][\w %]{2,})[ \t]+(?P<value>[\d\.]+\*?)(?:[ \t]+(?P<unit>[A-Za-z/%]+))?(?:[ \t]+(?P<normal_range>[\d\.]+\s*-\s*[\d\.]+|[<>]\s*[\d\.]+|\([\d\.\-]+\)))?'
+    # Updated to support Arabic fields, brackets in fields, < in values, and alphanumeric units
+    table_row_pattern = r'(?P<field>[A-Za-z\u0600-\u06FF][\w\s%\(\)\.\-\u0600-\u06FF]{2,})[ \t]+(?P<value>[<>]?[\d\.]+\*?)(?:[ \t]+(?P<unit>[A-Za-z0-9/%^\-]+))?(?:[ \t]+(?P<normal_range>[\d\.]+\s*-\s*[\d\.]+|[<>]\s*[\d\.]+|\([\d\.\-]+\)))?'
 
     # Pattern 3: RTL/Inverted Table row style (Range Value Field) or (Value Field)
     # Common in Arabic reports where English text is on the right
