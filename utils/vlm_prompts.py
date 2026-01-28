@@ -135,6 +135,9 @@ CRITICAL RULES
 3) Language: Handle Arabic (RTL) and English (LTR). Use the clearer test name.
 4) Units must be medical abbreviations, not symbols (*, -, .).
 5) Normal ranges: Read EXACTLY what's in the image. Do NOT invent or guess ranges.
+   - If the cell is empty, return "".
+   - If the cell has "-", return "".
+   - NEVER create a range like "(0-0.75)" if it is not in the image.
 6) EXTRACT EVERY ROW: Start at row 1, go to row 2, row 3... until you reach the LAST row at the bottom of the table.
 
 HOW TO READ TABLES
@@ -155,7 +158,8 @@ CRITICAL: Use EXTREME caution with row boundaries. Trace horizontal lines precis
    - If blank or symbol, return "".
 5) normal_range: Continue RIGHT along THIS row to the RANGE column. STOP at vertical boundary.
    - Extract the numeric range from THIS row ONLY.
-   - If blank, return "" (never invent).
+   - If blank, return "". NEVER invent a range.
+   - If the image shows only "-", return "".
 6) is_normal: Calculate ONLY using THIS row's value and range.
 7) category: Section header for THIS row's section, else "".
 8) notes: Flags in THIS row ONLY, else "".
@@ -174,7 +178,8 @@ VALIDATION BEFORE RETURN
 - Units are not symbols and not numbers.
 - CRITICAL NORMAL RANGES: Read the EXACT range from the image. Do NOT guess or invent ranges.
   * Example: If image shows "(10-15)", your normal_range MUST be "(10-15)"
-  * Do NOT use ranges from your knowledge (like "(0-0.75)" for platelet width)
+  * Do NOT use ranges from your knowledge (like "(0-0.75)" or "(0-100)").
+  * IF THE CELL IS EMPTY, RETURN "".
   * If you cannot read the range clearly, use "" - NEVER invent a range
 - CRITICAL: Normal_range must NOT look like a value, and field_value must NOT look like a unit or range.
 - Duplicate ranges allowed when units differ or the source shows the same range; re-check only if same unit and the range clearly belongs to another row.

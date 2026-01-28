@@ -55,6 +55,45 @@ def normalize_gender(gender_value):
 REPORT_TYPES = [
     "Complete Blood Count (CBC)",
     "Lipid Panel",
+
+def deduplicate_medical_data(medical_data):
+    """
+    Deduplicate medical data items based on field_name.
+    Prioritize items with more complete information (value + range).
+    """
+    if not medical_data:
+        return []
+    
+    unique_map = {}
+    
+    for item in medical_data:
+        name = item.get('field_name', '').strip()
+        if not name:
+            continue
+            
+        # Normalize name for key (lowercase)
+        key = name.lower()
+        
+        if key not in unique_map:
+            unique_map[key] = item
+        else:
+            # Conflict resolution: prefer the one with values/ranges
+            existing = unique_map[key]
+            
+            # Helper to check completeness
+            def get_score(itm):
+                score = 0
+                if itm.get('field_value') and str(itm.get('field_value')).strip() not in ["", "N/A", "n/a"]: score += 2
+                if itm.get('normal_range') and str(itm.get('normal_range')).strip() not in ["", "-", "N/A"]: score += 1
+                return score
+            
+            # If new item has better score, replace. If equal, keep existing (usually first one found).
+            if get_score(item) > get_score(existing):
+                unique_map[key] = item
+            
+    return list(unique_map.values())
+
+
     "Comprehensive Metabolic Panel (CMP)",
     "Basic Metabolic Panel (BMP)",
     "Liver Function Test (LFT)",
@@ -290,6 +329,10 @@ Return ONLY the raw JSON object. No markdown formatting, no explanations.
         # Force gender normalization on the LLM output
         if 'personal_info' in corrected_data and 'patient_gender' in corrected_data['personal_info']:
             corrected_data['personal_info']['patient_gender'] = normalize_gender(corrected_data['personal_info']['patient_gender'])
+
+        # Deduplicate medical fields
+        if 'medical_data' in corrected_data and isinstance(corrected_data['medical_data'], list):
+            corrected_data['medical_data'] = deduplicate_medical_data(corrected_data['medical_data'])
 
         print("LLM self-correction complete.")
         return corrected_data

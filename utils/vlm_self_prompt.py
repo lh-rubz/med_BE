@@ -25,6 +25,7 @@ For EACH row, also note:
 ⚠️ If you see 24+ rows, your answer should be 24+, not 6!
 ⚠️ THIS IS PAGE {idx} OF {total_pages} - CONTINUE EXTRACTION ACROSS ALL PAGES!
 ⚠️ DO NOT INVENT NORMAL RANGES - if empty in image, leave it empty in JSON!
+⚠️ IF A FIELD HAS A VALUE BUT NO RANGE, EXTRACT THE VALUE AND LEAVE RANGE EMPTY.
 
 STEP 3 - CREATE DETAILED ROW ANALYSIS:
 For EACH row in the medical table, identify:
@@ -159,6 +160,7 @@ Page {idx}/{total_pages} - You ALREADY analyzed this report and found {total_row
    - Extract field_value (result, write "N/A" if blank)
    - Extract field_unit (unit of measurement, "" if none)
    - Extract normal_range EXACTLY from image (format: "(X-Y)" or "(X-Y) unit")
+     * IF EMPTY IN IMAGE, RETURN "". DO NOT INVENT.
    - Set is_normal: true/false/null based on comparison
 5. Gender: Convert {analysis.get('patient_gender_value', 'ذكر/أنثى')} to English "Male" or "Female"
 6. Normal ranges: Read from IMAGE, not from memory! If range says "(10-15)", write "(10-15)", NOT "(0-0.75)"!
@@ -167,7 +169,8 @@ Page {idx}/{total_pages} - You ALREADY analyzed this report and found {total_row
 1. For EACH field: extract test name EXACTLY as shown (preserve Arabic if Arabic, English if English)
 2. Extract value ONLY if it exists in image - do NOT guess or invent
 3. Extract normal range ONLY if shown in image - if empty/missing in image, leave as empty string ""
-4. NEVER invent a normal range like "(0-0.75)" if not visible in image
+4. NEVER invent a normal range like "(0-0.75)" if not visible in image.
+5. IF VALUE EXISTS BUT NO RANGE: Extract the value and set range to "".
 5. Gender MUST be converted to English: "ذكر" -> "Male", "أنثى" -> "Female"
 6. Patient name MUST be the actual person's name, not a label
 7. Doctor name MUST be found and returned - look at signature area, header, or footer
