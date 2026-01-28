@@ -231,6 +231,66 @@ class ExtractPersonalInfoFile(Resource):
         except Exception as e:
             return {"error": f"Failed to process file: {str(e)}"}, 500
 
+def verify_and_correct_with_llm(extracted_data, raw_text):
+    """
+    Uses LLM to verify and correct the extracted data against the raw text.
+    This acts as a self-correction mechanism.
+    """
+    try:
+        prompt = f"""You are a meticulous medical data verification assistant.
+Your goal is to ensure the extracted JSON data is 100% accurate matches the Raw Text.
+
+RAW TEXT FROM REPORT:
+---
+{raw_text}
+---
+
+CURRENT EXTRACTED DATA (May have errors):
+---
+{json.dumps(extracted_data, indent=2, ensure_ascii=False)}
+---
+
+TASK:
+1. Compare every field in the "CURRENT EXTRACTED DATA" against the "RAW TEXT".
+2. Fix any MISALIGNED values. Example: If "Lymphocytes" is 2.9 in data but text shows "Lymphocytes 257", CHANGE IT TO 257.
+3. Fix any NAME swaps. Ensure Doctor Name is correct and Patient Name is correct.
+4. If a value is missing in data but present in text, ADD IT.
+5. If a value is present in data but NOT in text (hallucinated), REMOVE IT.
+6. Return the FULLY CORRECTED JSON object.
+
+OUTPUT FORMAT:
+Return ONLY the raw JSON object. No markdown formatting, no explanations.
+"""
+
+        print("Refining data with LLM self-correction...")
+        response = ollama_client.chat.completions.create(
+            model=Config.OLLAMA_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a precise medical data extraction assistant. Output only valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1, # Low temperature for precision
+            max_tokens=4000
+        )
+        
+        content = response.choices[0].message.content.strip()
+        
+        # Clean potential markdown code blocks if present
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+            
+        corrected_data = json.loads(content)
+        print("LLM self-correction complete.")
+        return corrected_data
+
+    except Exception as e:
+        print(f"LLM correction failed: {e}")
+        # Fallback to original data if LLM fails
+        return extracted_data
+
+
 @vlm_ns.route('/chat')
 class ChatResource(Resource):
     def post(self):
@@ -291,7 +351,7 @@ class ChatResource(Resource):
 
             print(f"Total extracted text length: {len(extracted_text)}")
             
-            # Extract personal and medical information
+            # Extract personal and medical information (Initial Pass)
             personal_info = extract_personal_info(extracted_text)
             medical_info = extract_medical_data(extracted_text)
 
@@ -301,11 +361,16 @@ class ChatResource(Resource):
                 for field, details in medical_info.items()
                 if details.get("value") or details.get("normal_range")
             }
-
-            return {
+            
+            initial_data = {
                 "personal_info": personal_info,
                 "medical_info": cleaned_medical_info
-            }, 200
+            }
+
+            # Self-Correction Pass: Use LLM to verify and fix the data
+            final_data = verify_and_correct_with_llm(initial_data, extracted_text)
+
+            return final_data, 200
 
         except Exception as e:
             import traceback
