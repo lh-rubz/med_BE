@@ -565,8 +565,8 @@ class ChatResource(Resource):
 
             # 3. Post-Processing
             
-            # Deduplicate
-            aggregated_medical_data = deduplicate_medical_data(aggregated_medical_data)
+            # Deduplicate - DISABLED based on user request ("return data AS IT IS")
+            # aggregated_medical_data = deduplicate_medical_data(aggregated_medical_data)
             
             # Recalculate Normality
             aggregated_medical_data = recalculate_normality(aggregated_medical_data)

@@ -196,7 +196,11 @@ As you extract, verify each row has all 4 pieces (or mark as empty if missing):
 ❌ If medical_data.length < {total_rows}, you FAILED - go back and extract missing rows!
 ❌ If any normal_range looks like "(0-0.75)" but doesn't match image, you HALLUCINATED!
 ❌ If gender is "ذكر" or "أنثى", you FAILED to convert to English!
-✅ Only return when you have ALL {total_rows} items with correct ranges!
+❌ If medical_data.length < {total_rows}, you FAILED - go back and extract missing rows!
+❌ If any normal_range looks like "(0-0.75)" but doesn't match image, you HALLUCINATED!
+❌ If gender is "ذكر" or "أنثى", you FAILED to convert to English!
+✅ Only return when you have ALL {total_rows} items!
+✅ Duplicates are ALLOWED if they appear in the report. Extract EVERYTHING.
 
 Return JSON:Full patient name from image",
   "patient_age": "Age in years",
