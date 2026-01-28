@@ -263,9 +263,15 @@ class ChatResource(Resource):
                     # Try direct text extraction first (faster and more accurate for native PDFs)
                     text = page.get_text()
                     
-                    # If direct extraction yields little text, fall back to OCR
-                    if len(text.strip()) < 50:
-                        print(f"Page {page_num + 1}: minimal text found, using OCR...")
+                    # Check for Arabic characters in the extracted text
+                    # PyMuPDF often has issues with Arabic text direction/ordering, so we prefer OCR for Arabic
+                    has_arabic = bool(re.search(r'[\u0600-\u06FF]', text))
+                    
+                    # If direct extraction yields little text, or contains Arabic (safer to use OCR), fall back to OCR
+                    if len(text.strip()) < 100 or has_arabic:
+                        reason = "contains Arabic" if has_arabic else "minimal text found"
+                        print(f"Page {page_num + 1}: {reason}, using OCR...")
+                        
                         pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0)) # 2x zoom for better OCR
                         img_data = pix.tobytes("png")
                         result = reader.readtext(img_data, detail=0)

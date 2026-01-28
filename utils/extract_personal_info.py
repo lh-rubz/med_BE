@@ -76,10 +76,31 @@ def extract_medical_data(text: str) -> Dict[str, Dict[str, str]]:
     medical_data = {}
 
     # Example patterns for medical data extraction
+    # Pattern 1: Field: Value (Range) - Requires colon
     lab_result_pattern = r'(?P<field>[\w\s%]+):\s*(?P<value>[\d\.\*]+)?\s*(?:\((?P<normal_range>[\d\.\-]+)?\))?'
+    
+    # Pattern 2: Table row style (Field Value Range) - No colon, but stricter structure
+    # Looks for: Text (at least 2 chars) + Space + Number + Space + Range (optional)
+    # Avoids matching random text by requiring specific structure
+    table_row_pattern = r'(?P<field>[A-Za-z][\w\s%]{2,})\s+(?P<value>[\d\.]+\*?)\s+(?P<normal_range>[\d\.]+\s*-\s*[\d\.]+|[<>]\s*[\d\.]+)?'
 
+    # Collect all matches from both patterns
+    all_matches = []
     for match in re.finditer(lab_result_pattern, text, re.IGNORECASE):
+        all_matches.append(match)
+    
+    # Only try table pattern if we didn't find many matches with colon pattern, or as supplement
+    for match in re.finditer(table_row_pattern, text, re.IGNORECASE):
+        # Avoid duplicates or overlapping matches if needed, but for now just add them
+        # Simple check: if the field name is already matched, maybe skip? 
+        # But same test can appear twice. Let's just add.
+        all_matches.append(match)
+
+    for match in all_matches:
         field = match.group("field").strip()
+        # Clean up field name (remove trailing/leading whitespace)
+        field = re.sub(r'\s+', ' ', field)
+        
         value = match.group("value")
         normal_range = match.group("normal_range")
 
