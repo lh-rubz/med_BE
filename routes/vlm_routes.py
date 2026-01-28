@@ -387,6 +387,12 @@ Return ONLY the raw JSON object. No markdown formatting, no explanations.
             
         corrected_data = json.loads(content)
         
+        # Add debug info
+        corrected_data['debug_metadata'] = {
+            'raw_llm_response': content,
+            'model_used': Config.OLLAMA_MODEL
+        }
+        
         # Force gender normalization on the LLM output
         if 'personal_info' in corrected_data and 'patient_gender' in corrected_data['personal_info']:
             corrected_data['personal_info']['patient_gender'] = normalize_gender(corrected_data['personal_info']['patient_gender'])
@@ -488,15 +494,16 @@ class ChatResource(Resource):
             medical_info = extract_medical_data(extracted_text)
 
             # Ensure fields are clean and consistent
-            cleaned_medical_info = {
-                field: details
-                for field, details in medical_info.items()
-                if details.get("value") or details.get("normal_range")
-            }
+            # REMOVED FILTERING to keep empty values as requested by user
+            # cleaned_medical_info = {
+            #     field: details
+            #     for field, details in medical_info.items()
+            #     if details.get("value") or details.get("normal_range")
+            # }
             
             initial_data = {
                 "personal_info": personal_info,
-                "medical_info": cleaned_medical_info
+                "medical_info": medical_info # Use raw medical_info (includes empty fields)
             }
 
             # Self-Correction Pass: Use LLM to verify and fix the data

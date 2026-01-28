@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VLM Extraction Debugger</title>
+    <style>
+        body {
+            font-family: monospace;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .api-response {
+            background: #2d2d2d;
+            color: #50fa7b;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            font-size: 14px;
+        }
+
+        .debug-section {
+            margin-top: 20px;
+            border-top: 1px solid #ccc;
+            padding-top: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        .preview {
+            max-width: 200px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🏥 VLM Extraction Debugger</h1>
+        <p>Upload a medical report (Image/PDF) to test data extraction. Supports multiple files.</p>
+
+        <input type="file" id="fileInput" name="file" multiple accept=".pdf,.png,.jpg,.jpeg">
+        <br><br>
+        <button onclick="uploadFiles()">Upload & Extract</button>
+
+        <div id="loading" style="display:none; margin-top: 10px; color: #666;">⏳ Processing... This may take up to 60
+            seconds...</div>
+
+        <div id="results" style="display:none;" class="debug-section">
+            <h2>📝 Extracted Data (JSON)</h2>
+            <div id="jsonOutput" class="api-response"></div>
+
+            <h2>🐛 Raw LLM Response (Debug)</h2>
+            <div id="llmOutput" class="api-response" style="color: #ffb86c;"></div>
+        </div>
+    </div>
+
+    <script>
+        async function uploadFiles() {
+            const fileInput = document.getElementById('fileInput');
+            const files = fileInput.files;
+
+            if (files.length === 0) {
+                alert("Please select at least one file.");
+                return;
+            }
+
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append('file', files[i]);
+            }
+
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+
+            try {
+                // Change URL if testing on server vs localhost
+                const apiUrl = '/vlm/chat';
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('results').style.display = 'block';
+
+                // Pretty print output
+                document.getElementById('jsonOutput').textContent = JSON.stringify(data, null, 2);
+
+                if (data.debug_metadata && data.debug_metadata.raw_llm_response) {
+                    document.getElementById('llmOutput').textContent = data.debug_metadata.raw_llm_response;
+                } else {
+                    document.getElementById('llmOutput').textContent = "No debug metadata found.";
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('jsonOutput').textContent = "Error: " + error.message;
+            }
+        }
+    </script>
+</body>
+
+</html>
