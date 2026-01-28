@@ -77,23 +77,28 @@ def extract_medical_data(text: str) -> Dict[str, Dict[str, str]]:
 
     # Example patterns for medical data extraction
     # Pattern 1: Field: Value (Range) - Requires colon
-    lab_result_pattern = r'(?P<field>[\w\s%]+):\s*(?P<value>[\d\.\*]+)?\s*(?:\((?P<normal_range>[\d\.\-]+)?\))?'
+    # Use [ \t] instead of \s to avoid matching across newlines
+    lab_result_pattern = r'(?P<field>[\w %]+):\s*(?P<value>[\d\.\*]+)?\s*(?:\((?P<normal_range>[\d\.\-]+)?\))?'
     
     # Pattern 2: Table row style (Field Value Range) - No colon, but stricter structure
     # Looks for: Text (at least 2 chars) + Space + Number + Space + Range (optional)
-    # Avoids matching random text by requiring specific structure
-    table_row_pattern = r'(?P<field>[A-Za-z][\w\s%]{2,})\s+(?P<value>[\d\.]+\*?)\s+(?P<normal_range>[\d\.]+\s*-\s*[\d\.]+|[<>]\s*[\d\.]+)?'
+    # STRICT SINGLE LINE MATCHING: [ \t] instead of \s
+    table_row_pattern = r'(?P<field>[A-Za-z][\w %]{2,})[ \t]+(?P<value>[\d\.]+\*?)(?:[ \t]+(?P<normal_range>[\d\.]+\s*-\s*[\d\.]+|[<>]\s*[\d\.]+))?'
 
-    # Collect all matches from both patterns
+    # Pattern 3: RTL/Inverted Table row style (Range Value Field) or (Value Field)
+    # Common in Arabic reports where English text is on the right
+    # Structure: [Range (optional)] [Value] [Field Name]
+    inverted_row_pattern = r'(?:(?P<normal_range>[\d\.]+\s*-\s*[\d\.]+|[<>]\s*[\d\.]+|\([\d\.\-]+\))[ \t]+)?(?P<value>[\d\.]+\*?)[ \t]+(?P<field>[A-Za-z][\w %(),-]{2,})'
+
+    # Collect all matches from all patterns
     all_matches = []
     for match in re.finditer(lab_result_pattern, text, re.IGNORECASE):
         all_matches.append(match)
     
-    # Only try table pattern if we didn't find many matches with colon pattern, or as supplement
     for match in re.finditer(table_row_pattern, text, re.IGNORECASE):
-        # Avoid duplicates or overlapping matches if needed, but for now just add them
-        # Simple check: if the field name is already matched, maybe skip? 
-        # But same test can appear twice. Let's just add.
+        all_matches.append(match)
+
+    for match in re.finditer(inverted_row_pattern, text, re.IGNORECASE):
         all_matches.append(match)
 
     for match in all_matches:
