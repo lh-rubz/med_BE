@@ -169,6 +169,10 @@ def compress_image(image_data, format_hint='png'):
     return compressed_data
 
 
+# Initialize EasyOCR reader globally to avoid reloading model on every request
+# Added 'ar' for Arabic support
+reader = easyocr.Reader(['en', 'ar'])
+
 @vlm_ns.route('/extract-personal-info')
 class ExtractPersonalInfo(Resource):
     def post(self):
@@ -243,24 +247,44 @@ class ChatResource(Resource):
 
         try:
             extracted_text = ""
-            reader = easyocr.Reader(['en'])
+            print(f"Processing file: {uploaded_file.filename}")
 
             if uploaded_file.filename.lower().endswith('.pdf'):
-                # Process multi-page PDF files using easyocr for robust text extraction
-                pdf_document = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+                # Process multi-page PDF files
+                # Use stream=uploaded_file.read() to load the file into memory for PyMuPDF
+                file_content = uploaded_file.read()
+                pdf_document = fitz.open(stream=file_content, filetype="pdf")
+                
+                print(f"PDF has {len(pdf_document)} pages")
+                
                 for page_num in range(len(pdf_document)):
                     page = pdf_document[page_num]
-                    pix = page.get_pixmap()
-                    img_data = pix.tobytes("png")
-                    result = reader.readtext(img_data, detail=0)
-                    extracted_text += "\n".join(result) + "\n"
+                    
+                    # Try direct text extraction first (faster and more accurate for native PDFs)
+                    text = page.get_text()
+                    
+                    # If direct extraction yields little text, fall back to OCR
+                    if len(text.strip()) < 50:
+                        print(f"Page {page_num + 1}: minimal text found, using OCR...")
+                        pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0)) # 2x zoom for better OCR
+                        img_data = pix.tobytes("png")
+                        result = reader.readtext(img_data, detail=0)
+                        page_text = "\n".join(result)
+                        extracted_text += f"\n--- Page {page_num + 1} ---\n{page_text}\n"
+                    else:
+                        print(f"Page {page_num + 1}: extracted {len(text)} characters using native text extraction")
+                        extracted_text += f"\n--- Page {page_num + 1} ---\n{text}\n"
+                        
             elif uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                 # Process image files using easyocr
+                print("Processing image file with OCR...")
                 result = reader.readtext(uploaded_file.read(), detail=0)
                 extracted_text = "\n".join(result)
             else:
                 return {"error": "Unsupported file type. Please upload a PDF or image."}, 400
 
+            print(f"Total extracted text length: {len(extracted_text)}")
+            
             # Extract personal and medical information
             personal_info = extract_personal_info(extracted_text)
             medical_info = extract_medical_data(extracted_text)
@@ -278,4 +302,6 @@ class ChatResource(Resource):
             }, 200
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return {"error": f"Failed to process file: {str(e)}"}, 500

@@ -30,15 +30,37 @@ def extract_personal_info(text: str) -> Dict[str, str]:
     # Use regex for specific patterns
     email_pattern = r'[\w.-]+@[\w.-]+\.\w{2,3}'
     phone_pattern = r'\b\d{10}\b|\(\d{3}\) \d{3}-\d{4}'
+    
+    # Arabic/English Doctor Name patterns
+    # Matches "Dr." or "Doctor" followed by English name
+    # OR "د." or "دكتور" followed by Arabic characters
+    doctor_pattern_en = r'(?i)(?:Dr\.?|Doctor)\s+([A-Za-z\s]+)'
+    doctor_pattern_ar = r'(?:د\.|دكتور)\s+([\u0600-\u06FF\s]+)'
 
     email_match = re.search(email_pattern, text)
     phone_match = re.search(phone_pattern, text)
+    doctor_match_en = re.search(doctor_pattern_en, text)
+    doctor_match_ar = re.search(doctor_pattern_ar, text)
 
     if email_match:
         personal_info["Email"] = email_match.group(0)
     if phone_match:
         personal_info["Phone"] = phone_match.group(0)
-
+    
+    # Prioritize Arabic doctor name if found (as requested by user to keep it in Arabic)
+    if doctor_match_ar:
+        personal_info["Doctor Name"] = doctor_match_ar.group(1).strip()
+    elif doctor_match_en:
+        personal_info["Doctor Name"] = doctor_match_en.group(1).strip()
+    
+    # Also attempt to find Patient Name in Arabic if English NER failed or as supplement
+    # Pattern: "الاسم:" or "Name:" followed by Arabic text
+    name_pattern_ar = r'(?:الاسم|Name)\s*[:\-]\s*([\u0600-\u06FF\s]+)'
+    name_match_ar = re.search(name_pattern_ar, text)
+    
+    if name_match_ar and "Name" not in personal_info:
+        personal_info["Name"] = name_match_ar.group(1).strip()
+        
     return personal_info
 
 def extract_medical_data(text: str) -> Dict[str, Dict[str, str]]:
