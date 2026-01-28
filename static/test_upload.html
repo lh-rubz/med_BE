@@ -853,7 +853,7 @@
             resultDiv.innerHTML = '<span class="loading"></span> Extracting data...';
 
             try {
-                // Determine which endpoint to call - typically /vlm/extract-medical-info-file
+                // Determine which endpoint to call - typically /vlm/chat
                 // But we need to handle auth if required. The route definition didn't show @jwt_required
                 // so we'll try without header first, or use the token if we have it.
                 
@@ -862,7 +862,7 @@
                     headers['Authorization'] = `Bearer ${authToken}`;
                 }
 
-                const response = await fetch(`${API_BASE}/vlm/extract-medical-info-file`, {
+                const response = await fetch(`${API_BASE}/vlm/chat`, {
                     method: 'POST',
                     headers: headers,
                     body: formData
