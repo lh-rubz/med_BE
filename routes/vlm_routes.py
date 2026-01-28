@@ -205,8 +205,8 @@ class ExtractPersonalInfoFile(Resource):
 
         try:
             # Determine file type and extract text
-            extracted_text = ""
-            reader = easyocr.Reader(['en'])
+            # Use global reader (initialized with 'en' and 'ar') to support Arabic text extraction
+            # reader = easyocr.Reader(['en']) - REMOVED to avoid English-only restriction
             
             if uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                 # Process image file using easyocr
@@ -254,9 +254,13 @@ TASK:
 1. Compare every field in the "CURRENT EXTRACTED DATA" against the "RAW TEXT".
 2. Fix any MISALIGNED values. Example: If "Lymphocytes" is 2.9 in data but text shows "Lymphocytes 257", CHANGE IT TO 257.
 3. Fix any NAME swaps. Ensure Doctor Name is correct and Patient Name is correct.
-4. If a value is missing in data but present in text, ADD IT.
-5. If a value is present in data but NOT in text (hallucinated), REMOVE IT.
-6. Return the FULLY CORRECTED JSON object.
+4. GENDER NORMALIZATION: You MUST convert Arabic gender to English:
+   - "أنثى", "انثى", "Female" -> "Female"
+   - "ذكر", "Male" -> "Male"
+   - Return ONLY "Male" or "Female".
+5. If a value is missing in data but present in text, ADD IT.
+6. If a value is present in data but NOT in text (hallucinated), REMOVE IT.
+7. Return the FULLY CORRECTED JSON object.
 
 OUTPUT FORMAT:
 Return ONLY the raw JSON object. No markdown formatting, no explanations.
@@ -282,6 +286,11 @@ Return ONLY the raw JSON object. No markdown formatting, no explanations.
             content = content.split("```")[1].split("```")[0].strip()
             
         corrected_data = json.loads(content)
+        
+        # Force gender normalization on the LLM output
+        if 'personal_info' in corrected_data and 'patient_gender' in corrected_data['personal_info']:
+            corrected_data['personal_info']['patient_gender'] = normalize_gender(corrected_data['personal_info']['patient_gender'])
+
         print("LLM self-correction complete.")
         return corrected_data
 
