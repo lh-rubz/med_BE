@@ -331,85 +331,86 @@ class ExtractPersonalInfoFile(Resource):
         except Exception as e:
             return {"error": f"Failed to process file: {str(e)}"}, 500
 
-def verify_and_correct_with_llm(extracted_data, raw_text):
+def process_page_with_llm(page_text, page_idx, total_pages):
     """
-    Uses LLM to verify and correct the extracted data against the raw text.
-    This acts as a self-correction mechanism.
+    Process a single page using Self-Prompting strategy:
+    1. Analyze the page (Structure, Row Count)
+    2. Generate Custom Prompt
+    3. Extract Data
     """
+    debug_logs = []
+    
+    # Step 1: Analysis
+    analysis_prompt = get_report_analysis_prompt(page_idx, total_pages)
+    
+    # Run Analysis LLM Call
     try:
-        prompt = f"""You are a meticulous medical data verification assistant.
-Your goal is to ensure the extracted JSON data is 100% accurate matches the Raw Text.
-
-RAW TEXT FROM REPORT:
----
-{raw_text}
----
-
-CURRENT EXTRACTED DATA (May have errors):
----
-{json.dumps(extracted_data, indent=2, ensure_ascii=False)}
----
-
-TASK:
-1. Compare every field in the "CURRENT EXTRACTED DATA" against the "RAW TEXT".
-2. Fix any MISALIGNED values. Example: If "Lymphocytes" is 2.9 in data but text shows "Lymphocytes 257", CHANGE IT TO 257.
-3. Fix any NAME swaps. Ensure Doctor Name is correct and Patient Name is correct.
-4. GENDER NORMALIZATION: You MUST convert Arabic gender to English:
-   - "أنثى", "انثى", "Female" -> "Female"
-   - "ذكر", "Male" -> "Male"
-   - Return ONLY "Male" or "Female".
-5. If a value is missing in data but present in text, ADD IT.
-6. If a value is present in data but NOT in text (hallucinated), REMOVE IT.
-7. Return the FULLY CORRECTED JSON object.
-
-OUTPUT FORMAT:
-Return ONLY the raw JSON object. No markdown formatting, no explanations.
-"""
-
-        print("Refining data with LLM self-correction...")
-        response = ollama_client.chat.completions.create(
+        response_analysis = ollama_client.chat.completions.create(
             model=Config.OLLAMA_MODEL,
             messages=[
-                {"role": "system", "content": "You are a precise medical data extraction assistant. Output only valid JSON."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": "You are a precise medical report analyzer. Output valid JSON only."},
+                {"role": "user", "content": f"PAGE TEXT:\n{page_text}\n\n{analysis_prompt}"}
             ],
-            temperature=0.1, # Low temperature for precision
+            temperature=0.1,
+            max_tokens=2000
+        )
+        analysis_content = response_analysis.choices[0].message.content.strip()
+        debug_logs.append({
+            "step": "1_analysis",
+            "page": page_idx,
+            "prompt_preview": analysis_prompt[:200] + "...",
+            "response": analysis_content
+        })
+        
+        # Parse Analysis
+        if "```json" in analysis_content:
+            analysis_content = analysis_content.split("```json")[1].split("```")[0].strip()
+        elif "```" in analysis_content:
+            analysis_content = analysis_content.split("```")[1].split("```")[0].strip()
+            
+        analysis_json = json.loads(analysis_content)
+        
+    except Exception as e:
+        print(f"Analysis failed for page {page_idx}: {e}")
+        debug_logs.append({"step": "1_analysis_error", "error": str(e)})
+        # Fallback analysis
+        analysis_json = {"total_test_rows": 20, "report_language": "Unknown"}
+
+    # Step 2: Extraction
+    extraction_prompt = get_custom_extraction_prompt(analysis_json, page_idx, total_pages)
+    
+    try:
+        response_extract = ollama_client.chat.completions.create(
+            model=Config.OLLAMA_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a precise medical data extractor. Output valid JSON only."},
+                {"role": "user", "content": f"PAGE TEXT:\n{page_text}\n\n{extraction_prompt}"}
+            ],
+            temperature=0.1,
             max_tokens=4000
         )
+        extract_content = response_extract.choices[0].message.content.strip()
+        debug_logs.append({
+            "step": "2_extraction",
+            "page": page_idx,
+            "prompt_preview": extraction_prompt[:200] + "...",
+            "response": extract_content
+        })
         
-        content = response.choices[0].message.content.strip()
-        
-        # Clean potential markdown code blocks if present
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0].strip()
+        # Parse Extraction
+        if "```json" in extract_content:
+            extract_content = extract_content.split("```json")[1].split("```")[0].strip()
+        elif "```" in extract_content:
+            extract_content = extract_content.split("```")[1].split("```")[0].strip()
             
-        corrected_data = json.loads(content)
-        
-        # Add debug info
-        corrected_data['debug_metadata'] = {
-            'raw_llm_response': content,
-            'model_used': Config.OLLAMA_MODEL
-        }
-        
-        # Force gender normalization on the LLM output
-        if 'personal_info' in corrected_data and 'patient_gender' in corrected_data['personal_info']:
-            corrected_data['personal_info']['patient_gender'] = normalize_gender(corrected_data['personal_info']['patient_gender'])
-
-        # Deduplicate medical fields
-        if 'medical_data' in corrected_data and isinstance(corrected_data['medical_data'], list):
-            corrected_data['medical_data'] = deduplicate_medical_data(corrected_data['medical_data'])
-            # STRICT Normality Check (Overrides LLM)
-            corrected_data['medical_data'] = recalculate_normality(corrected_data['medical_data'])
-
-        print("LLM self-correction complete.")
-        return corrected_data
+        extracted_data = json.loads(extract_content)
+        return extracted_data, debug_logs
 
     except Exception as e:
-        print(f"LLM correction failed: {e}")
-        # Fallback to original data if LLM fails
-        return extracted_data
+        print(f"Extraction failed for page {page_idx}: {e}")
+        debug_logs.append({"step": "2_extraction_error", "error": str(e)})
+        return None, debug_logs
+
 
 
 @vlm_ns.route('/chat')
@@ -511,29 +512,82 @@ class ChatResource(Resource):
                     return {"error": "Unsupported file type. Please upload a PDF or image."}, 400
 
 
-            print(f"Total extracted text length: {len(extracted_text)}")
+            # --- PER-PAGE SELF-PROMPTING EXTRACTION ---
             
-            # Extract personal and medical information (Initial Pass)
-            personal_info = extract_personal_info(extracted_text)
-            medical_info = extract_medical_data(extracted_text)
+            # 1. Identify valid pages from extracted_text
+            # We used "--- Page X ---" delimiter in extraction loop
+            # Split text by pages
+            pages = extracted_text.split("--- Page ")
+            # Filter empty splits and reconstruction
+            clean_pages = []
+            for p in pages:
+                if not p.strip(): continue
+                # p starts with "X ---\nText..."
+                try:
+                    header, content = p.split("---\n", 1)
+                    page_num = int(header.strip())
+                    clean_pages.append((page_num, content))
+                except:
+                    continue
+            
+            total_pages_count = len(clean_pages)
+            print(f"Detected {total_pages_count} pages for processing.")
+            
+            aggregated_medical_data = []
+            final_personal_info = {}
+            all_debug_logs = []
+            
+            # 2. Process Each Page
+            for page_idx, page_text in clean_pages:
+                print(f"Processing Page {page_idx}/{total_pages_count} with LLM...")
+                
+                extracted_data, logs = process_page_with_llm(page_text, page_idx, total_pages_count)
+                all_debug_logs.extend(logs)
+                
+                if extracted_data:
+                    # Merge Medical Data
+                    if 'medical_data' in extracted_data and isinstance(extracted_data['medical_data'], list):
+                        aggregated_medical_data.extend(extracted_data['medical_data'])
+                    
+                    # Merge/Update Personal Info (Take the most complete one)
+                    # For simplicity, if we find non-empty personal info, we update
+                    p_info = extracted_data.get('patient_info', {}) or extracted_data.get('personal_info', {})
+                    
+                    # Update if current is empty or new one has more keys
+                    if not final_personal_info:
+                        final_personal_info = p_info
+                    elif p_info.get('patient_name'):
+                        # If new page has a name, it might be better, or we might want to keep first page.
+                        # Usually page 1 is best for personal info.
+                        # Let's keep Page 1 info unless empty
+                        if not final_personal_info.get('patient_name'):
+                            final_personal_info = p_info
 
-            # Ensure fields are clean and consistent
-            # REMOVED FILTERING to keep empty values as requested by user
-            # cleaned_medical_info = {
-            #     field: details
-            #     for field, details in medical_info.items()
-            #     if details.get("value") or details.get("normal_range")
-            # }
+            # 3. Post-Processing
             
-            initial_data = {
-                "personal_info": personal_info,
-                "medical_info": medical_info # Use raw medical_info (includes empty fields)
+            # Deduplicate
+            aggregated_medical_data = deduplicate_medical_data(aggregated_medical_data)
+            
+            # Recalculate Normality
+            aggregated_medical_data = recalculate_normality(aggregated_medical_data)
+            
+            # Normalize Gender
+            if 'patient_gender' in final_personal_info:
+                final_personal_info['patient_gender'] = normalize_gender(final_personal_info['patient_gender'])
+
+            # Construct Final Response
+            final_response = {
+                "personal_info": final_personal_info,
+                "medical_info": aggregated_medical_data, # Return list directly for frontend compatibility
+                "medical_data": aggregated_medical_data, # Backup key
+                "debug_metadata": {
+                    "total_pages_processed": total_pages_count,
+                    "model_used": Config.OLLAMA_MODEL,
+                    "logs": all_debug_logs
+                }
             }
-
-            # Self-Correction Pass: Use LLM to verify and fix the data
-            final_data = verify_and_correct_with_llm(initial_data, extracted_text)
-
-            return final_data, 200
+            
+            return final_response, 200
 
         except Exception as e:
             import traceback
