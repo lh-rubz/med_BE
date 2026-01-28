@@ -334,7 +334,8 @@ class ChatResource(Resource):
                         
                         pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0)) # 2x zoom for better OCR
                         img_data = pix.tobytes("png")
-                        result = reader.readtext(img_data, detail=0)
+                        # Use paragraph=True to group text into lines/blocks, preserving table row structure better
+                        result = reader.readtext(img_data, detail=0, paragraph=True)
                         page_text = "\n".join(result)
                         extracted_text += f"\n--- Page {page_num + 1} ---\n{page_text}\n"
                     else:
@@ -344,7 +345,8 @@ class ChatResource(Resource):
             elif uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                 # Process image files using easyocr
                 print("Processing image file with OCR...")
-                result = reader.readtext(uploaded_file.read(), detail=0)
+                # Use paragraph=True here as well
+                result = reader.readtext(uploaded_file.read(), detail=0, paragraph=True)
                 extracted_text = "\n".join(result)
             else:
                 return {"error": "Unsupported file type. Please upload a PDF or image."}, 400
