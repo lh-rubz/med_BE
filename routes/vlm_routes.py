@@ -451,16 +451,40 @@ class ChatResource(Resource):
                     for page_num in range(len(pdf_document)):
                         page = pdf_document[page_num]
                         
-                        # Try direct text extraction first (faster and more accurate for native PDFs)
+                        # Try direct text extraction first
                         text = page.get_text()
                         
-                        # Check for Arabic characters in the extracted text
-                        # PyMuPDF often has issues with Arabic text direction/ordering, so we prefer OCR for Arabic
+                        # Check heuristics for OCR fallback:
+                        # 1. Arabic content (PyMuPDF isn't great with RTL)
                         has_arabic = bool(re.search(r'[\u0600-\u06FF]', text))
                         
-                        # If direct extraction yields little text, or contains Arabic (safer to use OCR), fall back to OCR
-                        if len(text.strip()) < 100 or has_arabic:
-                            reason = "contains Arabic" if has_arabic else "minimal text found"
+                        # 2. Check for images on page (Hybrid PDFs often have text headers but image tables)
+                        # get_images() returns list of images on page
+                        has_images = len(page.get_images()) > 0
+                        
+                        # 3. Text length - if huge amount of text (>800), it's likely a full native PDF
+                        # If minimal text (<800), it might just be headers/footers with an image body
+                        
+                        # FORCE OCR if:
+                        # - Contains Arabic (Safety)
+                        # - Has Images AND text is not overwhelming (Hybrid case)
+                        # - Text is very short (Scanned/Image-only)
+                        
+                        should_use_ocr = False
+                        reason = ""
+                        
+                        if has_arabic:
+                            should_use_ocr = True
+                            reason = "contains Arabic"
+                        elif len(text.strip()) < 800:
+                             should_use_ocr = True
+                             reason = "low text count (< 800 chars)"
+                             # If it has images, it's almost certainly a hybrid/scanned PDF
+                             if has_images:
+                                 reason += " + has images"
+                        
+                        
+                        if should_use_ocr:
                             print(f"Page {page_global_idx}: {reason}, using OCR...")
                             
                             pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0)) # 2x zoom for better OCR
@@ -470,7 +494,7 @@ class ChatResource(Resource):
                             page_text = "\n".join(result)
                             extracted_text += f"\n--- Page {page_global_idx} ---\n{page_text}\n"
                         else:
-                            print(f"Page {page_global_idx}: extracted {len(text)} characters using native text extraction")
+                            print(f"Page {page_global_idx}: Native PDF extraction ({len(text)} chars)")
                             extracted_text += f"\n--- Page {page_global_idx} ---\n{text}\n"
                         
                         page_global_idx += 1
