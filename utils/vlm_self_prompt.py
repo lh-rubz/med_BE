@@ -165,6 +165,12 @@ Page {idx}/{total_pages} - You ALREADY analyzed this report and found {total_row
 5. Gender: Convert {analysis.get('patient_gender_value', 'ذكر/أنثى')} to English "Male" or "Female"
 6. Normal ranges: Read from IMAGE, not from memory! If range says "(10-15)", write "(10-15)", NOT "(0-0.75)"!
 
+🚨 ANTI-SLIP VALIDATION 🚨
+- Make sure "WBC" (White Blood Cells) gets its OWN value.
+- Make sure "Neutrophils" gets its OWN value.
+- Do NOT shift values down. If a test is missing, skip the row, do NOT assign its value to the next test.
+- CHECK ALIGNMENT: The value must be on the SAME HORIZONTAL LINE as the test name.
+
 🔍 CRITICAL EXTRACTION RULES:
 1. For EACH field: extract test name EXACTLY as shown (preserve Arabic if Arabic, English if English)
 2. Extract value ONLY if it exists in image - do NOT guess or invent

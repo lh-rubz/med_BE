@@ -138,7 +138,14 @@ CRITICAL RULES
    - If the cell is empty, return "".
    - If the cell has "-", return "".
    - NEVER create a range like "(0-0.75)" if it is not in the image.
-6) EXTRACT EVERY ROW: Start at row 1, go to row 2, row 3... until you reach the LAST row at the bottom of the table.
+6) EXTRACT EVERY ROW: Start at row 1, go to row 2, row 3... until you reach the LAST row.
+
+🚨 ANTI-SLIP PROTOCOL (CRITICAL) 🚨
+- You must NOT let values "slip" to the wrong row.
+- If Row 4 is "WBC" with value "7.1", and Row 5 is "Neutrophils" with value "4.1":
+  - CORRECT: {{ "field_name": "WBC", "field_value": "7.1" }}, {{ "field_name": "Neutrophils", "field_value": "4.1" }}
+  - WRONG: {{ "field_name": "Neutrophils", "field_value": "7.1" }} (This steals WBC's value!)
+- ALWAYS check: "Is this value EXACTLY to the right of this test name?"
 
 HOW TO READ TABLES
 - Typical headers Arabic: "الفحص", "النتيجة", "الوحدة", "المعدل الطبيعي".
@@ -152,6 +159,7 @@ CRITICAL: Use EXTREME caution with row boundaries. Trace horizontal lines precis
 2) field_name: Read ONLY from the far left cell of THIS row's boundary.
 3) field_value: Trace straight RIGHT along THIS row's line to the NEXT column. STOP at the vertical boundary.
    - Do NOT look at other rows' values.
+   - CHECK: Is this value physically aligned with the Test Name? If it's higher or lower, STOP.
    - If there is NO value in this cell for THIS row, return "".
 4) field_unit: Continue RIGHT along THIS row's line to the UNIT column. STOP at vertical boundary.
    - Extract the unit symbol from THIS row ONLY.
