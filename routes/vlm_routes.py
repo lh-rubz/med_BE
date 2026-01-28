@@ -129,7 +129,68 @@ def deduplicate_medical_data(medical_data):
     "Drug Screen/Toxicology",
     "General Medical Report",
     "Other"
+    "Other"
 ]
+
+def recalculate_normality(medical_data):
+    """
+    Programmatically recalculate is_normal based on value and range.
+    Overrides LLM hallucinations.
+    """
+    if not medical_data:
+        return medical_data
+        
+    for item in medical_data:
+        try:
+            val_str = str(item.get('field_value', '')).strip()
+            range_str = str(item.get('normal_range', '')).strip()
+            
+            # Skip empty
+            if not val_str or not range_str or val_str.lower() in ['n/a', 'nan', ''] or range_str in ['-', '']:
+                item['is_normal'] = None
+                continue
+                
+            # Parse Value
+            # Remove <, >, units, commas
+            val_clean = re.sub(r'[^\d\.-]', '', val_str)
+            if not val_clean:
+                continue
+            val = float(val_clean)
+            
+            # Parse Range
+            # Handle (min-max)
+            min_val = float('-inf')
+            max_val = float('inf')
+            
+            # Standard "min-max" or "(min-max)"
+            range_match = re.search(r'(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)', range_str)
+            if range_match:
+                min_val = float(range_match.group(1))
+                max_val = float(range_match.group(2))
+            
+            # Handle "< max"
+            elif '<' in range_str:
+                num_match = re.search(r'(\d+(?:\.\d+)?)', range_str)
+                if num_match:
+                    max_val = float(num_match.group(1))
+            
+            # Handle "> min"
+            elif '>' in range_str:
+                num_match = re.search(r'(\d+(?:\.\d+)?)', range_str)
+                if num_match:
+                    min_val = float(num_match.group(1))
+            
+            # Check Normality
+            if min_val != float('-inf') or max_val != float('inf'):
+                is_norm = (val >= min_val and val <= max_val)
+                item['is_normal'] = is_norm
+                
+        except Exception as e:
+            # On error, leave as is or set null
+            # item['is_normal'] = None
+            pass
+            
+    return medical_data
 
 # API Models for file upload
 # Using reqparse for better Swagger file upload compatibility
@@ -333,6 +394,8 @@ Return ONLY the raw JSON object. No markdown formatting, no explanations.
         # Deduplicate medical fields
         if 'medical_data' in corrected_data and isinstance(corrected_data['medical_data'], list):
             corrected_data['medical_data'] = deduplicate_medical_data(corrected_data['medical_data'])
+            # STRICT Normality Check (Overrides LLM)
+            corrected_data['medical_data'] = recalculate_normality(corrected_data['medical_data'])
 
         print("LLM self-correction complete.")
         return corrected_data
@@ -359,51 +422,64 @@ class ChatResource(Resource):
 
         try:
             extracted_text = ""
-            print(f"Processing file: {uploaded_file.filename}")
+            files = request.files.getlist('file')
+            
+            if not files:
+                 return {"error": "No files provided."}, 400
+                 
+            print(f"Processing {len(files)} files...")
+            
+            page_global_idx = 1
+            
+            for uploaded_file in files:
+                print(f"Processing file: {uploaded_file.filename}")
+    
+                if uploaded_file.filename.lower().endswith('.pdf'):
+                    # Process multi-page PDF files
+                    # Use stream=uploaded_file.read() to load the file into memory for PyMuPDF
+                    file_content = uploaded_file.read()
+                    pdf_document = fitz.open(stream=file_content, filetype="pdf")
+                    
+                    print(f"PDF has {len(pdf_document)} pages")
+                    
+                    for page_num in range(len(pdf_document)):
+                        page = pdf_document[page_num]
+                        
+                        # Try direct text extraction first (faster and more accurate for native PDFs)
+                        text = page.get_text()
+                        
+                        # Check for Arabic characters in the extracted text
+                        # PyMuPDF often has issues with Arabic text direction/ordering, so we prefer OCR for Arabic
+                        has_arabic = bool(re.search(r'[\u0600-\u06FF]', text))
+                        
+                        # If direct extraction yields little text, or contains Arabic (safer to use OCR), fall back to OCR
+                        if len(text.strip()) < 100 or has_arabic:
+                            reason = "contains Arabic" if has_arabic else "minimal text found"
+                            print(f"Page {page_global_idx}: {reason}, using OCR...")
+                            
+                            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0)) # 2x zoom for better OCR
+                            img_data = pix.tobytes("png")
+                            # Use paragraph=True to group text into lines/blocks, preserving table row structure better
+                            result = reader.readtext(img_data, detail=0, paragraph=True)
+                            page_text = "\n".join(result)
+                            extracted_text += f"\n--- Page {page_global_idx} ---\n{page_text}\n"
+                        else:
+                            print(f"Page {page_global_idx}: extracted {len(text)} characters using native text extraction")
+                            extracted_text += f"\n--- Page {page_global_idx} ---\n{text}\n"
+                        
+                        page_global_idx += 1
+                            
+                elif uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    # Process image files using easyocr
+                    print(f"Processing image file {uploaded_file.filename} with OCR...")
+                    # Use paragraph=True here as well
+                    result = reader.readtext(uploaded_file.read(), detail=0, paragraph=True)
+                    page_text = "\n".join(result)
+                    extracted_text += f"\n--- Page {page_global_idx} ---\n{page_text}\n"
+                    page_global_idx += 1
+                else:
+                    return {"error": "Unsupported file type. Please upload a PDF or image."}, 400
 
-            if uploaded_file.filename.lower().endswith('.pdf'):
-                # Process multi-page PDF files
-                # Use stream=uploaded_file.read() to load the file into memory for PyMuPDF
-                file_content = uploaded_file.read()
-                pdf_document = fitz.open(stream=file_content, filetype="pdf")
-                
-                print(f"PDF has {len(pdf_document)} pages")
-                
-                for page_num in range(len(pdf_document)):
-                    page = pdf_document[page_num]
-                    
-                    # Try direct text extraction first (faster and more accurate for native PDFs)
-                    text = page.get_text()
-                    
-                    # Check for Arabic characters in the extracted text
-                    # PyMuPDF often has issues with Arabic text direction/ordering, so we prefer OCR for Arabic
-                    has_arabic = bool(re.search(r'[\u0600-\u06FF]', text))
-                    
-                    # If direct extraction yields little text, or contains Arabic (safer to use OCR), fall back to OCR
-                    if len(text.strip()) < 100 or has_arabic:
-                        reason = "contains Arabic" if has_arabic else "minimal text found"
-                        print(f"Page {page_num + 1}: {reason}, using OCR...")
-                        
-                        pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0)) # 2x zoom for better OCR
-                        img_data = pix.tobytes("png")
-                        # Use paragraph=True to group text into lines/blocks, preserving table row structure better
-                        result = reader.readtext(img_data, detail=0, paragraph=True)
-                        page_text = "\n".join(result)
-                        extracted_text += f"\n--- Page {page_num + 1} ---\n{page_text}\n"
-                print(f"Page {page_num + 1} processed. Text length: {len(page_text)}")
-                    else:
-                        print(f"Page {page_num + 1}: extracted {len(text)} characters using native text extraction")
-                        extracted_text += f"\n--- Page {page_num + 1} ---\n{text}\n"
-                    print(f"Page {page_num + 1} processed (Native). Text length: {len(text)}")
-                        
-            elif uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-                # Process image files using easyocr
-                print("Processing image file with OCR...")
-                # Use paragraph=True here as well
-                result = reader.readtext(uploaded_file.read(), detail=0, paragraph=True)
-                extracted_text = "\n".join(result)
-            else:
-                return {"error": "Unsupported file type. Please upload a PDF or image."}, 400
 
             print(f"Total extracted text length: {len(extracted_text)}")
             
