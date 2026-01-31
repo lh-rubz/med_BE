@@ -626,10 +626,11 @@ class ChatResource(Resource):
                                     final_personal_info = p_info
 
                     # 3. Post-Processing
-                    yield f"data: {json.dumps({'percent': 75, 'message': 'Verifying consistency...'})}\n\n"
+                    # yield f"data: {json.dumps({'percent': 75, 'message': 'Verifying consistency...'})}\n\n"
                     
-                    # 3a. Self-Correction
-                    consolidated_data = recheck_data_consistency(aggregated_medical_data, extracted_text)
+                    # 3a. Self-Correction (DISABLED per user request)
+                    # consolidated_data = recheck_data_consistency(aggregated_medical_data, extracted_text)
+                    consolidated_data = aggregated_medical_data
 
                     # 3b. Recalculate Normality
                     yield f"data: {json.dumps({'percent': 85, 'message': 'Validating medical ranges...'})}\n\n"
