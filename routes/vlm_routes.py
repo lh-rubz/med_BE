@@ -319,14 +319,14 @@ def generate_prompt_for_page(page_text, page_idx, total_pages):
 
     OUTPUT FORMAT:
     [
-        {
+        {{
             "field_name": "",
             "field_value": "",
             "field_unit": "",
             "normal_range": "",
             "is_normal": true/false/null,
             "notes": ""
-        }
+        }}
     ]
     """
 
