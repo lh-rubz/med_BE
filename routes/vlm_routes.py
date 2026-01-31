@@ -579,15 +579,11 @@ class ChatResource(Resource):
                     clean_pages = []
 
                     page_global_idx = 1
-                    for uploaded_file in uploaded_files:
-                         # ... (Text Extraction Logic from previous lines would logically be here, but since we are replacing a block that STARTS after extraction, we need to be careful)
-                         # Wait, the extraction loop was weirdly outside or before line 566.
-                         # Let's assume 'extracted_text' and 'uploaded_files' are available or we need to respect the code structure.
-                         # CHECKING CONTEXT: 'extracted_text' seems to vary. 
-                         # Actuallly, line 566 comes AFTER the text extraction loop (lines 503-562).
-                         # So 'extracted_text' is ALREADY populated.  We just need to process it.
+                    # 1. Text Extraction Strategy
+                    total_pages_count = 0
+                    clean_pages = []
 
-                         pass 
+                    # Note: text extraction happened in outer scope, using 'extracted_text' variable. 
 
                     # 1. Identify valid pages from extracted_text (which is available from outer scope if we are careful, but wait, 'extracted_text' is a local variable in post method...)
                     # We need to capture 'extracted_text' from the closure.
