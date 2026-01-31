@@ -126,13 +126,16 @@ def extract_medical_data(text: str) -> Dict[str, Dict[str, str]]:
                 lower_bound = float('-inf')
                 upper_bound = float('inf')
                 
+                # Clean normal_range of parentheses and brackets
+                clean_range = normal_range.replace("(", "").replace(")", "").replace("[", "").replace("]", "").strip()
+                
                 # Handle "< 5.0" or "> 5.0" formats
-                if "<" in normal_range:
-                    upper_bound = float(normal_range.replace("<", "").strip())
-                elif ">" in normal_range:
-                    lower_bound = float(normal_range.replace(">", "").strip())
-                elif "-" in normal_range:
-                    range_parts = normal_range.split("-")
+                if "<" in clean_range:
+                    upper_bound = float(clean_range.replace("<", "").strip())
+                elif ">" in clean_range:
+                    lower_bound = float(clean_range.replace(">", "").strip())
+                elif "-" in clean_range:
+                    range_parts = clean_range.split("-")
                     if len(range_parts) == 2:
                         lower_bound = float(range_parts[0].strip())
                         upper_bound = float(range_parts[1].strip())

@@ -413,6 +413,72 @@ def process_page_with_llm(page_text, page_idx, total_pages):
 
 
 
+
+def verify_and_correct_with_llm(extracted_data, raw_text):
+    """
+    Second pass: Use LLM to verify extracted data against raw text.
+    Corrects hallucinations, misaligned values, and swaps.
+    """
+    if not extracted_data:
+        return []
+
+    print("  🕵️ Starting Self-Correction Pass...")
+    
+    # Context window management
+    text_context = raw_text[:30000] # Limit to avoid context overflow
+    
+    prompt = f"""
+    TASK: Verify and Correct Medical Data.
+    
+    RAW REPORT TEXT:
+    {text_context}
+    
+    EXTRACTED DATA (JSON):
+    {json.dumps(extracted_data, ensure_ascii=False)}
+    
+    INSTRUCTIONS:
+    1. Check every field in EXTRACTED DATA against RAW REPORT TEXT.
+    2. CORRECTIONS REQUIRED:
+       - Fix numerical values (e.g., "5.2" vs "52").
+       - Fix units (e.g., "g/L" vs "g/dL").
+       - Fix names (Doctor vs Patient).
+       - REMOVE hallucinated fields (not in text).
+       - ADD missing fields (visible in text but missing in JSON).
+    3. RE-EVALUATE "is_normal":
+       - true: Value is strictly within Range.
+       - false: Value is outside Range.
+       - null: No range.
+    
+    OUTPUT:
+    - Return ONLY the corrected JSON list of objects.
+    """
+    
+    try:
+        response = ollama_client.chat.completions.create(
+            model=Config.OLLAMA_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a precise medical data auditor. Output only valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            max_tokens=4000
+        )
+        content = response.choices[0].message.content.strip()
+        
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+            
+        corrected_data = json.loads(content)
+        print(f"  ✅ Self-Correction complete. Items: {len(extracted_data)} -> {len(corrected_data)}")
+        return corrected_data
+        
+    except Exception as e:
+        print(f"  ⚠️ Self-Correction failed: {e}")
+        return extracted_data
+
+
 @vlm_ns.route('/chat')
 class ChatResource(Resource):
     def post(self):
@@ -565,11 +631,15 @@ class ChatResource(Resource):
 
             # 3. Post-Processing
             
+            # 3a. Self-Correction (LLM Pass) - Requested by user to ensure 100% accuracy
+            aggregated_medical_data = verify_and_correct_with_llm(aggregated_medical_data, extracted_text)
+
+            # 3b. Recalculate Normality (Programmatic Math Check)
+            # Re-enabled to fix "is_normal" accuracy issues (User: "showing everything as normal")
+            aggregated_medical_data = recalculate_normality(aggregated_medical_data)
+            
             # Deduplicate - DISABLED based on user request ("return data AS IT IS")
             # aggregated_medical_data = deduplicate_medical_data(aggregated_medical_data)
-            
-            # Recalculate Normality
-            aggregated_medical_data = recalculate_normality(aggregated_medical_data)
             
             # Normalize Gender
             if 'patient_gender' in final_personal_info:
