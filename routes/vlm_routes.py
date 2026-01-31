@@ -55,6 +55,42 @@ def normalize_gender(gender_value):
 REPORT_TYPES = [
     "Complete Blood Count (CBC)",
     "Lipid Panel",
+    "Comprehensive Metabolic Panel (CMP)",
+    "Basic Metabolic Panel (BMP)",
+    "Liver Function Test (LFT)",
+    "Kidney Function Test (KFT)",
+    "Thyroid Function Test (TFT)",
+    "Hemoglobin A1C (HbA1c)",
+    "Urinalysis",
+    "Vitamin D Test",
+    "Iron Studies",
+    "Coagulation Panel (PT/INR/PTT)",
+    "Cardiac Enzymes (Troponin)",
+    "Electrolyte Panel",
+    "Hormone Panel",
+    "Tumor Markers",
+    "Infectious Disease Test",
+    "Allergy Test",
+    "X-Ray",
+    "CT Scan",
+    "MRI Scan",
+    "Ultrasound",
+    "Mammogram",
+    "DEXA Scan (Bone Density)",
+    "ECG/EKG (Electrocardiogram)",
+    "Echocardiogram",
+    "Stress Test",
+    "Pulmonary Function Test (PFT)",
+    "Colonoscopy Report",
+    "Endoscopy Report",
+    "Biopsy Report",
+    "Pathology Report",
+    "Genetic Test",
+    "COVID-19 Test",
+    "Drug Screen/Toxicology",
+    "General Medical Report",
+    "Other"
+]
 
 def deduplicate_medical_data(medical_data):
     """
@@ -93,44 +129,6 @@ def deduplicate_medical_data(medical_data):
             
     return list(unique_map.values())
 
-
-    "Comprehensive Metabolic Panel (CMP)",
-    "Basic Metabolic Panel (BMP)",
-    "Liver Function Test (LFT)",
-    "Kidney Function Test (KFT)",
-    "Thyroid Function Test (TFT)",
-    "Hemoglobin A1C (HbA1c)",
-    "Urinalysis",
-    "Vitamin D Test",
-    "Iron Studies",
-    "Coagulation Panel (PT/INR/PTT)",
-    "Cardiac Enzymes (Troponin)",
-    "Electrolyte Panel",
-    "Hormone Panel",
-    "Tumor Markers",
-    "Infectious Disease Test",
-    "Allergy Test",
-    "X-Ray",
-    "CT Scan",
-    "MRI Scan",
-    "Ultrasound",
-    "Mammogram",
-    "DEXA Scan (Bone Density)",
-    "ECG/EKG (Electrocardiogram)",
-    "Echocardiogram",
-    "Stress Test",
-    "Pulmonary Function Test (PFT)",
-    "Colonoscopy Report",
-    "Endoscopy Report",
-    "Biopsy Report",
-    "Pathology Report",
-    "Genetic Test",
-    "COVID-19 Test",
-    "Drug Screen/Toxicology",
-    "General Medical Report",
-    "Other"
-    "Other"
-]
 
 def recalculate_normality(medical_data):
     """
