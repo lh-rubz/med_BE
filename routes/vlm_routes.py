@@ -135,7 +135,7 @@ def deduplicate_medical_data(medical_data):
 def recalculate_normality(medical_data):
     """
     Programmatically recalculate is_normal based on value and range.
-    Overrides LLM hallucinations.
+    Handles complex ranges and missing values.
     """
     if not medical_data:
         return medical_data
@@ -337,60 +337,66 @@ class ExtractPersonalInfoFile(Resource):
         except Exception as e:
             return {"error": f"Failed to process file: {str(e)}"}, 500
 
+def generate_prompt_for_page(page_text, page_idx, total_pages):
+    """
+    Generate a strict and precise prompt for the model based on the page content.
+    """
+    return f"""
+    TASK: Extract medical data from the report page.
+
+    PAGE INDEX: {page_idx}/{total_pages}
+
+    PAGE CONTENT:
+    {page_text}
+
+    INSTRUCTIONS:
+    1. Extract all medical fields with their values, units, and normal ranges.
+    2. For each field, calculate and set "is_normal" based on the value and range.
+    3. Ensure all extracted data is accurate and matches the page content.
+    4. Handle both Arabic and English text correctly.
+    5. Return the output as a JSON list of objects.
+
+    OUTPUT FORMAT:
+    [
+        {
+            "field_name": "",
+            "field_value": "",
+            "field_unit": "",
+            "normal_range": "",
+            "is_normal": true/false/null,
+            "notes": ""
+        }
+    ]
+    """
+
 def process_page_with_llm(page_text, page_idx, total_pages):
     """
-    Process a single page using Self-Prompting strategy:
-    1. Analyze the page (Structure, Row Count)
-    2. Generate Custom Prompt
-    3. Extract Data
+    Process a single page using a two-step strategy:
+    1. Generate a strict prompt for the page.
+    2. Use the generated prompt to extract data.
     """
     debug_logs = []
-    
-    # Step 1: Analysis
-    analysis_prompt = get_report_analysis_prompt(page_idx, total_pages)
-    
-    # Run Analysis LLM Call
-    try:
-        response_analysis = ollama_client.chat.completions.create(
-            model=Config.OLLAMA_MODEL,
-            messages=[
-                {"role": "system", "content": "You are a precise medical report analyzer. Output valid JSON only."},
-                {"role": "user", "content": f"PAGE TEXT:\n{page_text}\n\n{analysis_prompt}"}
-            ],
-            temperature=0.1,
-            max_tokens=2000
-        )
-        analysis_content = response_analysis.choices[0].message.content.strip()
-        debug_logs.append({
-            "step": "1_analysis",
-            "page": page_idx,
-            "prompt_preview": analysis_prompt[:200] + "...",
-            "response": analysis_content
-        })
-        
-        # Parse Analysis
-        if "```json" in analysis_content:
-            analysis_content = analysis_content.split("```json")[1].split("```")[0].strip()
-        elif "```" in analysis_content:
-            analysis_content = analysis_content.split("```")[1].split("```")[0].strip()
-            
-        analysis_json = json.loads(analysis_content)
-        
-    except Exception as e:
-        print(f"Analysis failed for page {page_idx}: {e}")
-        debug_logs.append({"step": "1_analysis_error", "error": str(e)})
-        # Fallback analysis
-        analysis_json = {"total_test_rows": 20, "report_language": "Unknown"}
 
-    # Step 2: Extraction
-    extraction_prompt = get_custom_extraction_prompt(analysis_json, page_idx, total_pages)
-    
+    # Step 1: Generate Prompt
+    try:
+        generated_prompt = generate_prompt_for_page(page_text, page_idx, total_pages)
+        debug_logs.append({
+            "step": "1_generate_prompt",
+            "page": page_idx,
+            "prompt_preview": generated_prompt[:200] + "..."
+        })
+    except Exception as e:
+        print(f"Prompt generation failed for page {page_idx}: {e}")
+        debug_logs.append({"step": "1_generate_prompt_error", "error": str(e)})
+        return None, debug_logs
+
+    # Step 2: Extract Data
     try:
         response_extract = ollama_client.chat.completions.create(
             model=Config.OLLAMA_MODEL,
             messages=[
                 {"role": "system", "content": "You are a precise medical data extractor. Output valid JSON only."},
-                {"role": "user", "content": f"PAGE TEXT:\n{page_text}\n\n{extraction_prompt}"}
+                {"role": "user", "content": generated_prompt}
             ],
             temperature=0.1,
             max_tokens=4000
@@ -399,16 +405,15 @@ def process_page_with_llm(page_text, page_idx, total_pages):
         debug_logs.append({
             "step": "2_extraction",
             "page": page_idx,
-            "prompt_preview": extraction_prompt[:200] + "...",
-            "response": extract_content
+            "response": extract_content[:200] + "..."
         })
-        
+
         # Parse Extraction
         if "```json" in extract_content:
             extract_content = extract_content.split("```json")[1].split("```")[0].strip()
         elif "```" in extract_content:
             extract_content = extract_content.split("```")[1].split("```")[0].strip()
-            
+
         extracted_data = json.loads(extract_content)
         return extracted_data, debug_logs
 
