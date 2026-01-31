@@ -891,15 +891,29 @@
                     html += '<h4>Medical Info</h4><table class="medical-data-table">';
                     html += '<thead><tr><th>Field</th><th>Value</th><th>Range</th><th>Normal?</th></tr></thead><tbody>';
                     
-                    for (const [key, details] of Object.entries(data.medical_info)) {
-                        const isNormal = details.is_normal === "Yes" ? "value-normal" : (details.is_normal === "No" ? "value-abnormal" : "value-unknown");
+                    // Handle both Array and Object formats
+                    const items = Array.isArray(data.medical_info) ? data.medical_info : Object.entries(data.medical_info).map(([k, v]) => ({ field_name: k, ...v }));
+
+                    items.forEach(details => {
+                        const isNorm = details.is_normal;
+                        let isNormalClass = "value-unknown";
+                        let isNormalText = details.is_normal || '-';
+
+                        if (isNorm === true || isNorm === "Yes") {
+                            isNormalClass = "value-normal";
+                            isNormalText = "Yes";
+                        } else if (isNorm === false || isNorm === "No") {
+                            isNormalClass = "value-abnormal";
+                            isNormalText = "No";
+                        }
+
                         html += `<tr>
-                            <td>${key}</td>
-                            <td>${details.value || ''}</td>
+                            <td>${details.field_name || 'N/A'}</td>
+                            <td>${details.field_value || details.value || ''}</td>
                             <td>${details.normal_range || ''}</td>
-                            <td class="${isNormal}">${details.is_normal || '-'}</td>
+                            <td class="${isNormalClass}">${isNormalText}</td>
                         </tr>`;
-                    }
+                    });
                     html += '</tbody></table>';
                 }
 

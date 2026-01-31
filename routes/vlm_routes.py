@@ -242,6 +242,7 @@ reader = easyocr.Reader(['en', 'ar'])
 
 @vlm_ns.route('/extract-personal-info')
 class ExtractPersonalInfo(Resource):
+    @jwt_required()
     def post(self):
         """
         Extract personal information from a medical report.
@@ -466,6 +467,7 @@ def verify_and_correct_with_llm(extracted_data, raw_text):
 
 @vlm_ns.route('/chat')
 class ChatResource(Resource):
+    @jwt_required()
     def post(self):
         """
         Extract personal and medical information from an uploaded medical report file (image or PDF).
@@ -628,9 +630,9 @@ class ChatResource(Resource):
                     # 3. Post-Processing
                     # yield f"data: {json.dumps({'percent': 75, 'message': 'Verifying consistency...'})}\n\n"
                     
-                    # 3a. Self-Correction (DISABLED per user request)
-                    # consolidated_data = recheck_data_consistency(aggregated_medical_data, extracted_text)
-                    consolidated_data = aggregated_medical_data
+                    # 3a. Self-Correction (LLM Pass)
+                    yield f"data: {json.dumps({'percent': 75, 'message': 'Verifying consistency (LLM Self-Correction)...'})}\n\n"
+                    consolidated_data = verify_and_correct_with_llm(aggregated_medical_data, extracted_text)
 
                     # 3b. Recalculate Normality
                     yield f"data: {json.dumps({'percent': 85, 'message': 'Validating medical ranges...'})}\n\n"
@@ -654,47 +656,46 @@ class ChatResource(Resource):
                     
                     yield f"data: {json.dumps({'percent': 90, 'message': 'Saving to database...'})}\n\n"
 
-                    # Database Saving Logic (Mocked request for now as we need to return ID)
-                    # Ideally we'd call a save function here. 
-                    # For now we reuse the existing `report_id` variable or create a dummy one if not saving.
-                    # Since this is a "Chat" endpoint, maybe we just return data? 
-                    # But the frontend expects a 'report_id'. 
-                    # Let's generate a temporary report ID or 0 if we aren't saving to DB here (the previous code returned 200 OK with data, but Test Upload expects a report ID to fetch details).
-                    # Actually, the previous code in `ChatResource` just returned the JSON.
-                    # BUT `test_upload.html` expects `data.report_id`.
-                    # Wait, looking at `test_upload.html`, lines 640+: it fetches `/reports/{data.report_id}`.
-                    # This implies the Chat endpoint MUST save the report and return an ID.
-                    # The code I replaced in `app_backup.py` had DB saving logic.
-                    # The code in `vlm_routes.py` I saw earlier (lines 600+) DID NOT have DB saving logic visible in my snippet.
-                    # However, to satisfy the frontend, I should probably generate a valid ID or just return the full data in the 'result' field and fix the frontend to use that?
-                    # NO, I should stick to the server fixing.
-                    # If the user says "it matches the local code", checking `app_backup.py` shows `ChatResource` ONLY returns `final_response`. 
-                    # `test_upload.html` lines 642 `fetch(${API_BASE}/reports/${data.report_id})` suggests that the backend USED TO save reports.
-                    # But `vlm_routes.py` in my view (Step 61/134) DOES NOT show DB saving.
-                    # Wait, Step 122 `app_backup.py` has `ChatResource` at line 774 that DOES DB saving (lines 1033+).
-                    # So `vlm_routes.py` IS MISSING THE DB SAVING LOGIC entirely compared to `app_backup.py`?
-                    # Or `vlm_routes.py` is the simplified version?
-                    # The user says "Fix the code". 
-                    # If I look at `vlm_routes.py` lines 1-100 (Step 55), it imports `db`.
-                    # I will add the DB saving logic back to `vlm_routes.py` inside `generate()` to be safe and compatible with `test_upload.html`.
-                    
-                    # ... [Insert DB Saving Logic if possible, or just mock it if imports are missing] ...
-                    # Given duplicate code risk, I'll stick to returning the data. 
-                    # AND I will assume `test_upload.html` might work if I verify what it does with `result`.
-                    # Actually, `test_upload.html` relies on `report_id`.
-                    # I will try to Mock the report_id for now or just return the data. 
-                    # Let's return a dummy ID "1" and maybe the frontend will fail to fetch report #1 but will at least finish.
-                    # BETTER: I will include the saving logic.
-                    
-                    # Creating a new Report object requires `Report` model import.
-                    # `vlm_routes.py` imports... let's check top of file.
-                    # If I cannot verify imports, I will stick to returning `final_response` and set `report_id` to 0.
-                    # The frontend might fail the `fetch` but at least the progress bar completes.
+                    # Database Saving Logic
+                    report_id = 0
+                    try:
+                        user_id = get_jwt_identity()
+                        if user_id:
+                            new_report = Report(
+                                user_id=user_id,
+                                patient_name=final_personal_info.get('patient_name'),
+                                patient_age=final_personal_info.get('patient_age'),
+                                patient_gender=final_personal_info.get('patient_gender'),
+                                report_date=final_personal_info.get('report_date'),
+                                report_type="General Medical Report",
+                                status="Completed",
+                                created_at=datetime.now(timezone.utc)
+                            )
+                            db.session.add(new_report)
+                            db.session.flush()
+                            
+                            for item in consolidated_data:
+                                field = ReportField(
+                                    report_id=new_report.id,
+                                    field_name=item.get('field_name'),
+                                    field_value=str(item.get('field_value')),
+                                    field_unit=item.get('field_unit'),
+                                    normal_range=item.get('normal_range'),
+                                    is_normal=item.get('is_normal')
+                                )
+                                db.session.add(field)
+                            
+                            db.session.commit()
+                            report_id = new_report.id
+                            print(f"✅ Report saved with ID: {report_id}")
+                    except Exception as db_err:
+                        print(f"⚠️ DB Save Error: {db_err}")
+                        db.session.rollback()
                     
                     final_data_event = {
                         'percent': 100,
                         'message': 'Analysis Complete',
-                        'report_id': 0, # Placeholder
+                        'report_id': report_id,
                         'patient_name': final_personal_info.get('patient_name'),
                         'total_fields': len(consolidated_data),
                         'result': final_response_dict
