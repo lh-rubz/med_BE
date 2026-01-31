@@ -380,6 +380,7 @@ def process_page_with_llm(page_text, page_idx, total_pages):
     # Step 1: Generate Prompt
     try:
         generated_prompt = generate_prompt_for_page(page_text, page_idx, total_pages)
+        print(f"Generated Prompt for Page {page_idx}/{total_pages}:\n{generated_prompt}")  # Print the prompt to console
         debug_logs.append({
             "step": "1_generate_prompt",
             "page": page_idx,
