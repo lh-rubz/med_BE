@@ -139,58 +139,64 @@ def recalculate_normality(medical_data):
     """
     if not medical_data:
         return medical_data
-        
+
     for item in medical_data:
         try:
             val_str = str(item.get('field_value', '')).strip()
             range_str = str(item.get('normal_range', '')).strip()
-            
+
             # Skip empty
             if not val_str or not range_str or val_str.lower() in ['n/a', 'nan', ''] or range_str in ['-', '']:
                 item['is_normal'] = None
                 continue
-                
+
             # Parse Value
-            # Remove <, >, units, commas
-            val_clean = re.sub(r'[^\d\.-]', '', val_str)
+            val_clean = re.sub(r'[^\\d\.\-]', '', val_str)
             if not val_clean:
                 continue
+
             val = float(val_clean)
-            
+
             # Parse Range
-            # Handle (min-max)
             min_val = float('-inf')
             max_val = float('inf')
-            
-            # Standard "min-max" or "(min-max)"
+
             range_match = re.search(r'(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)', range_str)
             if range_match:
                 min_val = float(range_match.group(1))
                 max_val = float(range_match.group(2))
-            
-            # Handle "< max"
             elif '<' in range_str:
                 num_match = re.search(r'(\d+(?:\.\d+)?)', range_str)
                 if num_match:
                     max_val = float(num_match.group(1))
-            
-            # Handle "> min"
             elif '>' in range_str:
                 num_match = re.search(r'(\d+(?:\.\d+)?)', range_str)
                 if num_match:
                     min_val = float(num_match.group(1))
-            
+
             # Check Normality
             if min_val != float('-inf') or max_val != float('inf'):
-                is_norm = (val >= min_val and val <= max_val)
+                is_norm = (min_val <= val <= max_val)
                 item['is_normal'] = is_norm
-                
+
         except Exception as e:
-            # On error, leave as is or set null
-            # item['is_normal'] = None
-            pass
-            
+            item['is_normal'] = None
+
     return medical_data
+
+def recheck_data_consistency(medical_data, raw_text):
+    """
+    Recheck data consistency until two consecutive checks produce the same results.
+    """
+    previous_data = None
+    current_data = medical_data
+
+    while previous_data != current_data:
+        previous_data = current_data
+        corrected_data = verify_and_correct_with_llm(previous_data, raw_text)
+        current_data = recalculate_normality(corrected_data)
+
+    return current_data
 
 # API Models for file upload
 # Using reqparse for better Swagger file upload compatibility
@@ -448,7 +454,8 @@ def verify_and_correct_with_llm(extracted_data, raw_text):
        - true: Value is strictly within Range.
        - false: Value is outside Range.
        - null: No range.
-    
+       - The model itself must calculate and set the "is_normal" field based on the value and range.
+
     OUTPUT:
     - Return ONLY the corrected JSON list of objects.
     """
@@ -632,7 +639,7 @@ class ChatResource(Resource):
             # 3. Post-Processing
             
             # 3a. Self-Correction (LLM Pass) - Requested by user to ensure 100% accuracy
-            aggregated_medical_data = verify_and_correct_with_llm(aggregated_medical_data, extracted_text)
+            aggregated_medical_data = recheck_data_consistency(aggregated_medical_data, extracted_text)
 
             # 3b. Recalculate Normality (Programmatic Math Check)
             # Re-enabled to fix "is_normal" accuracy issues (User: "showing everything as normal")

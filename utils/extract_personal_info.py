@@ -30,37 +30,15 @@ def extract_personal_info(text: str) -> Dict[str, str]:
     # Use regex for specific patterns
     email_pattern = r'[\w.-]+@[\w.-]+\.\w{2,3}'
     phone_pattern = r'\b\d{10}\b|\(\d{3}\) \d{3}-\d{4}'
-    
-    # Arabic/English Doctor Name patterns
-    # Matches "Dr." or "Doctor" followed by English name
-    # OR "د." or "دكتور" followed by Arabic characters
-    doctor_pattern_en = r'(?i)(?:Dr\.?|Doctor)\s+([A-Za-z\s]+)'
-    doctor_pattern_ar = r'(?:د\.|دكتور)\s+([\u0600-\u06FF\s]+)'
 
     email_match = re.search(email_pattern, text)
     phone_match = re.search(phone_pattern, text)
-    doctor_match_en = re.search(doctor_pattern_en, text)
-    doctor_match_ar = re.search(doctor_pattern_ar, text)
 
     if email_match:
         personal_info["Email"] = email_match.group(0)
     if phone_match:
         personal_info["Phone"] = phone_match.group(0)
-    
-    # Prioritize Arabic doctor name if found (as requested by user to keep it in Arabic)
-    if doctor_match_ar:
-        personal_info["Doctor Name"] = doctor_match_ar.group(1).strip()
-    elif doctor_match_en:
-        personal_info["Doctor Name"] = doctor_match_en.group(1).strip()
-    
-    # Also attempt to find Patient Name in Arabic if English NER failed or as supplement
-    # Pattern: "الاسم:" or "Name:" followed by Arabic text
-    name_pattern_ar = r'(?:الاسم|Name)\s*[:\-]\s*([\u0600-\u06FF\s]+)'
-    name_match_ar = re.search(name_pattern_ar, text)
-    
-    if name_match_ar and "Name" not in personal_info:
-        personal_info["Name"] = name_match_ar.group(1).strip()
-        
+
     return personal_info
 
 def extract_medical_data(text: str) -> Dict[str, Dict[str, str]]:
@@ -76,37 +54,10 @@ def extract_medical_data(text: str) -> Dict[str, Dict[str, str]]:
     medical_data = {}
 
     # Example patterns for medical data extraction
-    # Pattern 1: Field: Value (Range) - Requires colon
-    # Use [ \t] instead of \s to avoid matching across newlines
-    lab_result_pattern = r'(?P<field>[\w %]+):\s*(?P<value>[\d\.\*]+)?\s*(?:\((?P<normal_range>[\d\.\-]+)?\))?'
-    
-    # Pattern 2: Table row style (Field Value [Unit] Range) - No colon, but stricter structure
-    # Looks for: Text (at least 2 chars) + Space + Number + [Space + Unit(optional)] + Space + Range (optional)
-    # STRICT SINGLE LINE MATCHING: [ \t] instead of \s
-    # Updated to support Arabic fields, brackets in fields, < in values, and alphanumeric units
-    table_row_pattern = r'(?P<field>[A-Za-z\u0600-\u06FF][\w\s%\(\)\.\-\u0600-\u06FF]{2,})[ \t]+(?P<value>[<>]?[\d\.]+\*?)(?:[ \t]+(?P<unit>[A-Za-z0-9/%^\-]+))?(?:[ \t]+(?P<normal_range>[\d\.]+\s*-\s*[\d\.]+|[<>]\s*[\d\.]+|\([\d\.\-]+\)))?'
+    lab_result_pattern = r'(?P<field>[\w\s%]+):\s*(?P<value>[\d\.\*]+)?\s*(?:\((?P<normal_range>[\d\.\-]+)?\))?'
 
-    # Pattern 3: RTL/Inverted Table row style (Range Value Field) or (Value Field)
-    # Common in Arabic reports where English text is on the right
-    # Structure: [Range (optional)] [Value] [Field Name]
-    inverted_row_pattern = r'(?:(?P<normal_range>[\d\.]+\s*-\s*[\d\.]+|[<>]\s*[\d\.]+|\([\d\.\-]+\))[ \t]+)?(?P<value>[\d\.]+\*?)[ \t]+(?P<field>[A-Za-z][\w %(),-]{2,})'
-
-    # Collect all matches from all patterns
-    all_matches = []
     for match in re.finditer(lab_result_pattern, text, re.IGNORECASE):
-        all_matches.append(match)
-    
-    for match in re.finditer(table_row_pattern, text, re.IGNORECASE):
-        all_matches.append(match)
-
-    for match in re.finditer(inverted_row_pattern, text, re.IGNORECASE):
-        all_matches.append(match)
-
-    for match in all_matches:
         field = match.group("field").strip()
-        # Clean up field name (remove trailing/leading whitespace)
-        field = re.sub(r'\s+', ' ', field)
-        
         value = match.group("value")
         normal_range = match.group("normal_range")
 
@@ -126,16 +77,13 @@ def extract_medical_data(text: str) -> Dict[str, Dict[str, str]]:
                 lower_bound = float('-inf')
                 upper_bound = float('inf')
                 
-                # Clean normal_range of parentheses and brackets
-                clean_range = normal_range.replace("(", "").replace(")", "").replace("[", "").replace("]", "").strip()
-                
                 # Handle "< 5.0" or "> 5.0" formats
-                if "<" in clean_range:
-                    upper_bound = float(clean_range.replace("<", "").strip())
-                elif ">" in clean_range:
-                    lower_bound = float(clean_range.replace(">", "").strip())
-                elif "-" in clean_range:
-                    range_parts = clean_range.split("-")
+                if "<" in normal_range:
+                    upper_bound = float(normal_range.replace("<", "").strip())
+                elif ">" in normal_range:
+                    lower_bound = float(normal_range.replace(">", "").strip())
+                elif "-" in normal_range:
+                    range_parts = normal_range.split("-")
                     if len(range_parts) == 2:
                         lower_bound = float(range_parts[0].strip())
                         upper_bound = float(range_parts[1].strip())
