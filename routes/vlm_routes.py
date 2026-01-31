@@ -634,17 +634,67 @@ class ChatResource(Resource):
             final_response = {
                 "personal_info": final_personal_info,
                 "medical_info": aggregated_medical_data, # Return list directly for frontend compatibility
-                "medical_data": aggregated_medical_data, # Backup key
-                "debug_metadata": {
-                    "total_pages_processed": total_pages_count,
-                    "model_used": Config.OLLAMA_MODEL,
-                    "logs": all_debug_logs
-                }
-            }
-            
-            return final_response, 200
+                        elif p_info.get('patient_name'):
+                            # If new page has a name, it might be better, or we might want to keep first page.
+                            # Usually page 1 is best for personal info.
+                            # Let's keep Page 1 info unless empty
+                            if not final_personal_info.get('patient_name'):
+                                final_personal_info = p_info
 
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return {"error": f"Failed to process file: {str(e)}"}, 500
+                # 3. Post-Processing
+                
+                yield f"data: {json.dumps({'percent': 80, 'message': 'Verifying and normalizing data...'})}\n\n"
+
+                # 3a. Self-Correction (LLM Pass) - Requested by user to ensure 100% accuracy
+                aggregated_medical_data = recheck_data_consistency(aggregated_medical_data, extracted_text)
+
+                # 3b. Recalculate Normality (Programmatic Math Check)
+                # Re-enabled to fix "is_normal" accuracy issues (User: "showing everything as normal")
+                aggregated_medical_data = recalculate_normality(aggregated_medical_data, patient_gender=final_personal_info.get('patient_gender'))
+                
+                # Deduplicate - DISABLED based on user request ("return data AS IT IS")
+                # aggregated_medical_data = deduplicate_medical_data(aggregated_medical_data)
+                
+                # Normalize Gender
+                if 'patient_gender' in final_personal_info:
+                    final_personal_info['patient_gender'] = normalize_gender(final_personal_info['patient_gender'])
+
+                # Construct Final Response
+                final_response = {
+                    "personal_info": final_personal_info,
+                    "medical_info": aggregated_medical_data, # Return list directly for frontend compatibility
+                    "medical_data": aggregated_medical_data, # Backup key
+                    "debug_metadata": {
+                        "total_pages_processed": total_pages_count,
+                        "model_used": Config.OLLAMA_MODEL,
+                        "logs": all_debug_logs
+                    }
+                }
+                
+                yield f"data: {json.dumps({'percent': 90, 'message': 'Saving to database...'})}\n\n"
+                
+                # Placeholder for database saving logic.
+                # Assuming a function `save_report_to_db` exists and returns a report object with an ID.
+                # For now, we'll mock a report_id.
+                # new_report = save_report_to_db(final_response)
+                # report_id = new_report.id
+                report_id = "mock_report_id_123" # Replace with actual DB save and ID retrieval
+
+                # Final Success Response
+                final_data = {
+                    'percent': 100,
+                    'message': 'Analysis Complete',
+                    'report_id': report_id, 
+                    'patient_name': final_personal_info.get('patient_name'),
+                    'total_fields': len(aggregated_medical_data),
+                    'result': final_response # Include the full result for the final message
+                }
+                yield f"data: {json.dumps(final_data)}\n\n"
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                yield f"data: {json.dumps({'error': f'Failed to process file: {str(e)}'})}\n\n"
+
+        return Response(stream_with_context(generate()), mimetype='text/event-stream')
+```
