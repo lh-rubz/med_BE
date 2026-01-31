@@ -312,22 +312,33 @@ def generate_prompt_for_page(page_text, page_idx, total_pages):
 
     INSTRUCTIONS:
     1. Extract all medical fields with their values, units, and normal ranges.
-    2. For each field, calculate and set "is_normal" based on the value and range.
-    3. Ensure all extracted data is accurate and matches the page content.
-    4. Handle both Arabic and English text correctly.
-    5. Return the output as a JSON list of objects.
+    2. Extract patient information if visible (Name, Age, DOB, Gender, Doctor Name).
+    3. For each medical field, calculate and set "is_normal" based on the value and range.
+    4. Ensure all extracted data is accurate and matches the page content.
+    5. Handle both Arabic and English text correctly.
+    6. Return the output as a valid JSON object with "patient_info" and "medical_data".
 
     OUTPUT FORMAT:
-    [
-        {{
-            "field_name": "",
-            "field_value": "",
-            "field_unit": "",
-            "normal_range": "",
-            "is_normal": true/false/null,
-            "notes": ""
-        }}
-    ]
+    {{
+        "patient_info": {{
+            "patient_name": "",
+            "patient_age": "",
+            "patient_dob": "",
+            "patient_gender": "",
+            "report_date": "",
+            "doctor_names": ""
+        }},
+        "medical_data": [
+            {{
+                "field_name": "",
+                "field_value": "",
+                "field_unit": "",
+                "normal_range": "",
+                "is_normal": true/false/null,
+                "notes": ""
+            }}
+        ]
+    }}
     """
 
 def process_page_with_llm(page_text, page_idx, total_pages):
