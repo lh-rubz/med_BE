@@ -130,57 +130,20 @@ def deduplicate_medical_data(medical_data):
     return list(unique_map.values())
 
 
-def recalculate_normality(medical_data):
+def recalculate_normality(medical_data, patient_gender=None):
     """
-    Programmatically recalculate is_normal based on value and range.
-    Handles complex ranges and missing values.
+    Programmatically recalculate is_normal based on value and range using Robust MedicalValidator.
     """
     if not medical_data:
         return medical_data
 
+    validated_data = []
     for item in medical_data:
-        try:
-            val_str = str(item.get('field_value', '')).strip()
-            range_str = str(item.get('normal_range', '')).strip()
+        # Use the robust validator from utils
+        val_item = MedicalValidator.validate_and_normalize_field(item, patient_gender=patient_gender)
+        validated_data.append(val_item)
 
-            # Skip empty
-            if not val_str or not range_str or val_str.lower() in ['n/a', 'nan', ''] or range_str in ['-', '']:
-                item['is_normal'] = None
-                continue
-
-            # Parse Value
-            val_clean = re.sub(r'[^\\d\.\-]', '', val_str)
-            if not val_clean:
-                continue
-
-            val = float(val_clean)
-
-            # Parse Range
-            min_val = float('-inf')
-            max_val = float('inf')
-
-            range_match = re.search(r'(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)', range_str)
-            if range_match:
-                min_val = float(range_match.group(1))
-                max_val = float(range_match.group(2))
-            elif '<' in range_str:
-                num_match = re.search(r'(\d+(?:\.\d+)?)', range_str)
-                if num_match:
-                    max_val = float(num_match.group(1))
-            elif '>' in range_str:
-                num_match = re.search(r'(\d+(?:\.\d+)?)', range_str)
-                if num_match:
-                    min_val = float(num_match.group(1))
-
-            # Check Normality
-            if min_val != float('-inf') or max_val != float('inf'):
-                is_norm = (min_val <= val <= max_val)
-                item['is_normal'] = is_norm
-
-        except Exception as e:
-            item['is_normal'] = None
-
-    return medical_data
+    return validated_data
 
 def recheck_data_consistency(medical_data, raw_text):
     """
@@ -647,7 +610,7 @@ class ChatResource(Resource):
 
             # 3b. Recalculate Normality (Programmatic Math Check)
             # Re-enabled to fix "is_normal" accuracy issues (User: "showing everything as normal")
-            aggregated_medical_data = recalculate_normality(aggregated_medical_data)
+            aggregated_medical_data = recalculate_normality(aggregated_medical_data, patient_gender=final_personal_info.get('patient_gender'))
             
             # Deduplicate - DISABLED based on user request ("return data AS IT IS")
             # aggregated_medical_data = deduplicate_medical_data(aggregated_medical_data)
