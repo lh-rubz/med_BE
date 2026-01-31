@@ -714,4 +714,3 @@ class ChatResource(Resource):
                     yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
             return Response(stream_with_context(generate()), mimetype='text/event-stream')
-```
