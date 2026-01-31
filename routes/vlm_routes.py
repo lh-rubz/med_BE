@@ -570,7 +570,6 @@ class ChatResource(Resource):
                     aggregated_medical_data = []
                     final_personal_info = {}
                     all_debug_logs = []
-                    extracted_text = ""
                     
                     yield f"data: {json.dumps({'percent': 10, 'message': 'Starting file text extraction...'})}\n\n"
 
@@ -579,9 +578,6 @@ class ChatResource(Resource):
                     clean_pages = []
 
                     page_global_idx = 1
-                    # 1. Text Extraction Strategy
-                    total_pages_count = 0
-                    clean_pages = []
 
                     # Note: text extraction happened in outer scope, using 'extracted_text' variable. 
 
