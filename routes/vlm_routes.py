@@ -661,14 +661,27 @@ class ChatResource(Resource):
                     try:
                         user_id = get_jwt_identity()
                         if user_id:
+                            # Generate hash
+                            report_hash = hashlib.sha256(extracted_text.encode('utf-8')).hexdigest()
+                            
+                            # Parse date
+                            report_date_obj = datetime.now()
+                            date_str = final_personal_info.get('report_date')
+                            if date_str:
+                                try:
+                                    # Try standard format YYYY-MM-DD
+                                    report_date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                                except:
+                                    pass
+
                             new_report = Report(
                                 user_id=user_id,
                                 patient_name=final_personal_info.get('patient_name'),
                                 patient_age=final_personal_info.get('patient_age'),
                                 patient_gender=final_personal_info.get('patient_gender'),
-                                report_date=final_personal_info.get('report_date'),
+                                report_date=report_date_obj,
+                                report_hash=report_hash,
                                 report_type="General Medical Report",
-                                status="Completed",
                                 created_at=datetime.now(timezone.utc)
                             )
                             db.session.add(new_report)
@@ -677,6 +690,7 @@ class ChatResource(Resource):
                             for item in consolidated_data:
                                 field = ReportField(
                                     report_id=new_report.id,
+                                    user_id=user_id, # Added user_id as it is required in ReportField model
                                     field_name=item.get('field_name'),
                                     field_value=str(item.get('field_value')),
                                     field_unit=item.get('field_unit'),
