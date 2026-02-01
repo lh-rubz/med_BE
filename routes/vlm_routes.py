@@ -612,10 +612,11 @@ def compress_image(image_data, format_hint='png'):
 def calculate_is_normal(field_value, normal_range, field_type='measurement'):
     """
     Calculate if a field value is within normal range.
+    Handles complex ranges like categorical (Deficient, Insufficient, etc) and gender/age-specific ranges.
     
     Args:
         field_value: The extracted value (string or number)
-        normal_range: The normal range string (e.g., "12-16" or "<5.7")
+        normal_range: The normal range string (e.g., "12-16", "<5.7", "Deficient: <10, Insufficient: 11-30, Sufficient: 31-100")
         field_type: Type of field ('measurement', 'qualitative', etc.)
         
     Returns:
@@ -629,67 +630,156 @@ def calculate_is_normal(field_value, normal_range, field_type='measurement'):
         if not normal_range_str:
             return False
         
-        # Qualitative results
-        if field_type == 'qualitative' or not field_value_str:
-            # Check if field_value contains indicators of abnormality
-            abnormal_keywords = ['high', 'low', 'abnormal', 'positive', 'negative', 'nad']
-            field_lower = field_value_str.lower()
-            return not any(keyword in field_lower for keyword in abnormal_keywords)
-        
-        # Try to extract numeric value
-        try:
-            value = float(field_value_str.split()[0] if field_value_str else 0)
-        except (ValueError, IndexError):
+        # If field value is a qualitative result
+        if not field_value_str:
             return False
         
-        # Parse normal range
-        # Handle formats like: "12-16", "12 - 16", "<5.7", ">10", etc.
+        # Extract numeric value
+        numeric_value = None
+        try:
+            # Try to extract first number from field_value
+            import re
+            num_match = re.search(r'-?\d+\.?\d*', field_value_str)
+            if num_match:
+                numeric_value = float(num_match.group())
+        except (ValueError, AttributeError):
+            pass
+        
+        # If it's a qualitative result (text without numbers)
+        if numeric_value is None:
+            field_lower = field_value_str.lower()
+            # Check for explicit "normal" indicators
+            normal_keywords = ['normal', 'nad', 'negative']
+            abnormal_keywords = ['high', 'low', 'abnormal', 'positive', 'toxicity', 'deficient', 'insufficient']
+            
+            has_normal = any(kw in field_lower for kw in normal_keywords)
+            has_abnormal = any(kw in field_lower for kw in abnormal_keywords)
+            
+            if has_abnormal:
+                return False
+            if has_normal:
+                return True
+            # Default for qualitative without clear indicators
+            return False
+        
+        # Now we have a numeric value, parse the normal_range
+        # Handle complex categorical ranges like: "Deficient: <10, Insufficient: 11-30, Sufficient: 31-100, Toxicity: >100"
+        
+        # Extract all numeric ranges and their categories from the normal_range text
+        import re
+        
         normal_range_lower = normal_range_str.lower()
+        ranges_found = []
+        
+        # Look for patterns like "category: <10", "category: 11-30", etc.
+        # Pattern: optional text, optional colon, comparison or range
+        pattern = r'([a-z\s]*?):\s*([<>]=?)?(\d+\.?\d*)\s*(?:-\s*(\d+\.?\d*))?'
+        matches = re.finditer(pattern, normal_range_lower)
+        
+        for match in matches:
+            category = match.group(1).strip()
+            operator = match.group(2)
+            first_num = float(match.group(3))
+            second_num = float(match.group(4)) if match.group(4) else None
+            
+            ranges_found.append({
+                'category': category,
+                'operator': operator,
+                'min': first_num,
+                'max': second_num
+            })
+        
+        # If we found categorical ranges, find which category this value falls into
+        if ranges_found:
+            for range_info in ranges_found:
+                category = range_info['category']
+                operator = range_info['operator']
+                min_val = range_info['min']
+                max_val = range_info['max']
+                
+                # Check if value falls in this range
+                in_range = False
+                if operator == '<':
+                    in_range = numeric_value < min_val
+                elif operator == '<=':
+                    in_range = numeric_value <= min_val
+                elif operator == '>':
+                    in_range = numeric_value > min_val
+                elif operator == '>=':
+                    in_range = numeric_value >= min_val
+                elif max_val is not None:
+                    # Range format: min-max
+                    in_range = min_val <= numeric_value <= max_val
+                elif operator is None and max_val is None:
+                    # Single value (shouldn't happen)
+                    in_range = numeric_value == min_val
+                
+                if in_range:
+                    # Check if this category indicates normal or abnormal
+                    category_lower = category.lower()
+                    abnormal_categories = ['deficient', 'insufficient', 'high', 'low', 'abnormal', 'toxic', 'toxicity']
+                    is_abnormal_category = any(abn in category_lower for abn in abnormal_categories)
+                    return not is_abnormal_category
+        
+        # If no categorical ranges found, try simple range parsing
+        # Patterns: "12-16", "12 - 16", "<5.7", ">10", "<=10", ">=5"
         
         # Check for comparison operators
         if normal_range_lower.startswith('<'):
             try:
-                threshold = float(normal_range_lower[1:].strip())
-                return value < threshold
-            except ValueError:
+                # Remove < and get threshold
+                threshold_str = normal_range_lower[1:].strip()
+                threshold = float(threshold_str.split()[0])
+                return numeric_value < threshold
+            except (ValueError, IndexError):
                 return False
         
-        if normal_range_lower.startswith('>'):
+        if normal_range_lower.startswith('>') and not normal_range_lower.startswith('>='):
             try:
-                threshold = float(normal_range_lower[1:].strip())
-                return value > threshold
-            except ValueError:
+                threshold_str = normal_range_lower[1:].strip()
+                threshold = float(threshold_str.split()[0])
+                return numeric_value > threshold
+            except (ValueError, IndexError):
                 return False
         
         if '<=' in normal_range_lower:
             try:
-                threshold = float(normal_range_lower.replace('<=', '').strip())
-                return value <= threshold
-            except ValueError:
+                threshold_str = normal_range_lower.replace('<=', '').strip()
+                threshold = float(threshold_str.split()[0])
+                return numeric_value <= threshold
+            except (ValueError, IndexError):
                 return False
         
         if '>=' in normal_range_lower:
             try:
-                threshold = float(normal_range_lower.replace('>=', '').strip())
-                return value >= threshold
-            except ValueError:
+                threshold_str = normal_range_lower.replace('>=', '').strip()
+                threshold = float(threshold_str.split()[0])
+                return numeric_value >= threshold
+            except (ValueError, IndexError):
                 return False
         
-        # Handle range format: "min-max" or "min - max"
-        if '-' in normal_range_str:
-            parts = normal_range_str.split('-')
-            if len(parts) == 2:
+        # Handle simple range format: "min-max"
+        range_parts = re.findall(r'\d+\.?\d*\s*-\s*\d+\.?\d*', normal_range_str)
+        if range_parts:
+            for range_part in range_parts:
+                parts = range_part.split('-')
                 try:
                     min_val = float(parts[0].strip())
                     max_val = float(parts[1].strip())
-                    return min_val <= value <= max_val
-                except ValueError:
-                    return False
+                    if min_val <= numeric_value <= max_val:
+                        return True
+                except (ValueError, IndexError):
+                    continue
+            # If we found ranges but value doesn't fit any, it's abnormal
+            return False
         
+        # If we couldn't parse the range, assume we can't determine
         return False
         
     except Exception as e:
         print(f"Error calculating is_normal for '{field_value}' against '{normal_range}': {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -873,11 +963,15 @@ RULES:
    - patient_age: Extract age if found (e.g. "45", "45 Y", "45 Years"). If not found, use null or empty string.
    - patient_gender: Extract gender if found (e.g. "Male", "Female", "M", "F"). Expand "M"/"F" to full words.
 8. If value marked "High" or "Low", add to notes
-9. IMPORTANT - Extract normal_range WITHOUT units:
-   - Remove units from range (e.g., "12 - 16 g/dL" → "12 - 16")
-   - Keep only the numeric range values
-   - For text ranges (e.g., "Normal: <5.7"), keep the text but remove units
-9. IMPORTANT - Extract category/section for EACH test:
+9. CRITICAL - Extract FULL normal_range EXACTLY as shown in report:
+   - PRESERVE the COMPLETE normal range text exactly as it appears on the report
+   - Examples: "Deficient: <10, Insufficient: 11-30, Sufficient: 31-100, Toxicity: >100"
+   - Examples: "Male: 4.5-5.9, Female: 4.1-5.1"
+   - Examples: "Child: 4.5-13.5, Adult: 4.5-11"
+   - DO NOT simplify or parse - extract the FULL TEXT including labels like "Deficient:", "Male:", "Child:" etc.
+   - If there are detailed ranges with categories, include ALL of them
+   - Remove only the UNITS (e.g., remove "g/dL", "million/mm3") but keep all text, numbers, and labels
+10. IMPORTANT - Extract category/section for EACH test:
    - Look for section headers like "DIFFERENTIAL COUNT", "BLOOD INDICES", "ABSOLUTE COUNT", "WBC COUNT", "PLATELET COUNT"
    - Assign each test to its category (use exact header text in UPPERCASE)
    - If no category header visible, use empty string
@@ -886,7 +980,6 @@ Return ONLY valid JSON:
 {{
     "patient_name": "...",
     "patient_age": "...",
-    "patient_gender": "...",
     "patient_gender": "...",
     "report_date": "YYYY-MM-DD",
     "report_name": "...",
@@ -898,7 +991,7 @@ Return ONLY valid JSON:
             "field_name": "Test Name",
             "field_value": "123.45 OR 'Normal'",
             "field_unit": "g/dL or empty",
-            "normal_range": "13.5-17.5 or empty",
+            "normal_range": "Deficient: <10, Insufficient: 11-30, Sufficient: 31-100, Toxicity: >100",
             "is_normal": true,
             "field_type": "measurement",
             "category": "DIFFERENTIAL COUNT or empty",
