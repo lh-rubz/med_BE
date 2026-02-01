@@ -258,3 +258,52 @@ JSON OUTPUT ONLY:
   ]
 }}
 """
+
+
+def generate_prompt_for_page(page_text, page_idx, total_pages):
+    """Generate a prompt for extracting structured medical data from a report page.
+    
+    Args:
+        page_text: The text content of the page
+        page_idx: Current page index
+        total_pages: Total number of pages
+        
+    Returns:
+        A formatted prompt string with properly escaped JSON template
+    """
+    return f"""
+    TASK: Extract medical data from the report page.
+
+    PAGE INDEX: {page_idx}/{total_pages}
+
+    PAGE CONTENT:
+    {page_text}
+
+    INSTRUCTIONS:
+    1. Group data by sections (e.g., Haematology Report, Biochemistry).
+    2. Extract all medical fields with their values, units, and normal ranges.
+    3. Extract doctor names and ensure they are complete.
+    4. For each field, calculate and set "is_normal" based on the value and range.
+    5. Ensure all extracted data is accurate and matches the page content.
+    6. Handle both Arabic and English text correctly.
+
+    OUTPUT FORMAT:
+    {{{{
+        "sections": [
+            {{{{
+                "section_name": "Haematology Report",
+                "fields": [
+                    {{{{
+                        "field_name": "",
+                        "field_value": "",
+                        "field_unit": "",
+                        "normal_range": "",
+                        "is_normal": null,
+                        "notes": ""
+                    }}}}
+                ]
+            }}}}
+        ],
+        "doctor_names": ""
+    }}}}
+    """
