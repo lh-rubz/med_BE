@@ -153,8 +153,8 @@ class MedicalValidator:
                         if min_val <= value <= max_val:
                             return True
 
-        # Fallback to VLM's guess or default to True
-        return current_is_normal if current_is_normal is not None else True
+        # Fallback to VLM's guess or default to None (unknown)
+        return current_is_normal if current_is_normal is not None else None
     
     @staticmethod
     def extract_doctor_names(text: str) -> str:
@@ -253,6 +253,8 @@ class MedicalValidator:
         
         return deduplicated
     
+
+    
     @staticmethod
     def validate_and_normalize_field(field: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -279,11 +281,15 @@ class MedicalValidator:
         # Normalize normal_range but preserve full descriptive text
         normal_range = str(validated.get('normal_range', ''))
         unit = str(validated.get('field_unit', ''))
-        if unit and unit in normal_range:
-            # Only remove duplicated trailing unit occurrences like "mg/dl mg/dl"
-            pattern = rf'\b{re.escape(unit)}\b\s*\b{re.escape(unit)}\b'
-            normal_range = re.sub(pattern, unit, normal_range)
-            validated['normal_range'] = normal_range
+        
+        # aggressively strip unit from normal_range if present
+        if unit and normal_range:
+            # Escape unit for regex
+            unit_esc = re.escape(unit)
+            # Remove unit if it appears in the range string
+            # Case insensitive remove
+            normal_range = re.sub(rf'\s*{unit_esc}\s*', '', normal_range, flags=re.IGNORECASE)
+            validated['normal_range'] = normal_range.strip()
         
         # Recalculate is_normal deterministically
         normal_range = validated.get('normal_range', '')

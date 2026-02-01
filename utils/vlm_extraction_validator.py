@@ -103,12 +103,23 @@ def _is_valid_range(normal_range: str, field_value: str, field_name: str) -> boo
     
     # Extract numbers from range
     range_numbers = re.findall(r'[\d.]+', normal_range)
-    if len(range_numbers) < 2:
-        return False  # Invalid range format
+    
+    # Check for single bound ranges (e.g. < 5.0, > 100)
+    is_single_bound = '<' in normal_range or '>' in normal_range
+    
+    if len(range_numbers) < 2 and not is_single_bound:
+        return False  # Invalid range format (need 2 numbers or inequality)
     
     try:
-        range_min = float(range_numbers[0])
-        range_max = float(range_numbers[1])
+        if len(range_numbers) >= 2:
+            range_min = float(range_numbers[0])
+            range_max = float(range_numbers[1])
+        elif is_single_bound and len(range_numbers) == 1:
+            # For validation purposes, treat single bound as valid range
+            # We don't strictly validate value against it here, just format
+            return True
+        else:
+            return False
     except (ValueError, IndexError):
         return False
     

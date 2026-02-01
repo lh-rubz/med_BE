@@ -174,6 +174,7 @@ VALIDATION BEFORE RETURN
 - Units are not symbols and not numbers.
 - CRITICAL NORMAL RANGES: Read the EXACT range from the image. Do NOT guess or invent ranges.
   * Example: If image shows "(10-15)", your normal_range MUST be "(10-15)"
+  * CRITICAL: Do NOT include units in normal_range. "10-15 mg/dL" -> "10-15"
   * Do NOT use ranges from your knowledge (like "(0-0.75)" for platelet width)
   * If you cannot read the range clearly, use "" - NEVER invent a range
 - CRITICAL: Normal_range must NOT look like a value, and field_value must NOT look like a unit or range.
