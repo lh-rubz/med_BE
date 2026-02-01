@@ -712,8 +712,18 @@ def calculate_is_normal(field_value, normal_range, field_type='measurement', pat
             if match:
                 return numeric_value < float(match.group(1))
         
-        if 'above' in normal_range_lower or 'greater than' in normal_range_lower:
-            match = re.search(r'(?:above|greater than)\s+(\d+\.?\d*)', normal_range_lower)
+        if 'less than' in normal_range_lower:
+            match = re.search(r'less than\s+(\d+\.?\d*)', normal_range_lower)
+            if match:
+                return numeric_value < float(match.group(1))
+        
+        if 'more than' in normal_range_lower or 'greater than' in normal_range_lower:
+            match = re.search(r'(?:more than|greater than)\s+(\d+\.?\d*)', normal_range_lower)
+            if match:
+                return numeric_value > float(match.group(1))
+        
+        if 'above' in normal_range_lower:
+            match = re.search(r'above\s+(\d+\.?\d*)', normal_range_lower)
             if match:
                 return numeric_value > float(match.group(1))
         
@@ -770,6 +780,21 @@ def _check_range_value(numeric_value, range_text):
         if match:
             return numeric_value < float(match.group(1))
     
+    if 'less than' in range_text:
+        match = re.search(r'less than\s+(\d+\.?\d*)', range_text)
+        if match:
+            return numeric_value < float(match.group(1))
+    
+    if 'more than' in range_text or 'greater than' in range_text:
+        match = re.search(r'(?:more than|greater than)\s+(\d+\.?\d*)', range_text)
+        if match:
+            return numeric_value > float(match.group(1))
+    
+    if 'above' in range_text:
+        match = re.search(r'above\s+(\d+\.?\d*)', range_text)
+        if match:
+            return numeric_value > float(match.group(1))
+    
     # Comparison operators
     if range_text.startswith('<') and not range_text.startswith('<='):
         match = re.search(r'<\s*(\d+\.?\d*)', range_text)
@@ -781,12 +806,12 @@ def _check_range_value(numeric_value, range_text):
         if match:
             return numeric_value > float(match.group(1))
     
-    if range_text.startswith('<='):
+    if '<=' in range_text:
         match = re.search(r'<=\s*(\d+\.?\d*)', range_text)
         if match:
             return numeric_value <= float(match.group(1))
     
-    if range_text.startswith('>='):
+    if '>=' in range_text:
         match = re.search(r'>=\s*(\d+\.?\d*)', range_text)
         if match:
             return numeric_value >= float(match.group(1))
@@ -799,6 +824,7 @@ def _check_range_value(numeric_value, range_text):
         return min_val <= numeric_value <= max_val
     
     return False
+
 
 
 @vlm_ns.route('/chat')
@@ -961,45 +987,40 @@ class ChatResource(Resource):
             
             # Build prompt (Reusing logic)
             # Build OPTIMIZED extraction prompt (reduced by ~40%)
-            prompt_text = f"""Extract ALL medical data from this image (page {idx}/{total_pages}).
+            prompt_text = f"""Extract EVERY SINGLE test result from this medical report image (page {idx}/{total_pages}).
 
-CRITICAL RULES:
-1. Extract EVERY test with its EXACT value, unit, and normal range as shown.
-   - IMPORTANT: Match each test name (Investigation) with its corresponding normal range on the SAME ROW
-   - Do NOT mix ranges from different rows or tests
-   - If a test has no normal range visible, use empty string
-2. Report Identification:
-   - report_name: Extract the EXACT title written on the report (e.g., "Detailed Hemogram", "Lipid Profile", "HAEMATOLOGY REPORT").
-   - report_type: Choose the CLOSEST match from: {', '.join(REPORT_TYPES)}. Default to "Other" if no match.
-3. CRITICAL - Extract CORRECT doctor names:
-   - Look for "Ref. By:", "Ref By:", "Referred By:", "Referring Doctor:", "Doctor Name:", or "Dr." 
-   - Extract FULL name without title (e.g., "Dr. Hiren Shah" → "Hiren Shah")
-   - LEAVE EMPTY if NO doctor name visible on report
-4. Preserve EXACT decimal precision (e.g., "14.5" not "14.50" or "15")
-5. For qualitative results ("Normal", "NAD", "Negative"), put in field_value
-6. CRITICAL - Extract report_date as YYYY-MM-DD:
-   - Look for "Report Date:", "Date:", "Sample Date:" fields
-   - Extract the EXACT date shown on the report (NOT today's date)
-   - Format as YYYY-MM-DD (e.g., "01-02-2024" → "2024-02-01")
-7. Extract patient details:
-   - patient_age: Extract age if found (e.g., "20 Years", "45 Y", "45"). If not found, use empty string.
-   - patient_gender: Extract from "Gender & Age:" or similar field (e.g., "Female/20 Years" → "Female").
-8. CRITICAL - Extract normal_range EXACTLY as shown in the "Normal Ranges" column:
-   - PRESERVE the COMPLETE text exactly, character by character, from the SAME row as the test
-   - DO NOT simplify, parse, or modify the range
-   - DO NOT MIX RANGES FROM DIFFERENT TESTS - each test has its own range on the right side
-   - Examples to preserve exactly:
-     * Test: "C - Reactive Proteins", Result: "6.0", Normal Range: "Normal: <6 mg/dL" (NOT the Vitamin D range)
-     * Test: "25-OH Vitamin D", Result: "13.4", Normal Range: "Deficient: <10, Insufficient: 11-30, Sufficient: 31-100, Toxicity: >100"
-     * Test: "Haemoglobin", Result: "14.5", Normal Range: "12 - 16 g/dL"
-     * Test: "Serum Creatinine", Result: "0.98", Normal Range: "Adults Male: 0.9 - 1.3, Adults Female: 0.6 - 1.1"
-   - Only remove units if they repeat in every part (rare cases)
-   - EACH TEST HAS ITS OWN UNIQUE NORMAL RANGE FROM THE SAME ROW
-9. If value marked "High", "Low", "Marked Low", etc., add to notes
-10. Extract category/section for EACH test:
-    - Look for section headers: "HAEMATOLOGY REPORT", "BIOCHEMISTRY", "DIFFERENTIAL COUNT", "ELECTROLYTES", "ENDOCRINOLOGY REPORT", "SEROLOGY REPORT", etc.
-    - Use the exact section name found
-    - If no section visible, use empty string
+CRITICAL RULES FOR COMPLETE EXTRACTION:
+1. MANDATORY: Extract ALL test results visible on the page:
+   - Do NOT skip any tests - extract complete lists from all sections
+   - Do NOT summarize or group - each test is a SEPARATE entry
+   - Do NOT omit tests just because they seem similar
+   - COUNT EVERY ROW that has a test name and result value
+   
+2. Per-test rules:
+   - field_name: EXACT test name as written (e.g., "Haemoglobin", "C-Reactive Proteins")
+   - field_value: EXACT numeric or qualitative result shown (e.g., "14.5", "Normal", "Negative")
+   - field_unit: Unit of measurement (e.g., "g/dL", "mg/dL", "" for qualitative)
+   - normal_range: COMPLETE range text from the SAME ROW, preserved exactly character-by-character:
+     * For multi-category ranges, INCLUDE ALL CATEGORIES with their separators:
+       - Example: "Normal: <5.7 | Prediabetes: 5.7-6.4 | Diabetes: >6.5" (keep separators)
+       - Example: "Deficient: <10, Insufficient: 11-30, Sufficient: 31-100" (keep all commas)
+     * DO NOT concatenate without spaces - preserve exact formatting
+     * DO NOT mix ranges from different rows
+   
+3. Report metadata:
+   - report_name: EXACT title (e.g., "Haematology Report", "Biochemistry Profile")
+   - report_type: Match to: {', '.join(REPORT_TYPES)}
+   - report_date: Extract as YYYY-MM-DD from "Report Date:" or "Date:" field
+   - patient_name, patient_age, patient_gender: Extract from header
+   - doctor_names: Look for "Ref. By:", "Ref By:", "Referring Doctor:" - extract name without "Dr." title
+
+4. Categories:
+   - Extract section header (e.g., "HAEMATOLOGY", "BIOCHEMISTRY") for each test
+   - Multiple sections mean multiple tests with different categories
+
+5. Quality checks:
+   - If value marked "High", "Low", "Critical", add to notes
+   - Preserve exact decimal precision (14.5 not 14.50)
 
 Return ONLY valid JSON (no markdown, no code blocks):
 {{
@@ -1058,20 +1079,45 @@ Return ONLY valid JSON (no markdown, no code blocks):
                 response_text = completion.choices[0].message.content.strip()
                 print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
                 
-                # Parsing logic
+                # Parsing logic - More robust JSON extraction
                 extracted_data = {}
                 try:
                     import re
-                    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                    if json_match:
-                        extracted_data = json.loads(json_match.group())
-                        print(f"✅ JSON extracted after regex for Image {idx}")
-                except:
-                    pass
+                    # Try multiple strategies to extract JSON
+                    # Strategy 1: Find the outermost braces
+                    json_str = None
+                    brace_count = 0
+                    start_idx = -1
+                    for i, char in enumerate(response_text):
+                        if char == '{':
+                            if brace_count == 0:
+                                start_idx = i
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if brace_count == 0 and start_idx != -1:
+                                json_str = response_text[start_idx:i+1]
+                                break
+                    
+                    if json_str:
+                        extracted_data = json.loads(json_str)
+                        print(f"✅ JSON extracted for Image {idx} - {len(json_str)} chars")
+                    else:
+                        # Fallback: use regex
+                        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                        if json_match:
+                            extracted_data = json.loads(json_match.group())
+                            print(f"✅ JSON extracted via regex for Image {idx}")
+                except Exception as parse_err:
+                    print(f"⚠️  JSON Parse Error on page {idx}: {parse_err}")
+                    print(f"   Response text: {response_text[:200]}")
                 
                 if extracted_data.get('medical_data'):
+                    field_count = len(extracted_data['medical_data'])
                     all_extracted_data.extend(extracted_data['medical_data'])
-                    print(f"✅ Extracted {len(extracted_data['medical_data'])} field(s) from page {idx}")
+                    print(f"✅ Extracted {field_count} field(s) from page {idx}")
+                else:
+                    print(f"⚠️  No medical_data found in extracted_data for page {idx}")
                 
                 # Capture patient info from first good page
                 if not patient_info and extracted_data.get('patient_name'):
