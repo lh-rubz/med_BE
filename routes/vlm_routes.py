@@ -609,6 +609,90 @@ def compress_image(image_data, format_hint='png'):
     return compressed_data
 
 
+def calculate_is_normal(field_value, normal_range, field_type='measurement'):
+    """
+    Calculate if a field value is within normal range.
+    
+    Args:
+        field_value: The extracted value (string or number)
+        normal_range: The normal range string (e.g., "12-16" or "<5.7")
+        field_type: Type of field ('measurement', 'qualitative', etc.)
+        
+    Returns:
+        bool: True if value is normal, False otherwise
+    """
+    try:
+        field_value_str = str(field_value).strip() if field_value else ''
+        normal_range_str = str(normal_range).strip() if normal_range else ''
+        
+        # If no normal range, we can't determine - default to False (unknown)
+        if not normal_range_str:
+            return False
+        
+        # Qualitative results
+        if field_type == 'qualitative' or not field_value_str:
+            # Check if field_value contains indicators of abnormality
+            abnormal_keywords = ['high', 'low', 'abnormal', 'positive', 'negative', 'nad']
+            field_lower = field_value_str.lower()
+            return not any(keyword in field_lower for keyword in abnormal_keywords)
+        
+        # Try to extract numeric value
+        try:
+            value = float(field_value_str.split()[0] if field_value_str else 0)
+        except (ValueError, IndexError):
+            return False
+        
+        # Parse normal range
+        # Handle formats like: "12-16", "12 - 16", "<5.7", ">10", etc.
+        normal_range_lower = normal_range_str.lower()
+        
+        # Check for comparison operators
+        if normal_range_lower.startswith('<'):
+            try:
+                threshold = float(normal_range_lower[1:].strip())
+                return value < threshold
+            except ValueError:
+                return False
+        
+        if normal_range_lower.startswith('>'):
+            try:
+                threshold = float(normal_range_lower[1:].strip())
+                return value > threshold
+            except ValueError:
+                return False
+        
+        if '<=' in normal_range_lower:
+            try:
+                threshold = float(normal_range_lower.replace('<=', '').strip())
+                return value <= threshold
+            except ValueError:
+                return False
+        
+        if '>=' in normal_range_lower:
+            try:
+                threshold = float(normal_range_lower.replace('>=', '').strip())
+                return value >= threshold
+            except ValueError:
+                return False
+        
+        # Handle range format: "min-max" or "min - max"
+        if '-' in normal_range_str:
+            parts = normal_range_str.split('-')
+            if len(parts) == 2:
+                try:
+                    min_val = float(parts[0].strip())
+                    max_val = float(parts[1].strip())
+                    return min_val <= value <= max_val
+                except ValueError:
+                    return False
+        
+        return False
+        
+    except Exception as e:
+        print(f"Error calculating is_normal for '{field_value}' against '{normal_range}': {e}")
+        return False
+
+
 @vlm_ns.route('/chat')
 class ChatResource(Resource):
     @vlm_ns.doc(
@@ -1064,15 +1148,32 @@ Return ONLY valid JSON:
             medical_entries = []
             for item in final_data['medical_data']:
                 if isinstance(item, dict):
+                    field_value = item.get('field_value', '')
+                    normal_range = item.get('normal_range', '')
+                    field_type = item.get('field_type', 'measurement')
+                    
+                    # Calculate is_normal based on actual value and range
+                    # First check if VLM provided a value, otherwise calculate it
+                    vlm_is_normal = item.get('is_normal')
+                    if vlm_is_normal is None or vlm_is_normal == '':
+                        # VLM didn't provide is_normal, calculate it
+                        calculated_is_normal = calculate_is_normal(field_value, normal_range, field_type)
+                        is_normal_value = calculated_is_normal
+                    else:
+                        # Use VLM's value, but validate it by calculating
+                        calculated_is_normal = calculate_is_normal(field_value, normal_range, field_type)
+                        # Prefer the calculated value if we have a range
+                        is_normal_value = calculated_is_normal if normal_range else bool(vlm_is_normal)
+                    
                     field = ReportField(
                         report_id=new_report.id,
                         user_id=current_user_id,
                         field_name=item.get('field_name', 'Unknown'),
-                        field_value=str(item.get('field_value', '')),
+                        field_value=str(field_value),
                         field_unit=str(item.get('field_unit', '')),
-                        normal_range=str(item.get('normal_range', '')),
-                        is_normal=bool(item.get('is_normal', True)),
-                        field_type=str(item.get('field_type', 'measurement')),
+                        normal_range=str(normal_range),
+                        is_normal=is_normal_value,
+                        field_type=str(field_type),
                         category=str(item.get('category', '')),
                         notes=str(item.get('notes', ''))
                     )

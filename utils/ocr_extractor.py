@@ -1,34 +1,24 @@
 """OCR Extractor utility for medical report processing."""
 
-import easyocr
 import io
 from PIL import Image
 
-# Global OCR reader instances for different language combinations
-_ocr_readers = {}
+# Global OCR reader instance (lazy-loaded)
+_ocr_reader = None
 
 
 def get_ocr_instance(languages=None):
     """
-    Get or create an EasyOCR reader instance for the specified languages.
+    Get the EasyOCR reader instance from vlm_routes.
+    The reader supports English and Arabic by default.
     
     Args:
-        languages (list): List of language codes (e.g., ['en', 'ar'])
+        languages (list): Language codes (ignored - uses default reader)
         
     Returns:
         OCRExtractor: An OCR extractor instance
     """
-    if languages is None:
-        languages = ['en', 'ar']
-    
-    # Create a hashable key from the languages list
-    lang_key = tuple(sorted(languages))
-    
-    # Return cached reader if available
-    if lang_key not in _ocr_readers:
-        _ocr_readers[lang_key] = OCRExtractor(languages)
-    
-    return _ocr_readers[lang_key]
+    return OCRExtractor()
 
 
 class OCRExtractor:
@@ -37,15 +27,12 @@ class OCRExtractor:
     def __init__(self, languages=None):
         """
         Initialize the OCR extractor.
+        Uses the global reader from vlm_routes.
         
         Args:
-            languages (list): List of language codes (default: ['en', 'ar'])
+            languages (list): Ignored - uses default reader
         """
-        if languages is None:
-            languages = ['en', 'ar']
-        
-        self.languages = languages
-        self.reader = easyocr.Reader(languages, gpu=False)  # gpu=False for compatibility
+        self.languages = languages or ['en', 'ar']
     
     def extract_text(self, image_data):
         """
@@ -58,11 +45,16 @@ class OCRExtractor:
             str: Extracted text
         """
         try:
+            # Import here to avoid circular imports and lazy-load issues
+            from routes.vlm_routes import get_reader
+            
+            reader = get_reader()
+            
             # Convert bytes to PIL Image
             img = Image.open(io.BytesIO(image_data))
             
             # Read text from image
-            results = self.reader.readtext(img, detail=0)
+            results = reader.readtext(img, detail=0)
             
             # Join text into a single string
             text = '\n'.join(results)
@@ -70,6 +62,8 @@ class OCRExtractor:
             return text
         except Exception as e:
             print(f"Error extracting text with OCR: {e}")
+            import traceback
+            traceback.print_exc()
             return ""
     
     def extract_text_from_file(self, file_path):
@@ -83,8 +77,13 @@ class OCRExtractor:
             str: Extracted text
         """
         try:
+            # Import here to avoid circular imports
+            from routes.vlm_routes import get_reader
+            
+            reader = get_reader()
+            
             # Read text from file
-            results = self.reader.readtext(file_path, detail=0)
+            results = reader.readtext(file_path, detail=0)
             
             # Join text into a single string
             text = '\n'.join(results)
@@ -92,4 +91,7 @@ class OCRExtractor:
             return text
         except Exception as e:
             print(f"Error extracting text from file: {e}")
+            import traceback
+            traceback.print_exc()
             return ""
+
