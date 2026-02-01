@@ -350,9 +350,10 @@ def generate_prompt_for_page(page_text, page_idx, total_pages):
     INSTRUCTIONS:
     1. Group data by sections (e.g., Haematology Report, Biochemistry).
     2. Extract all medical fields with their values, units, and normal ranges.
-    3. For each field, calculate and set "is_normal" based on the value and range.
-    4. Ensure all extracted data is accurate and matches the page content.
-    5. Handle both Arabic and English text correctly.
+    3. Extract doctor names and ensure they are complete.
+    4. For each field, calculate and set "is_normal" based on the value and range.
+    5. Ensure all extracted data is accurate and matches the page content.
+    6. Handle both Arabic and English text correctly.
 
     OUTPUT FORMAT:
     {
@@ -370,7 +371,8 @@ def generate_prompt_for_page(page_text, page_idx, total_pages):
                     }
                 ]
             }
-        ]
+        ],
+        "doctor_names": ""
     }
     """
 
