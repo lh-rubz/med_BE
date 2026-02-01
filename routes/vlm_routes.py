@@ -650,32 +650,53 @@ class ChatResource(Resource):
                          except:
                              print(f"    ⚠️ Could not parse date: {p_info.get('report_date')}, using Now.")
                              pass
-                             
+                     
+                     # Combine text for hash
+                     full_text = "\n".join([page[1] for page in extracted_text_pages])
+                     report_hash = hashlib.sha256(full_text.encode('utf-8')).hexdigest()
+                     
+                     # Get filename
+                     original_filename = files[0].filename if files else "uploaded_file"
+                     
                      new_report = Report(
                         user_id=user_id,
                         patient_name=p_info.get('name'),
                         patient_age=p_info.get('age'),
                         patient_gender=p_info.get('gender'),
+                        doctor_names=p_info.get('doctor_name'),
                         report_date=r_date,
                         report_type="General Medical Report",
+                        report_hash=report_hash, # FIXED: Added required hash
+                        original_filename=original_filename, # FIXED: Added filename
+                        report_name=original_filename, # Default name
                         created_at=datetime.now(timezone.utc)
                      )
                      db.session.add(new_report)
                      db.session.flush()
                      
                      # Add Fields
+                     consolidated_data = [] # For legacy structure compatibility
+                     
                      for test in aggregated_results['medical_tests']:
-                         # Simple normalization for is_normal logic could go here
-                         # For now we store the raw extraction
+                         # Map prompt keys to DB keys
+                         item = {
+                             "field_name": test.get('test_name'),
+                             "field_value": str(test.get('result_value')),
+                             "field_unit": test.get('unit'),
+                             "normal_range": test.get('normal_range'),
+                             "is_normal": None, # Logic can be added to compare value vs range
+                             "flag": test.get('flag')
+                         }
+                         consolidated_data.append(item)
                          
                          field = ReportField(
                              report_id=new_report.id,
                              user_id=user_id,
-                             field_name=test.get('test_name'),
-                             field_value=str(test.get('result_value')),
-                             field_unit=test.get('unit'),
-                             normal_range=test.get('normal_range'),
-                             is_normal=None # Logic can be added to compare value vs range
+                             field_name=item['field_name'],
+                             field_value=item['field_value'],
+                             field_unit=item['field_unit'],
+                             normal_range=item['normal_range'],
+                             is_normal=item['is_normal']
                          )
                          db.session.add(field)
                      
@@ -685,14 +706,32 @@ class ChatResource(Resource):
             except Exception as e:
                 db.session.rollback()
                 print(f"⚠️ DB Save Error: {e}")
+                # Re-raise to alert user if it fails again
+                raise e
 
-            # Return success
-            return {
-                "success": True,
-                "message": "Report processed successfully",
-                "report_id": saved_report_id,
-                "data": aggregated_results
-            }, 200
+            # RESTORE OLD DATA STRUCTURE
+            # The frontend expects: { personal_info: {...}, medical_data: [...], medical_info: [...] }
+            final_response = {
+                "personal_info": {
+                    "patient_name": aggregated_results['patient_info'].get('name'),
+                    "patient_age": aggregated_results['patient_info'].get('age'),
+                    "patient_gender": aggregated_results['patient_info'].get('gender'),
+                    "patient_dob": None, # Not extracted by new prompt yet, can add if needed
+                    "report_date": aggregated_results['patient_info'].get('report_date'),
+                    "doctor_names": aggregated_results['patient_info'].get('doctor_name')
+                },
+                "medical_data": consolidated_data,
+                "medical_info": consolidated_data, # Alias for compatibility
+                "debug_metadata": {
+                    "total_pages_processed": total_pages,
+                    "model_used": Config.OLLAMA_MODEL
+                }
+            }
+
+            # Return success with legacy structure inside 'result' or top level?
+            # The previous code returned a final event with 'result': final_response_dict
+            # We will return the final_response_dict as the main JSON body
+            return final_response, 200
 
         except Exception as e:
             print(f"❌ Server Error: {e}")
