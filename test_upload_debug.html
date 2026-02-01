@@ -7,52 +7,128 @@
     <title>VLM Extraction Debugger</title>
     <style>
         body {
-            font-family: monospace;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
-            background: #f0f0f0;
+            background: #f4f6f8;
+            color: #333;
         }
 
         .container {
             background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        h1 {
+            margin-top: 0;
+            color: #1a73e8;
+        }
+
+        h2 {
+            margin-top: 30px;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        input[type="text"],
+        input[type="number"] {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            width: 300px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: #1a73e8;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+        }
+
+        button:hover {
+            background: #1557b0;
         }
 
         .api-response {
             background: #2d2d2d;
-            color: #50fa7b;
+            color: #f8f8f2;
             padding: 15px;
-            border-radius: 4px;
+            border-radius: 6px;
             overflow-x: auto;
             white-space: pre-wrap;
-            font-size: 14px;
+            font-family: monospace;
+            font-size: 13px;
+            max-height: 400px;
         }
 
-        .debug-section {
+        /* Table Styles */
+        table {
+            width: 100%;
+            border-collapse: collapse;
             margin-top: 20px;
-            border-top: 1px solid #ccc;
-            padding-top: 20px;
         }
 
-        button {
-            padding: 10px 20px;
-            background: #007bff;
-            color: white;
-            border: none;
+        th,
+        td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            color: #555;
+        }
+
+        tr:hover {
+            background-color: #f1f3f4;
+        }
+
+        .badge {
+            padding: 4px 8px;
             border-radius: 4px;
-            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
         }
 
-        button:hover {
-            background: #0056b3;
+        .normal {
+            background: #e6fffa;
+            color: #00796b;
         }
 
-        .preview {
-            max-width: 200px;
-            margin-top: 10px;
+        .abnormal {
+            background: #fff5f5;
+            color: #c53030;
+        }
+
+        .neutral {
+            background: #edf2f7;
+            color: #4a5568;
+        }
+
+        #loading {
+            display: none;
+            margin-top: 20px;
+            font-weight: bold;
+            color: #666;
         }
     </style>
 </head>
@@ -60,27 +136,56 @@
 <body>
     <div class="container">
         <h1>🏥 VLM Extraction Debugger</h1>
-        <p>Upload a medical report (Image/PDF) to test data extraction. Supports multiple files.</p>
+        <p>Upload a medical report to test the NEW bilingual extraction engine.</p>
 
-        <input type="file" id="fileInput" name="file" multiple accept=".pdf,.png,.jpg,.jpeg">
-        <br><br>
-        <button onclick="uploadFiles()">Upload & Extract</button>
+        <div class="form-group">
+            <label for="profileId">Profile ID (Optional)</label>
+            <input type="number" id="profileId" placeholder="e.g. 5" value="5">
+        </div>
 
-        <div id="loading" style="display:none; margin-top: 10px; color: #666;">⏳ Processing... This may take up to 60
-            seconds...</div>
+        <div class="form-group">
+            <label for="fileInput">Select Report (PDF/Image)</label>
+            <input type="file" id="fileInput" name="file" multiple accept=".pdf,.png,.jpg,.jpeg">
+        </div>
 
-        <div id="results" style="display:none;" class="debug-section">
-            <h2>📝 Extracted Data (JSON)</h2>
+        <button onclick="uploadFiles()">🚀 Upload & Extract</button>
+
+        <div id="loading">⏳ Processing... Please wait...</div>
+
+        <div id="results" style="display:none;">
+
+            <div id="patientInfoSection">
+                <h2>👤 Patient Information</h2>
+                <div id="patientInfoDisplay"
+                    style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px;">
+                </div>
+            </div>
+
+            <h2>🧪 Medical Data Extraction</h2>
+            <div style="overflow-x: auto;">
+                <table id="resultsTable">
+                    <thead>
+                        <tr>
+                            <th>Test Name</th>
+                            <th>Value</th>
+                            <th>Unit</th>
+                            <th>Reference Range</th>
+                            <th>Status (is_normal)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody"></tbody>
+                </table>
+            </div>
+
+            <h2>🔍 Raw JSON Response</h2>
             <div id="jsonOutput" class="api-response"></div>
-
-            <h2>🐛 Raw LLM Response (Debug)</h2>
-            <div id="llmOutput" class="api-response" style="color: #ffb86c;"></div>
         </div>
     </div>
 
     <script>
         async function uploadFiles() {
             const fileInput = document.getElementById('fileInput');
+            const profileId = document.getElementById('profileId').value;
             const files = fileInput.files;
 
             if (files.length === 0) {
@@ -93,13 +198,15 @@
                 formData.append('file', files[i]);
             }
 
+            if (profileId) {
+                formData.append('profile_id', profileId);
+            }
+
             document.getElementById('loading').style.display = 'block';
             document.getElementById('results').style.display = 'none';
 
             try {
-                // Change URL if testing on server vs localhost
                 const apiUrl = '/vlm/chat';
-
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     body: formData
@@ -109,20 +216,60 @@
 
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('results').style.display = 'block';
-
-                // Pretty print output
                 document.getElementById('jsonOutput').textContent = JSON.stringify(data, null, 2);
 
-                if (data.debug_metadata && data.debug_metadata.raw_llm_response) {
-                    document.getElementById('llmOutput').textContent = data.debug_metadata.raw_llm_response;
-                } else {
-                    document.getElementById('llmOutput').textContent = "No debug metadata found.";
-                }
+                // Render Tables
+                renderResults(data);
 
             } catch (error) {
                 console.error('Error:', error);
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('jsonOutput').textContent = "Error: " + error.message;
+            }
+        }
+
+        function renderResults(data) {
+            // 1. Render Patient Info
+            const pInfo = data.personal_info || {};
+            const pInfoDiv = document.getElementById('patientInfoDisplay');
+            pInfoDiv.innerHTML = `
+                <div><strong>Name:</strong> ${pInfo.patient_name || '-'}</div>
+                <div><strong>Age:</strong> ${pInfo.patient_age || '-'}</div>
+                <div><strong>Gender:</strong> ${pInfo.patient_gender || '-'}</div>
+                <div><strong>Date:</strong> ${pInfo.report_date || '-'}</div>
+                <div><strong>Doctor:</strong> ${pInfo.doctor_names || '-'}</div>
+                <div><strong>Profile ID Linked:</strong> ${data.profile_id || 'None'}</div>
+            `;
+
+            // 2. Render Medical Table
+            const tbody = document.getElementById('resultsBody');
+            tbody.innerHTML = '';
+
+            const medicalData = data.medical_data || [];
+
+            medicalData.forEach(item => {
+                const tr = document.createElement('tr');
+
+                // Status Badge
+                let statusBadge = '<span class="badge neutral">Unknown</span>';
+                if (item.is_normal === true) {
+                    statusBadge = '<span class="badge normal">Normal</span>';
+                } else if (item.is_normal === false) {
+                    statusBadge = '<span class="badge abnormal">Abnormal</span>';
+                }
+
+                tr.innerHTML = `
+                    <td>${item.field_name || ''}</td>
+                    <td>${item.field_value || ''}</td>
+                    <td>${item.field_unit || ''}</td>
+                    <td>${item.normal_range || ''}</td>
+                    <td>${statusBadge}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            if (medicalData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No medical data extracted.</td></tr>';
             }
         }
     </script>
