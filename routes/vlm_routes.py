@@ -1057,6 +1057,26 @@ Return ONLY valid JSON (no markdown, no code blocks):
             "field_type": "measurement",
             "category": "SEROLOGY REPORT",
             "notes": ""
+        }},
+        {{
+            "field_name": "TSH Level",
+            "field_value": "< 0.5",
+            "field_unit": "mIU/L",
+            "normal_range": "0.4 - 4.0",
+            "is_normal": false,
+            "field_type": "measurement",
+            "category": "ENDOCRINOLOGY",
+            "notes": "Low TSH"
+        }},
+        {{
+            "field_name": "Glucose",
+            "field_value": "> 200",
+            "field_unit": "mg/dL",
+            "normal_range": "70 - 100",
+            "is_normal": false,
+            "field_type": "measurement",
+            "category": "BIOCHEMISTRY",
+            "notes": "High glucose"
         }}
     ]
 }}"""
