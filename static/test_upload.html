@@ -385,6 +385,11 @@
             <div id="userInfo" class="status status-info"></div>
 
             <div class="form-group">
+                <label for="profileId">Profile ID (Optional)</label>
+                <input type="number" id="profileId" placeholder="e.g. 5">
+            </div>
+
+            <div class="form-group">
                 <label for="files">Select Files (Images or PDFs)</label>
                 <input type="file" id="files" multiple accept="image/*,.pdf">
                 <div id="fileInfo" class="file-info hidden"></div>
@@ -534,6 +539,7 @@
 
         async function uploadFiles() {
             const filesInput = document.getElementById('files');
+            const profileIdInput = document.getElementById('profileId');
             const files = filesInput.files;
             const uploadBtn = document.querySelector('#uploadCard .btn-success');
             const uploadBtnText = document.getElementById('uploadBtnText');
@@ -561,16 +567,19 @@
             uploadStatus.classList.add('hidden');
             responseContainer.classList.add('hidden');
 
-            // Show progress
+            // Show progress (Simulated for non-streaming)
             progressSection.style.display = 'block';
-            progressBar.style.width = '0%';
-            progressBar.textContent = '0%';
+            progressBar.style.width = '20%';
+            progressBar.textContent = '20%';
             progressBar.style.backgroundColor = ''; // Reset color
-            progressText.textContent = 'Starting upload...';
+            progressText.textContent = 'Uploading and Analyzing... (This may take ~30-60s)';
 
             const formData = new FormData();
             for (let i = 0; i < files.length; i++) {
                 formData.append('file', files[i]);
+            }
+            if (profileIdInput && profileIdInput.value) {
+                formData.append('profile_id', profileIdInput.value);
             }
 
             try {
@@ -591,94 +600,54 @@
                     throw new Error(errorMsg);
                 }
 
-                // Read the stream
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
+                // ----------------------------------------------------
+                // CHANGED: Standard JSON handling (removed SSE stream)
+                // ----------------------------------------------------
+                progressBar.style.width = '80%';
+                progressBar.textContent = '80%';
 
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
+                const data = await response.json();
+                console.log('✅ Final Result:', data);
 
-                    buffer += decoder.decode(value, { stream: true });
-                    console.log("📨 Received chunk:", value ? value.length : 0, "bytes. Buffer len:", buffer.length);
+                // Success/Completion
+                showStatus(uploadStatus, `✅ Analysis Complete! Report Saved.`, 'success');
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+                progressBar.style.background = '#38ef7d'; // Success green
+                progressText.textContent = 'Completed';
 
-                    // Split by double newline (SSE event separator)
-                    const parts = buffer.split('\n\n');
 
-                    // The last part might be incomplete, keep it in the buffer
-                    buffer = parts.pop();
+                // Show final data in HTML
+                responseContent.textContent = JSON.stringify(data, null, 2);
+                responseContainer.classList.remove('hidden');
 
-                    for (const part of parts) {
-                        if (part.trim().startsWith('data: ')) {
-                            try {
-                                const jsonStr = part.replace('data: ', '').trim();
-                                const data = JSON.parse(jsonStr);
+                // If report_id exists, try to fetch full details (optional, as we have data already)
+                if (data.report_id) {
+                    try {
+                        const reportResponse = await fetch(`${API_BASE}/reports/${data.report_id}`, {
+                            headers: { 'Authorization': `Bearer ${authToken}` }
+                        });
+                        const reportJson = await reportResponse.json();
+                        // Update display with full standard report object if successful
+                        responseContent.textContent = JSON.stringify(reportJson, null, 2);
 
-                                if (data.error) {
-                                    throw new Error(data.error);
-                                }
-
-                                // Update Progress
-                                if (data.percent) {
-                                    progressBar.style.width = `${data.percent}%`;
-                                    progressBar.textContent = `${data.percent}%`;
-                                }
-
-                                if (data.message) {
-                                    progressText.textContent = data.message;
-                                }
-
-                                // Success/Completion
-                                if (data.percent === 100) {
-                                    console.log('✅ Final Result (ID received):', data);
-                                    showStatus(uploadStatus, `✅ Analysis Complete! Fetching full report #${data.report_id}...`, 'success');
-                                    progressBar.style.width = '100%';
-                                    progressBar.textContent = '100%';
-                                    progressBar.style.background = '#38ef7d'; // Success green
-
-                                    // Fetch full report data
-                                    try {
-                                        const reportResponse = await fetch(`${API_BASE}/reports/${data.report_id}`, {
-                                            headers: { 'Authorization': `Bearer ${authToken}` }
-                                        });
-                                        const reportJson = await reportResponse.json();
-
-                                        // Show final data in HTML
-                                        responseContent.textContent = JSON.stringify(reportJson, null, 2);
-                                        responseContainer.classList.remove('hidden');
-                                        showStatus(uploadStatus, `✅ Success! Report #${data.report_id} Ready`, 'success');
-
-                                        // Fetch all reports for this patient/profile
-                                        try {
-                                            const allReportsResponse = await fetch(`${API_BASE}/reports?profile_id=${reportJson.report.profile_id || ''}`, {
-                                                headers: { 'Authorization': `Bearer ${authToken}` }
-                                            });
-                                            if (allReportsResponse.ok) {
-                                                const allReports = await allReportsResponse.json();
-                                                displayAllReports(allReports);
-                                            }
-                                        } catch (reportsErr) {
-                                            console.warn("Failed to fetch all reports:", reportsErr);
-                                        }
-
-                                    } catch (fetchErr) {
-                                        console.error("Failed to fetch report details:", fetchErr);
-                                        showStatus(uploadStatus, `⚠️ Report Created (#${data.report_id}) but failed to load details.`, 'warning');
-                                    }
-                                }
-
-                            } catch (e) {
-                                // Rethrow valid errors, ignore parse errors of partial chunks
-                                if (e.message && !e.message.includes("JSON")) {
-                                    throw e;
-                                }
-                                console.warn("Parse error (likely split chunk):", e, part.substring(0, 50));
+                        // Fetch all reports for this patient/profile
+                        try {
+                            const allReportsResponse = await fetch(`${API_BASE}/reports?profile_id=${reportJson.report.profile_id || ''}`, {
+                                headers: { 'Authorization': `Bearer ${authToken}` }
+                            });
+                            if (allReportsResponse.ok) {
+                                const allReports = await allReportsResponse.json();
+                                displayAllReports(allReports);
                             }
+                        } catch (reportsErr) {
+                            console.warn("Failed to fetch all reports:", reportsErr);
                         }
+
+                    } catch (fetchErr) {
+                        console.error("Failed to fetch report details:", fetchErr);
                     }
                 }
-
 
             } catch (error) {
                 console.error(error);
@@ -837,10 +806,10 @@
         });
 
         // Handle the Medical Info Extraction Test
-        document.getElementById('extractButton').addEventListener('click', async function() {
+        document.getElementById('extractButton').addEventListener('click', async function () {
             const fileInput = document.getElementById('reportFile');
             const resultDiv = document.getElementById('result');
-            
+
             if (fileInput.files.length === 0) {
                 alert('Please select a file first.');
                 return;
@@ -856,7 +825,7 @@
                 // Determine which endpoint to call - typically /vlm/chat
                 // But we need to handle auth if required. The route definition didn't show @jwt_required
                 // so we'll try without header first, or use the token if we have it.
-                
+
                 const headers = {};
                 if (authToken) {
                     headers['Authorization'] = `Bearer ${authToken}`;
@@ -873,10 +842,10 @@
                 }
 
                 const data = await response.json();
-                
+
                 // Format the output
                 let html = '<h3>Extraction Results</h3>';
-                
+
                 // Personal Info
                 if (data.personal_info) {
                     html += '<h4>Personal Info</h4><ul>';
@@ -890,7 +859,7 @@
                 if (data.medical_info) {
                     html += '<h4>Medical Info</h4><table class="medical-data-table">';
                     html += '<thead><tr><th>Field</th><th>Value</th><th>Range</th><th>Normal?</th></tr></thead><tbody>';
-                    
+
                     // Handle both Array and Object formats
                     const items = Array.isArray(data.medical_info) ? data.medical_info : Object.entries(data.medical_info).map(([k, v]) => ({ field_name: k, ...v }));
 
@@ -918,7 +887,7 @@
                 }
 
                 html += '<h4>Raw JSON</h4><pre>' + JSON.stringify(data, null, 2) + '</pre>';
-                
+
                 resultDiv.innerHTML = html;
 
             } catch (error) {
