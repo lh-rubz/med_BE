@@ -638,6 +638,11 @@ class ChatResource(Resource):
             try:
                 user_id = get_jwt_identity()
                 if user_id:
+                     # Get profile_id if provided (for family profiles)
+                     profile_id = request.form.get('profile_id')
+                     if profile_id and str(profile_id).lower() in ['null', 'undefined', '']:
+                         profile_id = None
+                         
                      # Create Report
                      p_info = aggregated_results['patient_info']
                      
@@ -658,45 +663,60 @@ class ChatResource(Resource):
                      # Get filename
                      original_filename = files[0].filename if files else "uploaded_file"
                      
+                     # Extract doctor names
+                     doctor_names = p_info.get('doctor_name')
+                     if doctor_names:
+                         # Use validator to clean up doctor names
+                         doctor_names = MedicalValidator.extract_doctor_names(doctor_names)
+
                      new_report = Report(
                         user_id=user_id,
+                        profile_id=profile_id, # Added profile_id
                         patient_name=p_info.get('name'),
                         patient_age=p_info.get('age'),
                         patient_gender=p_info.get('gender'),
-                        doctor_names=p_info.get('doctor_name'),
+                        doctor_names=doctor_names,
                         report_date=r_date,
                         report_type="General Medical Report",
-                        report_hash=report_hash, # FIXED: Added required hash
-                        original_filename=original_filename, # FIXED: Added filename
-                        report_name=original_filename, # Default name
+                        report_hash=report_hash,
+                        original_filename=original_filename,
+                        report_name=original_filename,
                         created_at=datetime.now(timezone.utc)
                      )
                      db.session.add(new_report)
                      db.session.flush()
                      
-                     # Add Fields
-                     consolidated_data = [] # For legacy structure compatibility
+                     # Add Fields with Validation
+                     consolidated_data = [] 
                      
                      for test in aggregated_results['medical_tests']:
                          # Map prompt keys to DB keys
-                         item = {
+                         raw_item = {
                              "field_name": test.get('test_name'),
                              "field_value": str(test.get('result_value')),
                              "field_unit": test.get('unit'),
                              "normal_range": test.get('normal_range'),
-                             "is_normal": None, # Logic can be added to compare value vs range
+                             "is_normal": None,
                              "flag": test.get('flag')
                          }
-                         consolidated_data.append(item)
+                         
+                         # VALIDATE AND CALCULATE IS_NORMAL
+                         # Use MedicalValidator to normalize and check ranges
+                         validated_item = MedicalValidator.validate_and_normalize_field(
+                             raw_item, 
+                             patient_gender=p_info.get('gender')
+                         )
+                         
+                         consolidated_data.append(validated_item)
                          
                          field = ReportField(
                              report_id=new_report.id,
                              user_id=user_id,
-                             field_name=item['field_name'],
-                             field_value=item['field_value'],
-                             field_unit=item['field_unit'],
-                             normal_range=item['normal_range'],
-                             is_normal=item['is_normal']
+                             field_name=validated_item['field_name'],
+                             field_value=validated_item['field_value'],
+                             field_unit=validated_item['field_unit'],
+                             normal_range=validated_item['normal_range'],
+                             is_normal=validated_item['is_normal']
                          )
                          db.session.add(field)
                      
@@ -706,31 +726,28 @@ class ChatResource(Resource):
             except Exception as e:
                 db.session.rollback()
                 print(f"⚠️ DB Save Error: {e}")
-                # Re-raise to alert user if it fails again
                 raise e
 
             # RESTORE OLD DATA STRUCTURE
-            # The frontend expects: { personal_info: {...}, medical_data: [...], medical_info: [...] }
             final_response = {
                 "personal_info": {
                     "patient_name": aggregated_results['patient_info'].get('name'),
                     "patient_age": aggregated_results['patient_info'].get('age'),
                     "patient_gender": aggregated_results['patient_info'].get('gender'),
-                    "patient_dob": None, # Not extracted by new prompt yet, can add if needed
+                    "patient_dob": None, 
                     "report_date": aggregated_results['patient_info'].get('report_date'),
                     "doctor_names": aggregated_results['patient_info'].get('doctor_name')
                 },
-                "medical_data": consolidated_data,
-                "medical_info": consolidated_data, # Alias for compatibility
+                "medical_data": consolidated_data, # Now contains validated data with is_normal
+                "medical_info": consolidated_data, 
+                "profile_id": request.form.get('profile_id'), # Echo back profile_id
+                "report_id": saved_report_id,
                 "debug_metadata": {
                     "total_pages_processed": total_pages,
                     "model_used": Config.OLLAMA_MODEL
                 }
             }
 
-            # Return success with legacy structure inside 'result' or top level?
-            # The previous code returned a final event with 'result': final_response_dict
-            # We will return the final_response_dict as the main JSON body
             return final_response, 200
 
         except Exception as e:
