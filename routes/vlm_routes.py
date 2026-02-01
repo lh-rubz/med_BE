@@ -221,10 +221,6 @@ upload_parser.add_argument('file',
                           required=True,
                           action='append',
                           help='Upload medical report image or PDF file. You can select multiple files at once.')
-upload_parser.add_argument('profile_id',
-                          type=int,
-                          required=False,
-                          help='Optional: Profile ID to associate this report with. If not provided, uses the user\'s Self profile.')
 
 
 def allowed_file(filename):
@@ -853,11 +849,6 @@ class ChatResource(Resource):
         if not user:
             return {'message': 'User not found'}, 404
         
-        # Parse arguments
-        args = upload_parser.parse_args()
-        requested_profile_id = args.get('profile_id') if args else None
-        user_id = current_user_id  # Capture for closure
-        
         if 'file' not in request.files:
             return {'error': 'No file part in the request. Please upload a file using form-data with key "file"', 'code': 'NO_FILE'}, 400
         
@@ -871,7 +862,6 @@ class ChatResource(Resource):
         
         # Generator for streaming response
         def generate_progress():
-            nonlocal requested_profile_id, current_user_id  # Capture from outer scope
             try:
                 yield f"data: {json.dumps({'percent': 2, 'message': 'Preparing your file for analysis...'})}\n\n"
                 
@@ -1300,29 +1290,14 @@ Return ONLY valid JSON (no markdown, no code blocks):
                 except:
                     print(f"⚠️ Could not parse report date: {extracted_date}, using now()")
 
-            # Get profile_id: use requested one if provided and belongs to user, otherwise use Self profile
-            profile_id = None
+            # Get user's Self profile and assign to report
+            from models import Profile
+            user_profile = Profile.query.filter_by(
+                creator_id=current_user_id,
+                relationship='Self'
+            ).first()
             
-            if requested_profile_id:
-                # Verify that the profile belongs to this user
-                from models import Profile
-                requested_profile = Profile.query.filter_by(
-                    id=requested_profile_id,
-                    creator_id=current_user_id
-                ).first()
-                if requested_profile:
-                    profile_id = requested_profile.id
-                else:
-                    print(f"⚠️  Profile {requested_profile_id} not found for user {current_user_id}, using Self profile")
-            
-            # If no profile_id yet, get user's Self profile (default)
-            if not profile_id:
-                from models import Profile
-                user_profile = Profile.query.filter_by(
-                    creator_id=current_user_id,
-                    relationship='Self'
-                ).first()
-                profile_id = user_profile.id if user_profile else None
+            profile_id = user_profile.id if user_profile else None
             
             new_report = Report(
                 user_id=current_user_id,
