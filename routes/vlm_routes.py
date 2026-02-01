@@ -159,23 +159,38 @@ def recalculate_normality(medical_data):
             # Parse Range
             min_val = float('-inf')
             max_val = float('inf')
+            use_strict_less_than = False
+            use_strict_greater_than = False
 
             range_match = re.search(r'(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)', range_str)
             if range_match:
+                # Standard range like "10-20"
                 min_val = float(range_match.group(1))
                 max_val = float(range_match.group(2))
             elif '<' in range_str:
+                # Less than operator (e.g., "<6" or "< 6")
                 num_match = re.search(r'(\d+(?:\.\d+)?)', range_str)
                 if num_match:
                     max_val = float(num_match.group(1))
+                    use_strict_less_than = True  # Use strict < instead of <=
             elif '>' in range_str:
+                # Greater than operator (e.g., ">10" or "> 10")
                 num_match = re.search(r'(\d+(?:\.\d+)?)', range_str)
                 if num_match:
                     min_val = float(num_match.group(1))
+                    use_strict_greater_than = True  # Use strict > instead of >=
 
-            # Check Normality
+            # Check Normality with proper strict/non-strict comparison
             if min_val != float('-inf') or max_val != float('inf'):
-                is_norm = (min_val <= val <= max_val)
+                if use_strict_less_than:
+                    # For "<6", value must be strictly less than 6
+                    is_norm = (val < max_val)
+                elif use_strict_greater_than:
+                    # For ">10", value must be strictly greater than 10
+                    is_norm = (val > min_val)
+                else:
+                    # For ranges like "10-20", use inclusive comparison
+                    is_norm = (min_val <= val <= max_val)
                 item['is_normal'] = is_norm
 
         except Exception as e:
@@ -950,6 +965,9 @@ class ChatResource(Resource):
 
 CRITICAL RULES:
 1. Extract EVERY test with its EXACT value, unit, and normal range as shown.
+   - IMPORTANT: Match each test name (Investigation) with its corresponding normal range on the SAME ROW
+   - Do NOT mix ranges from different rows or tests
+   - If a test has no normal range visible, use empty string
 2. Report Identification:
    - report_name: Extract the EXACT title written on the report (e.g., "Detailed Hemogram", "Lipid Profile", "HAEMATOLOGY REPORT").
    - report_type: Choose the CLOSEST match from: {', '.join(REPORT_TYPES)}. Default to "Other" if no match.
@@ -967,16 +985,16 @@ CRITICAL RULES:
    - patient_age: Extract age if found (e.g., "20 Years", "45 Y", "45"). If not found, use empty string.
    - patient_gender: Extract from "Gender & Age:" or similar field (e.g., "Female/20 Years" → "Female").
 8. CRITICAL - Extract normal_range EXACTLY as shown in the "Normal Ranges" column:
-   - PRESERVE the COMPLETE text exactly, character by character
+   - PRESERVE the COMPLETE text exactly, character by character, from the SAME row as the test
    - DO NOT simplify, parse, or modify the range
+   - DO NOT MIX RANGES FROM DIFFERENT TESTS - each test has its own range on the right side
    - Examples to preserve exactly:
-     * "12 - 16 g/dL" → Extract as: "12 - 16 g/dL"
-     * "Male: 4.5 - 5.9, Female: 4.1 - 5.1" → Extract as: "Male: 4.5 - 5.9, Female: 4.1 - 5.1"
-     * "Deficient: <10, Insufficient: 11-30, Sufficient: 31-100, Toxicity: >100" → Extract exact text
-     * "Normal: <6 mg/dL" → Extract as: "Normal: <6 mg/dL"
-     * "Normal: 187 - 883, Sufficiency: >350" → Extract exact text
+     * Test: "C - Reactive Proteins", Result: "6.0", Normal Range: "Normal: <6 mg/dL" (NOT the Vitamin D range)
+     * Test: "25-OH Vitamin D", Result: "13.4", Normal Range: "Deficient: <10, Insufficient: 11-30, Sufficient: 31-100, Toxicity: >100"
+     * Test: "Haemoglobin", Result: "14.5", Normal Range: "12 - 16 g/dL"
+     * Test: "Serum Creatinine", Result: "0.98", Normal Range: "Adults Male: 0.9 - 1.3, Adults Female: 0.6 - 1.1"
    - Only remove units if they repeat in every part (rare cases)
-   - EACH TEST HAS ITS OWN UNIQUE NORMAL RANGE - DO NOT COPY RANGES BETWEEN TESTS
+   - EACH TEST HAS ITS OWN UNIQUE NORMAL RANGE FROM THE SAME ROW
 9. If value marked "High", "Low", "Marked Low", etc., add to notes
 10. Extract category/section for EACH test:
     - Look for section headers: "HAEMATOLOGY REPORT", "BIOCHEMISTRY", "DIFFERENTIAL COUNT", "ELECTROLYTES", "ENDOCRINOLOGY REPORT", "SEROLOGY REPORT", etc.
@@ -1002,6 +1020,16 @@ Return ONLY valid JSON (no markdown, no code blocks):
             "is_normal": true,
             "field_type": "measurement",
             "category": "HAEMATOLOGY REPORT",
+            "notes": ""
+        }},
+        {{
+            "field_name": "C - Reactive Proteins",
+            "field_value": "6.0",
+            "field_unit": "mg/dL",
+            "normal_range": "Normal: <6 mg/dL",
+            "is_normal": false,
+            "field_type": "measurement",
+            "category": "SEROLOGY REPORT",
             "notes": ""
         }}
     ]
