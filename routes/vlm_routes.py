@@ -871,6 +871,7 @@ class ChatResource(Resource):
         
         # Generator for streaming response
         def generate_progress():
+            nonlocal requested_profile_id, current_user_id  # Capture from outer scope
             try:
                 yield f"data: {json.dumps({'percent': 2, 'message': 'Preparing your file for analysis...'})}\n\n"
                 
