@@ -270,3 +270,83 @@ JSON OUTPUT ONLY:
   ]
 }}
 """
+
+
+def get_universal_extraction_prompt(idx, total_pages):
+    """
+    A single, powerful prompt to extract BOTH patient info and medical data from a report page.
+    Designed for bilingual (Arabic/English) reports.
+    """
+    return f"""🚨 MEDICAL REPORT DIGITIZATION TASK (Page {idx}/{total_pages}) 🚨
+
+You are an expert bilingual medical data analyst. Your job is to extract data from this medical report image with 100% precision.
+The report may be in English, Arabic, or both (Bilingual).
+
+⚠️ CORE INSTRUCTIONS:
+1. Extract **Patient Personal Information** (Name, Age, Gender, Date).
+2. Extract **Medical Test Results** (Test Name, Value, Unit, Normal Range).
+3. **TRANSLATE** specific fields (Gender) to standard English format.
+4. Return a **SINGLE JSON OBJECT**. No markdown formatting, just raw JSON.
+
+---
+
+### PART 1: PATIENT INFORMATION
+Locate these fields anywhere on the page (Header, Footer, Claims).
+- **Patient Name**: Look for "Name", "Patient Name", "اسم المريض", "الاسم". 
+  - *Rule*: Extract the actual name. Ignore titles like "Mr.", "Mrs.", "Syd/Syda".
+- **Gender**: Look for "Sex", "Gender", "الجنس", "النوع".
+  - *Rule*: **MUST CONVERT TO ENGLISH**. 
+  - If "Male", "M", "ذكر" -> return "Male"
+  - If "Female", "F", "أنثى", "انثى" -> return "Female"
+- **Age**: Look for "Age", "العمر", "Years", "Y/O". Extract the number.
+- **Report Date**: Look for "Date", "Reporting Date", "تاريخ", "التاريخ". 
+  - *Rule*: Extract YYYY-MM-DD format. Ignore time stamps.
+- **Doctor Name**: Look for "Doctor", "Ref By", "Dr.", "الطبيب", "دكتورة", "د.".
+  - *Rule*: Extract the name ONLY. Remove "Dr." or "D." prefix.
+
+### PART 2: MEDICAL TEST DATA
+Extract the main lab results table.
+- **Field Name**: The name of the test (e.g., "Hemoglobin", "WBC", "Blood Sugar", "الهيموجلوبين").
+  - *Rule*: Keep original text. If bilingual, prefer English.
+- **Value**: The numeric result (e.g., "14.5", "102").
+  - *Rule*: Extract exactly as written. If explicitly empty, use null.
+- **Unit**: The unit of measurement (e.g., "g/dL", "mg/dL", "%").
+  - *Rule*: Extract exactly as written.
+- **Normal Range**: The reference interval (e.g., "12 - 16", "70-110").
+  - *Rule*: Extract EXACTLY from likely column. Do NOT invent your own ranges.
+- **Flag**: High/Low indicators (e.g., "H", "L", "*", "High").
+  - *Rule*: If present in a separate column or next to value, extract it.
+
+---
+
+### ⚠️ CRITICAL RULES FOR ARABIC/BILINGUAL REPORTS
+1. **Direction**: Arabic text is Right-to-Left (RTL). Columns might be ordered: [Range] [Unit] [Value] [Test Name]. Check carefully!
+2. **Numbers**: Both Western (1, 2, 3) and Eastern Arabic (١, ٢, ٣) numerals may be used. Convert ALL to standard Western medical format (1, 2, 3).
+3. **Gender**: NEVER return "ذكر" or "أنثى". YOU MUST RETURN "Male" or "Female".
+
+---
+
+### JSON OUTPUT FORMAT
+Return strictly this JSON structure:
+
+{{
+  "patient_info": {{
+    "name": "string or null",
+    "age": "string or null", 
+    "gender": "Male | Female | null",
+    "report_date": "YYYY-MM-DD or null",
+    "doctor_name": "string or null"
+  }},
+  "medical_tests": [
+    {{
+      "test_name": "string",
+      "result_value": "string", 
+      "unit": "string or null",
+      "normal_range": "string or null",
+      "flag": "string or null (e.g. H, L)"
+    }},
+    ... more tests
+  ]
+}}
+"""
+

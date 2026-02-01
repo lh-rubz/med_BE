@@ -202,15 +202,16 @@ As you extract, verify each row has all 4 pieces (or mark as empty if missing):
 ✅ Only return when you have ALL {total_rows} items!
 ✅ Duplicates are ALLOWED if they appear in the report. Extract EVERYTHING.
 
-Return JSON:Full patient name from image",
-  "patient_age": "Age in years",
-  "patient_dob": "Birth date YYYY-MM-DD",
-  "patient_gender": "Male" or "Female",
-  "report_date": "YYYY-MM-DD",EXACTLY from image (preserve language: Arabic or English)",
-      "field_value": "Result value from image ONLY - if missing in image, put empty string",
-      "field_unit": "Unit from image (e.g., mg/dl, %, cells/L) - if missing, put empty string",
-      "normal_range": "EXACT range from image like (10-15) or (10-15) mg/dL - if NOT shown in image, put empty string (NOT null, NOT hallucinated value)
-  "doctor_names": "",
+Return JSON:
+{{
+  "patient_info": {{
+    "patient_name": "Full patient name from image",
+    "patient_age": "Age in years",
+    "patient_dob": "Birth date YYYY-MM-DD",
+    "patient_gender": "Male" or "Female",
+    "report_date": "YYYY-MM-DD",
+    "doctor_names": "Doctor Name found"
+  }},
   "medical_data": [
     // Array of {total_rows} objects:
     {{

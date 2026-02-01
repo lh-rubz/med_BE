@@ -20,7 +20,7 @@ from models import db, User, Report, ReportField, ReportFile, MedicalSynonym
 from config import ollama_client, Config
 from utils.medical_validator import validate_medical_data, MedicalValidator
 from utils.medical_mappings import add_new_alias
-from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_personal_info_prompt
+from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_personal_info_prompt, get_universal_extraction_prompt
 from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt, generate_prompt_enhancement_request
 from utils.vlm_self_prompt import get_report_analysis_prompt, get_custom_extraction_prompt
 from ollama import Client
@@ -344,27 +344,66 @@ def generate_prompt_for_page(page_text, page_idx, total_pages):
 
 def process_page_with_llm(page_text, page_idx, total_pages):
     """
-    Process a single page using a two-step strategy:
-    1. Generate a strict prompt for the page.
-    2. Use the generated prompt to extract data.
+    Process a single page using a three-step strategy (Self-Prompting):
+    1. Analyze the page structure (count rows, identify columns).
+    2. Generate a custom prompt based on the analysis.
+    3. Extract data using the custom prompt.
     """
     debug_logs = []
 
-    # Step 1: Generate Prompt
+    # Step 1: Analyze Page Structure
+    analysis_result = {}
     try:
-        generated_prompt = generate_prompt_for_page(page_text, page_idx, total_pages)
-        print(f"Generated Prompt for Page {page_idx}/{total_pages}:\n{generated_prompt}")  # Print the prompt to console
+        analysis_prompt = get_report_analysis_prompt(page_idx, total_pages)
+        debug_logs.append({"step": "1_analysis_prompt", "prompt_preview": analysis_prompt[:100] + "..."})
+        
+        response_analysis = ollama_client.chat.completions.create(
+            model=Config.OLLAMA_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a senior medical report analyst. output valid JSON only."},
+                {"role": "user", "content": analysis_prompt + f"\n\nPAGE CONTENT:\n{page_text}"}
+            ],
+            temperature=0.1,
+            max_tokens=4000
+        )
+        analysis_content = response_analysis.choices[0].message.content.strip()
+        
+        # Parse Analysis JSON
+        if "```json" in analysis_content:
+            analysis_content = analysis_content.split("```json")[1].split("```")[0].strip()
+        elif "```" in analysis_content:
+            analysis_content = analysis_content.split("```")[1].split("```")[0].strip()
+            
+        analysis_result = json.loads(analysis_content)
+        debug_logs.append({"step": "1_analysis_result", "result": analysis_result})
+        print(f"  📊 Page {page_idx} Analysis: Found {analysis_result.get('total_test_rows', 'N/A')} rows.")
+
+    except Exception as e:
+        print(f"Analysis failed for page {page_idx}: {e}")
+        debug_logs.append({"step": "1_analysis_error", "error": str(e)})
+        # Fallback to basic prompt if analysis fails
+        analysis_result = {}
+
+    # Step 2: Generate Custom Prompt
+    try:
+        if analysis_result:
+            generated_prompt = get_custom_extraction_prompt(analysis_result, page_idx, total_pages)
+            generated_prompt += f"\n\nPAGE CONTENT:\n{page_text}"
+        else:
+            # Fallback
+            generated_prompt = generate_prompt_for_page(page_text, page_idx, total_pages)
+            
         debug_logs.append({
-            "step": "1_generate_prompt",
+            "step": "2_generate_prompt",
             "page": page_idx,
             "prompt_preview": generated_prompt[:200] + "..."
         })
     except Exception as e:
         print(f"Prompt generation failed for page {page_idx}: {e}")
-        debug_logs.append({"step": "1_generate_prompt_error", "error": str(e)})
+        debug_logs.append({"step": "2_generate_prompt_error", "error": str(e)})
         return None, debug_logs
 
-    # Step 2: Extract Data
+    # Step 3: Extract Data
     try:
         response_extract = ollama_client.chat.completions.create(
             model=Config.OLLAMA_MODEL,
@@ -377,7 +416,7 @@ def process_page_with_llm(page_text, page_idx, total_pages):
         )
         extract_content = response_extract.choices[0].message.content.strip()
         debug_logs.append({
-            "step": "2_extraction",
+            "step": "3_extraction",
             "page": page_idx,
             "response": extract_content[:200] + "..."
         })
@@ -393,7 +432,7 @@ def process_page_with_llm(page_text, page_idx, total_pages):
 
     except Exception as e:
         print(f"Extraction failed for page {page_idx}: {e}")
-        debug_logs.append({"step": "2_extraction_error", "error": str(e)})
+        debug_logs.append({"step": "3_extraction_error", "error": str(e)})
         return None, debug_logs
 
 
@@ -471,257 +510,190 @@ class ChatResource(Resource):
     def post(self):
         """
         Extract personal and medical information from an uploaded medical report file (image or PDF).
-        Accepts a file upload.
+        Uses a robust single-pass universal bilingual prompt (Arabic/English).
         """
         if 'file' not in request.files:
             return {"error": "No file uploaded."}, 400
 
-        uploaded_file = request.files['file']
-        if not uploaded_file:
-            return {"error": "No file provided."}, 400
+        files = request.files.getlist('file')
+        if not files:
+            return {"error": "No files provided."}, 400
 
         try:
-            extracted_text = ""
-            files = request.files.getlist('file')
-            
-            if not files:
-                 return {"error": "No files provided."}, 400
-                 
-            print(f"Processing {len(files)} files...")
-            
+            extracted_text_pages = [] # List of (page_num, text_content)
             page_global_idx = 1
             
+            # --- STEP 1: ROBUST TEXT EXTRACTION ---
+            print("📂 Processing uploaded files...")
             for uploaded_file in files:
-                print(f"Processing file: {uploaded_file.filename}")
-    
-                if uploaded_file.filename.lower().endswith('.pdf'):
-                    # Process multi-page PDF files
-                    # Use stream=uploaded_file.read() to load the file into memory for PyMuPDF
+                filename = uploaded_file.filename.lower()
+                
+                if filename.endswith('.pdf'):
+                    # Load PDF
                     file_content = uploaded_file.read()
                     pdf_document = fitz.open(stream=file_content, filetype="pdf")
                     
-                    print(f"PDF has {len(pdf_document)} pages")
-                    
                     for page_num in range(len(pdf_document)):
                         page = pdf_document[page_num]
-                        
-                        # Try direct text extraction first
                         text = page.get_text()
                         
-                        # Check heuristics for OCR fallback:
-                        # 1. Arabic content (PyMuPDF isn't great with RTL)
+                        # Heuristics to force OCR (Arabic or Scanned)
+                        # Check for Arabic characters
                         has_arabic = bool(re.search(r'[\u0600-\u06FF]', text))
-                        
-                        # 2. Check for images on page (Hybrid PDFs often have text headers but image tables)
-                        # get_images() returns list of images on page
+                        # Check if page is mostly images
                         has_images = len(page.get_images()) > 0
+                        # Check for sparse text (scanned PDF)
+                        is_scanned = len(text.strip()) < 100
                         
-                        # 3. Text length - if huge amount of text (>800), it's likely a full native PDF
-                        # If minimal text (<800), it might just be headers/footers with an image body
-                        
-                        # FORCE OCR if:
-                        # - Contains Arabic (Safety)
-                        # - Has Images AND text is not overwhelming (Hybrid case)
-                        # - Text is very short (Scanned/Image-only)
-                        
-                        should_use_ocr = False
-                        reason = ""
-                        
-                        if has_arabic:
-                            should_use_ocr = True
-                            reason = "contains Arabic"
-                        elif len(text.strip()) < 800:
-                             should_use_ocr = True
-                             reason = "low text count (< 800 chars)"
-                             # If it has images, it's almost certainly a hybrid/scanned PDF
-                             if has_images:
-                                 reason += " + has images"
-                        
-                        
-                        if should_use_ocr:
-                            print(f"Page {page_global_idx}: {reason}, using OCR...")
-                            
-                            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0)) # 2x zoom for better OCR
+                        if has_arabic or (is_scanned and has_images):
+                            print(f"  📄 Page {page_global_idx}: Detected Arabic/Scanned content. Using OCR.")
+                            # Force OCR
+                            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
                             img_data = pix.tobytes("png")
-                            # Use paragraph=True to group text into lines/blocks, preserving table row structure better
+                            # Use global 'reader' (EasyOCR)
+                            # paragraph=True helps preserve table structure
                             result = reader.readtext(img_data, detail=0, paragraph=True)
                             page_text = "\n".join(result)
-                            extracted_text += f"\n--- Page {page_global_idx} ---\n{page_text}\n"
                         else:
-                            print(f"Page {page_global_idx}: Native PDF extraction ({len(text)} chars)")
-                            extracted_text += f"\n--- Page {page_global_idx} ---\n{text}\n"
-                        
+                            print(f"  📄 Page {page_global_idx}: Native Text Extraction.")
+                            # Native PDF
+                            page_text = text
+                            
+                        extracted_text_pages.append((page_global_idx, page_text))
                         page_global_idx += 1
-                            
-                elif uploaded_file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    # Process image files using easyocr
-                    print(f"Processing image file {uploaded_file.filename} with OCR...")
-                    # Use paragraph=True here as well
-                    result = reader.readtext(uploaded_file.read(), detail=0, paragraph=True)
+                        
+                elif filename.endswith(('.png', '.jpg', '.jpeg')):
+                    print(f"  🖼️ Image File {page_global_idx}: Using OCR.")
+                    # Image OCR
+                    file_content = uploaded_file.read()
+                    result = reader.readtext(file_content, detail=0, paragraph=True)
                     page_text = "\n".join(result)
-                    extracted_text += f"\n--- Page {page_global_idx} ---\n{page_text}\n"
+                    extracted_text_pages.append((page_global_idx, page_text))
                     page_global_idx += 1
-                else:
-                    return {"error": "Unsupported file type. Please upload a PDF or image."}, 400
-
-
-            # --- PER-PAGE SELF-PROMPTING EXTRACTION (STREAMING) ---
             
-            def generate():
+            if not extracted_text_pages:
+                return {"error": "Could not extract text from files."}, 400
+
+            # --- STEP 2: ANALYZE WITH LLM (Universal Prompt) ---
+            print("🤖 Sending to LLM for Analysis...")
+            
+            aggregated_results = {
+                "patient_info": {},
+                "medical_tests": []
+            }
+            
+            total_pages = len(extracted_text_pages)
+            
+            for page_idx, page_content in extracted_text_pages:
+                print(f"  🧠 Analyzing Page {page_idx}/{total_pages}...")
+                
+                prompt = get_universal_extraction_prompt(page_idx, total_pages)
+                
+                response = ollama_client.chat.completions.create(
+                    model=Config.OLLAMA_MODEL,
+                    messages=[
+                        {"role": "system", "content": "You are a precise medical data extractor. Output JSON only."},
+                        {"role": "user", "content": prompt + f"\n\nREPORT IMAGE CONTENT (OCR TEXT):\n{page_content}"}
+                    ],
+                    temperature=0.0, # Strict for data extraction
+                    max_tokens=4000
+                )
+                
+                # Parse JSON
+                content = response.choices[0].message.content.strip()
+                # Clean code blocks if present
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].split("```")[0].strip()
+                
                 try:
-                    aggregated_medical_data = []
-                    final_personal_info = {}
-                    all_debug_logs = []
+                    data = json.loads(content)
+                    print(f"    ✅ Parsed JSON for Page {page_idx}")
                     
-                    yield f"data: {json.dumps({'percent': 10, 'message': 'Starting file text extraction...'})}\n\n"
-
-                    # 1. Text Extraction Strategy
-                    total_pages_count = 0
-                    clean_pages = []
-
-                    page_global_idx = 1
-
-                    # Note: text extraction happened in outer scope, using 'extracted_text' variable. 
-
-                    # 1. Identify valid pages from extracted_text (which is available from outer scope if we are careful, but wait, 'extracted_text' is a local variable in post method...)
-                    # We need to capture 'extracted_text' from the closure.
-                    
-                    # RE-READING FILE: The extraction loop (lines 503-562) populates 'extracted_text'.
-                    # So inside 'generate()', we can access 'extracted_text' from the outer 'post' scope.
-                    
-                    # SPLIT LOGIC
-                    pages = extracted_text.split("--- Page ")
-                    clean_pages_local = []
-                    for p in pages:
-                        if not p.strip(): continue
-                        try:
-                            header, content = p.split("---\n", 1)
-                            page_num = int(header.strip())
-                            clean_pages_local.append((page_num, content))
-                        except:
-                            continue
-                    
-                    total_pages_count = len(clean_pages_local)
-                    yield f"data: {json.dumps({'percent': 20, 'message': f'Detected {total_pages_count} pages...'})}\n\n"
-                    
-                    # 2. Process Each Page
-                    for i, (page_idx, page_text) in enumerate(clean_pages_local):
-                        progress = 30 + int((i / total_pages_count) * 40) if total_pages_count > 0 else 30
-                        yield f"data: {json.dumps({'percent': progress, 'message': f'Analyzing Page {page_idx}/{total_pages_count}...'})}\n\n"
+                    # Merge Patient Info (Prefer fuller info)
+                    new_p_info = data.get('patient_info', {})
+                    if new_p_info:
+                        curr_p = aggregated_results['patient_info']
+                        for k, v in new_p_info.items():
+                             # If new value is valid and (current is missing or empty)
+                             if v and str(v).lower() not in ["", "null", "none", "n/a"]:
+                                 if k not in curr_p or not curr_p[k]:
+                                     curr_p[k] = v
+                                     
+                    # Merge Medical Tests
+                    new_tests = data.get('medical_tests', [])
+                    if new_tests:
+                        print(f"    found {len(new_tests)} tests")
+                        aggregated_results['medical_tests'].extend(new_tests)
                         
-                        extracted_data_page, logs = process_page_with_llm(page_text, page_idx, total_pages_count)
-                        all_debug_logs.extend(logs)
-                        
-                        if extracted_data_page:
-                            # Merge Medical Data
-                            if 'medical_data' in extracted_data_page and isinstance(extracted_data_page['medical_data'], list):
-                                aggregated_medical_data.extend(extracted_data_page['medical_data'])
-                            
-                            # Merge/Update Personal Info
-                            p_info = extracted_data_page.get('patient_info', {}) or extracted_data_page.get('personal_info', {})
-                            
-                            # Update if current is empty or new one has more keys
-                            if not final_personal_info:
-                                final_personal_info = p_info
-                            elif p_info.get('patient_name'):
-                                if not final_personal_info.get('patient_name'):
-                                    final_personal_info = p_info
+                except json.JSONDecodeError as je:
+                    print(f"    ⚠️ Error parsing JSON for page {page_idx}: {je}")
+                    print(f"    Raw content preview: {content[:100]}...")
+                    continue
 
-                    # 3. Post-Processing
-                    # yield f"data: {json.dumps({'percent': 75, 'message': 'Verifying consistency...'})}\n\n"
-                    
-                    # 3a. Self-Correction (LLM Pass)
-                    yield f"data: {json.dumps({'percent': 75, 'message': 'Verifying consistency (LLM Self-Correction)...'})}\n\n"
-                    consolidated_data = verify_and_correct_with_llm(aggregated_medical_data, extracted_text)
+            # --- STEP 3: SAVE TO DATABASE ---
+            print("💾 Saving to Database...")
+            saved_report_id = None
+            try:
+                user_id = get_jwt_identity()
+                if user_id:
+                     # Create Report
+                     p_info = aggregated_results['patient_info']
+                     
+                     # Parser helper for date
+                     r_date = datetime.now()
+                     if p_info.get('report_date'):
+                         try:
+                             # Try parsing various formats if needed, but Prompt requests YYYY-MM-DD
+                             r_date = datetime.strptime(p_info['report_date'], "%Y-%m-%d")
+                         except:
+                             print(f"    ⚠️ Could not parse date: {p_info.get('report_date')}, using Now.")
+                             pass
+                             
+                     new_report = Report(
+                        user_id=user_id,
+                        patient_name=p_info.get('name'),
+                        patient_age=p_info.get('age'),
+                        patient_gender=p_info.get('gender'),
+                        report_date=r_date,
+                        report_type="General Medical Report",
+                        created_at=datetime.now(timezone.utc)
+                     )
+                     db.session.add(new_report)
+                     db.session.flush()
+                     
+                     # Add Fields
+                     for test in aggregated_results['medical_tests']:
+                         # Simple normalization for is_normal logic could go here
+                         # For now we store the raw extraction
+                         
+                         field = ReportField(
+                             report_id=new_report.id,
+                             user_id=user_id,
+                             field_name=test.get('test_name'),
+                             field_value=str(test.get('result_value')),
+                             field_unit=test.get('unit'),
+                             normal_range=test.get('normal_range'),
+                             is_normal=None # Logic can be added to compare value vs range
+                         )
+                         db.session.add(field)
+                     
+                     db.session.commit()
+                     saved_report_id = new_report.id
+                     print(f"✅ Saved Report ID: {saved_report_id}")
+            except Exception as e:
+                db.session.rollback()
+                print(f"⚠️ DB Save Error: {e}")
 
-                    # 3b. Recalculate Normality
-                    yield f"data: {json.dumps({'percent': 85, 'message': 'Validating medical ranges...'})}\n\n"
-                    consolidated_data = recalculate_normality(consolidated_data, patient_gender=final_personal_info.get('patient_gender'))
-                    
-                    # Normalize Gender
-                    if 'patient_gender' in final_personal_info:
-                        final_personal_info['patient_gender'] = normalize_gender(final_personal_info['patient_gender'])
-
-                    # Construct Final Response Dict
-                    final_response_dict = {
-                        "personal_info": final_personal_info,
-                        "medical_info": consolidated_data,
-                        "medical_data": consolidated_data,
-                        "debug_metadata": {
-                            "total_pages_processed": total_pages_count,
-                            "model_used": Config.OLLAMA_MODEL,
-                            "logs": all_debug_logs
-                        }
-                    }
-                    
-                    yield f"data: {json.dumps({'percent': 90, 'message': 'Saving to database...'})}\n\n"
-
-                    # Database Saving Logic
-                    report_id = 0
-                    try:
-                        user_id = get_jwt_identity()
-                        if user_id:
-                            # Generate hash
-                            report_hash = hashlib.sha256(extracted_text.encode('utf-8')).hexdigest()
-                            
-                            # Parse date
-                            report_date_obj = datetime.now()
-                            date_str = final_personal_info.get('report_date')
-                            if date_str:
-                                try:
-                                    # Try standard format YYYY-MM-DD
-                                    report_date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-                                except:
-                                    pass
-
-                            new_report = Report(
-                                user_id=user_id,
-                                patient_name=final_personal_info.get('patient_name'),
-                                patient_age=final_personal_info.get('patient_age'),
-                                patient_gender=final_personal_info.get('patient_gender'),
-                                report_date=report_date_obj,
-                                report_hash=report_hash,
-                                report_type="General Medical Report",
-                                created_at=datetime.now(timezone.utc)
-                            )
-                            db.session.add(new_report)
-                            db.session.flush()
-                            
-                            for item in consolidated_data:
-                                field = ReportField(
-                                    report_id=new_report.id,
-                                    user_id=user_id, # Added user_id as it is required in ReportField model
-                                    field_name=item.get('field_name'),
-                                    field_value=str(item.get('field_value')),
-                                    field_unit=item.get('field_unit'),
-                                    normal_range=item.get('normal_range'),
-                                    is_normal=item.get('is_normal')
-                                )
-                                db.session.add(field)
-                            
-                            db.session.commit()
-                            report_id = new_report.id
-                            print(f"✅ Report saved with ID: {report_id}")
-                    except Exception as db_err:
-                        print(f"⚠️ DB Save Error: {db_err}")
-                        db.session.rollback()
-                    
-                    final_data_event = {
-                        'percent': 100,
-                        'message': 'Analysis Complete',
-                        'report_id': report_id,
-                        'patient_name': final_personal_info.get('patient_name'),
-                        'total_fields': len(consolidated_data),
-                        'result': final_response_dict
-                    }
-                    yield f"data: {json.dumps(final_data_event)}\n\n"
-                    
-                except Exception as e:
-                    import traceback
-                    traceback.print_exc()
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
-
-            return Response(stream_with_context(generate()), mimetype='text/event-stream')
+            # Return success
+            return {
+                "success": True,
+                "message": "Report processed successfully",
+                "report_id": saved_report_id,
+                "data": aggregated_results
+            }, 200
 
         except Exception as e:
-            return {"error": f"Failed to process file: {str(e)}"}, 500
+            print(f"❌ Server Error: {e}")
+            return {"error": str(e)}, 500
