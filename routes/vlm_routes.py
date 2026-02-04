@@ -1135,29 +1135,44 @@ class ChatResource(Resource):
                 try:
                     # Create comprehensive learning prompt
                     terms_json = json.dumps(unknown_terms)
-                    learning_prompt = f"""You are a medical data standardizer.
+                    learning_prompt = f"""You are a medical data standardizer for multilingual medical reports.
 For each test name below, identify its STANDARD medical name.
-These are actual field names from medical reports that need standardization.
+These are actual field names from medical reports (English, Arabic, or mixed).
 
 Input: {terms_json}
 
 For each term, do this:
-1. Check if it's a common medical test name
-2. Find the STANDARD English name for it
-3. If it's already standard, map to itself
-4. If it's a variation (spelling, abbreviation, translation), map to the standard form
+1. Identify the language: Is it English, Arabic, or a mix?
+2. Determine the medical test it represents
+3. Find the STANDARD name (prefer the most commonly used format)
+4. Handle variations intelligently:
+   - Different spellings: "Hemoglobin" vs "Haemoglobin" → pick one standard
+   - Abbreviations: "WBC", "CBC", "RBC" → keep standard abbreviations
+   - Translations: Keep in the original language extracted from report
+   - Arabic names: كرات الدم البيضاء (White Blood Cells) → either keep Arabic or translate
+   - Language mix: If field is in one language, standardize within that language
+
+STANDARDIZATION RULES:
+- English medical tests: Use British English where applicable (Haemoglobin not Hemoglobin)
+- Abbreviations: Keep standard medical abbreviations (WBC, RBC, HDL, LDL, ALT, AST)
+- Arabic tests: Keep in Arabic if that's what was in the report, don't translate
+- Parenthetical notes: Standardize "(Fasting)" consistently
+- Units and ranges: These are separate fields, focus on test NAME only
 
 Examples:
-- "Hemoglobin" and "Haemoglobin" both → "Haemoglobin" (British standard)
-- "WBC" and "White Blood Cell Count" both → "WBC" or "White Blood Cell Count" (pick one)
-- "Glucose (Fasting)" and "Fasting Glucose" both → "Glucose (Fasting)"
+- "Hemoglobin" and "Haemoglobin" both → "Haemoglobin"
+- "WBC" and "White Blood Cell Count" → "WBC" (keep abbreviation if report uses it)
+- "Glucose (Fasting)" and "Fasting Glucose" → "Glucose (Fasting)"
 - "Hgb" and "HGB" and "Hemoglobin" → "Haemoglobin"
-- "C-Reactive Protein" and "CRP" → "C-Reactive Protein"
+- "Blood Sugar" and "Glucose" → "Glucose"
+- "كرات الدم البيضاء" (Arabic WBC) → keep as "كرات الدم البيضاء" (preserve Arabic)
+- "الهيموجلوبين" and "Haemoglobin" → If original is Arabic, keep Arabic; if English, use "Haemoglobin"
+- "ALT" and "SGPT" and "Alanine Aminotransferase" → "Alanine aminotransferase (ALT)"
 
 Return ONLY valid JSON (no markdown):
 {{"term": "standard_name", "term2": "standard_name2"}}
 
-Be aggressive in standardization - group all variations together."""
+Be aggressive but intelligent - group all variations of same test together."""
                     
                     response = ollama_client.chat.completions.create(
                         model=Config.OLLAMA_MODEL,

@@ -130,35 +130,72 @@ Return ONLY valid JSON (no markdown).
 def get_simplified_extraction_prompt(idx: int, total_pages: int, report_types: list) -> str:
     """
     Simplified one-shot extraction: Skip structure analysis, go straight to extraction.
-    Use this if the model should just extract all data without overthinking structure.
+    Optimized for both LTR (English) and RTL (Arabic) report layouts.
     """
     
     return f"""Extract EVERY medical test from this report image (page {idx}/{total_pages}).
 
-KEY RULES:
-1. Read the table carefully - identify all columns and rows
+LANGUAGE & LAYOUT DETECTION:
+- If the report is mostly ARABIC text: It's likely RTL (right-to-left)
+- If the report is mostly ENGLISH text: It's likely LTR (left-to-right)
+- If BILINGUAL (Arabic + English): Check the main table structure
+  - If table headers and first column are on the RIGHT: Read as RTL
+  - If table headers and first column are on the LEFT: Read as LTR
+  - Patient data section (header area) is often in the SAME direction as the main table
+
+TABLE READING STRATEGY:
+For LTR (English) reports: Read columns left-to-right
+For RTL (Arabic) reports: Read columns right-to-left, but maintain logical order:
+  - Find the TEST NAME column (rightmost in RTL, leftmost in LTR)
+  - Find the VALUE column (usually next to test name)
+  - Find the UNIT column (often after value)
+  - Find the REFERENCE RANGE column (usually rightmost in LTR, leftmost in RTL)
+
+EXTRACTION RULES:
+1. Read ALL test rows in the main table
 2. For EACH test row, extract:
-   - field_name: Test name (exactly as shown)
-   - field_value: Result value (exactly as shown, including < > operators)
-   - field_unit: Measurement unit
-   - normal_range: Reference range (if shown, otherwise "")
-   - category: Section name (HAEMATOLOGY, BIOCHEMISTRY, etc.)
-   - notes: Any flags (High, Low, Critical, etc.)
+   - field_name: Test name (exactly as shown, can be Arabic or English)
+   - field_value: Result value (exactly as shown, including < > operators, preserve decimals)
+   - field_unit: Measurement unit (mg/dL, U/L, %, etc. - can be empty)
+   - normal_range: Reference range with parentheses if shown (e.g., "(74-110)"), otherwise ""
+   - category: Section name (HAEMATOLOGY, BIOCHEMISTRY, CLINICAL CHEMISTRY, كيمياء سريرية, etc.)
+   - notes: Any flags (High, Low, Critical, abnormal, etc.) - usually shown as symbols or text
 
 3. ONLY include rows with a test name AND a result value
 4. If a field is empty, return ""
-5. If normal_range is missing, that's OK - leave it ""
-6. Preserve exact values: decimals, operators, spacing
+5. Preserve exact values: decimals, operators (< > ≤ ≥), spacing
+6. If normal_range appears as separate columns, combine into one field
 
-METADATA (from header area):
-- patient_name: From "Patient Name:" or "اسم المريض:"
-- patient_age: Numbers only
-- patient_gender: "Male", "Female", or ""
-- report_date: YYYY-MM-DD format only
-- doctor_names: From "Ref By:" or "الطبيب:"
-- report_type: Match to: {', '.join(report_types)}
+HEADER/METADATA EXTRACTION:
+Look for these fields in the HEADER section (not the table):
 
-JSON OUTPUT (only this, no markdown):
+For ENGLISH reports, look for:
+- "Patient Name:" or "Name:" → patient_name
+- "Age:" or "DOB:" → patient_age (extract number only)
+- "Gender:" or "Sex:" → patient_gender
+- "Date:" or "Report Date:" → report_date
+
+For ARABIC reports, look for:
+- "اسم المريض:" or "الاسم:" → patient_name (extract Arabic name)
+- "العمر:" or "السن:" → patient_age (numbers only, ignore Arabic words)
+- "الجنس:" or "النوع:" → patient_gender (male/female)
+- "التاريخ:" or "تاريخ التقرير:" → report_date (convert format to YYYY-MM-DD)
+- "الطبيب:" or "المراجع:" → doctor_names (extract the doctor name)
+
+For BILINGUAL reports: Look in the HEADER for BOTH English and Arabic labels
+
+Date Format Handling:
+- If date is DD/MM/YYYY format: Convert to YYYY-MM-DD
+- If date is MM/DD/YYYY format: Convert to YYYY-MM-DD
+- If date is already YYYY-MM-DD: Keep as is
+- Extract only the DATE part, ignore time
+
+REPORT TYPE AND NAME:
+- report_type: Match from list: {', '.join(report_types)}
+- report_name: Look for section headers like "CLINICAL CHEMISTRY", "HAEMATOLOGY", "كيمياء سريرية", etc.
+- If multiple sections: Use the section name corresponding to the current table
+
+JSON OUTPUT (only this, no markdown, no extra text):
 {{
     "patient_name": "",
     "patient_age": "",
@@ -170,13 +207,24 @@ JSON OUTPUT (only this, no markdown):
     "total_fields_in_image": 0,
     "medical_data": [
         {{
-            "field_name": "Test Name",
+            "field_name": "Test Name (can be Arabic)",
             "field_value": "Value",
             "field_unit": "Unit",
-            "normal_range": "Range or empty",
+            "normal_range": "(min-max) or empty",
             "category": "Section",
             "notes": ""
         }}
     ]
 }}
+
+VALIDATION CHECKLIST:
+✓ Count all visible test rows in the table
+✓ Each medical_data entry has field_name and field_value
+✓ Empty cells are represented as ""
+✓ Decimal values and operators are preserved exactly
+✓ Normal ranges are in parentheses if present
+✓ No invented data - extract only what you see
+✓ Date is in YYYY-MM-DD format
+✓ Patient name includes Arabic characters if present
+✓ All test values match what's shown in the image
 """
