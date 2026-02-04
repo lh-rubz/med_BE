@@ -312,56 +312,17 @@ REPORT TYPE AND NAME:
 - report_name: Look for section headers like "CLINICAL CHEMISTRY", "HAEMATOLOGY", "كيمياء سريرية", etc.
 - If multiple sections: Use the section name corresponding to the current table
 
-CRITICAL: VALIDATE FIELD-VALUE LOGICAL CORRECTNESS:
-Before finalizing extraction, verify each row makes logical sense:
-
-For test name + value pairings, check:
-1. NUMERICAL REASONABLENESS:
-   - "red blood cell distribution width" should have value ~11-14% NOT 257 K/uL
-   - "platelet count" should have value ~150-450 K/uL, NOT 77.3 fL (that's MCV)
-   - "hemoglobin" should have 12-16 g/dL, NOT 40.2 (that's hematocrit %)
-   - "hematocrit" should have 37-48 %, NOT 12.6 g/dL
-   - "mean cell volume" (MCV) should have 80-100 fL, NOT values >100 (unless truly abnormal)
-
-2. UNIT-VALUE MATCHING:
-   - If field_name contains "count" (RBC, WBC, Platelet) → unit should be K/uL or cells/L
-   - If field_name contains "hemoglobin" → unit should be g/dL or g/L
-   - If field_name contains "%" or "percentage" → unit should be % or blank
-   - If field_name contains "volume" (MCV) → unit should be fL
-   - If field_name contains "concentration" (MCH, MCHC) → unit should be pg or g/dL
-
-3. RANGE-VALUE MATCHING:
-   - "hemoglobin" with value 12.6 should have range (12-16) or (11.5-15.5), NOT (37-48)
-   - "hematocrit" with value 40.2 should have range (37-48), NOT (12-16)
-   - "platelet count" with value 230 should have range (140-450), NOT (12-16)
-   - "basophils" with value 0.2% should have range (0-1) or (0-3), NOT (11.5-14.5)
-
-4. IF A ROW SEEMS MISMATCHED:
-   - Check if the value actually belongs to the PREVIOUS or NEXT field
-   - Check if the normal_range was swapped with the actual value
-   - If you cannot match correctly, SKIP that mismatched pairing
-   - It's better to skip one field than to include wrong data
-
-COMMON ROW-MIXING ERRORS TO DETECT & CORRECT:
-- Value 257 paired with "red blood cell distribution width" (WRONG - 257 is platelet count)
-  Fix: Look for the actual RDW value (should be ~11-14%) and pair correctly
-  
-- Value 40.2 with unit % paired with "mean cell hemoglobin" (WRONG - 40.2% is hematocrit)
-  Fix: MCH should be ~27-32 pg, not a percentage
-
-- "monocytes" = "17.7%" with range (0-1) (WRONG - wrong field pair from next row)
-  Fix: Normal monocytes are (4-9)%, value 17.7% seems like it came from a different field
-
-Example: If in RTL table you see:
-  — | (0-1) | % | 17.7 | Basophils
-  — | (4-9) | % | 4.1 | Monocytes
-
-The WRONG extraction (row mixing):
-  field_name: "Basophils", field_value: "17.7", field_unit: "%", normal_range: "(4-9)" ← WRONG RANGE!
-
-The CORRECT extraction:
-  field_name: "Basophils", field_value: "17.7", field_unit: "%", normal_range: "(0-1)"
-  field_name: "Monocytes", field_value: "4.1", field_unit: "%", normal_range: "(4-9)"
+BEST PRACTICES FOR ACCURATE EXTRACTION:
+1. Match Test Name + Value carefully - they should be on the same row
+2. For RTL tables, visually, the test name is on the RIGHT and value is to the LEFT
+3. Copy Units and Ranges EXACTLY as shown in the table
+4. If Range column is empty or shows "-", return empty string ""
+5. Double-check numeric values match what you see (do not round or convert)
+6. Examples of correct pairings:
+   ✓ "Hemoglobin" = "12.6" with unit "g/dL" and range "(12-16)"
+   ✓ "Platelet Count" = "257" with unit "K/uL" and range "(140-450)"
+   ✓ "Basophils" = "0.2" with unit "%" and range "(0-1)"
+7. Do NOT invent or assume values - extract ONLY what you see
 
 JSON OUTPUT (only this, no markdown, no extra text):
 {{
