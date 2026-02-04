@@ -134,34 +134,40 @@ def get_simplified_extraction_prompt(idx: int, total_pages: int, report_types: l
     
     return f"""Extract ALL medical tests from this report image (page {idx}/{total_pages}).
 
-STEP 1: DETECT TABLE DIRECTION
-- If test names are on the RIGHT side → RTL (Arabic), read RIGHT to LEFT
-- If test names are on the LEFT side → LTR (English), read LEFT to RIGHT
+STEP 1: EXTRACT HEADER INFO FIRST
+Look at the TOP section of the report (before the table).
+Find these Arabic labels and extract the value NEXT TO each label:
 
-STEP 2: EXTRACT FROM TABLE (row by row)
-For EACH row, extract these fields staying on the SAME ROW:
-- field_name: The test name (e.g., "Fasting Blood Sugar", "Creatinine")
-- field_value: The numeric result (e.g., "109", "0.56")
-- field_unit: The unit (e.g., "mg/dl", "U/L")
-- normal_range: The reference range (e.g., "(74-110)", "(0.5-0.9)")
-- notes: Any flags like "*" or "High"
+| Arabic Label | English | What to Extract |
+|-------------|---------|-----------------|
+| اسم المريض | Patient Name | Full name next to this label |
+| الجنس | Gender | أنثى=Female, ذكر=Male |
+| تاريخ الميلاد | DOB | Date like 01/05/1975 |
+| تاريخ الطلب | Report Date | Date like 2025-12-31 |
+| الطبيب | Doctor | Doctor name next to this label |
 
-CRITICAL: Match test name with its value from the SAME row. Do NOT mix rows.
+IMPORTANT: 
+- "اسم المريض" and "الطبيب" are DIFFERENT fields - don't confuse them!
+- Patient name is at "اسم المريض:", Doctor name is at "الطبيب:"
+- Calculate age: Report Year - Birth Year (e.g., 2025 - 1975 = 50)
 
-STEP 3: EXTRACT HEADER INFO
-Look for these in the header (NOT in the table):
-- Patient name: Look for "اسم المريض" → Extract FULL name (all words)
-- Gender: Look for "الجنس" → Extract "أنثى" as Female, "ذكر" as Male
-- DOB/Age: Look for "تاريخ الميلاد" → Calculate age = Report Year - Birth Year
-- Report Date: Look for "تاريخ الطلب" or "تاريخ الدخول" → Use THIS date (not today)
-- Doctor: Look for "الطبيب" → Extract doctor name
+STEP 2: EXTRACT TABLE DATA
+The table has these columns (RIGHT to LEFT for Arabic headers):
+| ملاحظات | الوحدة | النتيجة الطبيعية | النتيجة | الفحص |
+| Notes | Unit | Normal Range | Value | Test Name |
 
-From this specific report, extract:
-- patient_name from "اسم المريض:" field
-- patient_gender from "الجنس:" field (أنثى = Female)
-- report_date from "تاريخ الطلب:" or "تاريخ الدخول:" (format: YYYY-MM-DD)
-- Calculate age from "تاريخ الميلاد:" (01/05/1975) using report date
-- doctor_names from "الطبيب:" field
+For EACH row, read from RIGHT to LEFT:
+1. Test Name (الفحص) - rightmost column
+2. Value (النتيجة) - next column left
+3. Normal Range (النتيجة الطبيعية) - next column left  
+4. Unit (الوحدة) - next column left
+5. Notes (ملاحظات) - leftmost column
+
+CRITICAL: Stay on the SAME ROW. Each test name matches the value directly to its left.
+
+Example from this report:
+- Row: "Fasting Blood Sugar (FBS)" | 109 | (74-110) | mg/dl | 
+- Extract: field_name="Fasting Blood Sugar (FBS)", field_value="109", normal_range="(74-110)", field_unit="mg/dl"
 
 JSON OUTPUT (only JSON, no markdown):
 {{
