@@ -132,59 +132,83 @@ def get_simplified_extraction_prompt(idx: int, total_pages: int, report_types: l
     Simplified one-shot extraction for LTR and RTL medical reports.
     """
     
-    return f"""Extract ALL medical tests from this report image (page {idx}/{total_pages}).
+    return f"""Extract ALL medical tests from this Arabic medical report (page {idx}/{total_pages}).
 
-STEP 1: EXTRACT HEADER INFO
-The header has TWO columns. Look carefully:
+===== STEP 1: HEADER EXTRACTION =====
+The header is a TWO-COLUMN table at the top.
 
-RIGHT COLUMN (rightmost):
-- رقم المريض (Patient ID): number
-- اسم المريض (Patient Name): EXTRACT THIS → patient_name
-- رقم الهوية (ID Number): number  
-- الجنس (Gender): أنثى means Female, ذكر means Male → patient_gender
-- تاريخ الميلاد (DOB): date like 01/05/1975 → use to calculate age
+RIGHT SIDE OF HEADER (look for these Arabic labels):
+- اسم المريض = Patient Name → copy the Arabic name next to it to patient_name
+- الجنس = Gender → أنثى = Female, ذكر = Male
+- تاريخ الميلاد = Date of Birth → calculate age from this date
 
-LEFT COLUMN (leftmost):
-- تاريخ الطلب (Report Date): date like 2025-12-31 → report_date
-- الطبيب (Doctor): EXTRACT THIS → doctor_names
+LEFT SIDE OF HEADER (look for these Arabic labels):
+- تاريخ الطلب = Request Date → use as report_date (format: YYYY-MM-DD)
+- الطبيب = Doctor → copy the Arabic name next to it to doctor_names
 
-CRITICAL RULES FOR NAMES:
-- patient_name comes from "اسم المريض" row (RIGHT column)
-- doctor_names comes from "الطبيب" row (LEFT column)
-- These are DIFFERENT people - do not mix them!
-- Extract the FULL text exactly as written
+HEADER EXAMPLE from this image:
+- اسم المريض: رئيسة خضر طالب خطيب ← this is patient_name
+- الجنس: أنثى ← this means Female
+- تاريخ الميلاد: 01/05/1975 ← calculate age: 2025 - 1975 = 50 years
+- الطبيب: جهاد العملة ← this is doctor_names
 
-STEP 2: EXTRACT TABLE DATA
-Read the table row by row. The table columns from RIGHT to LEFT are:
-الفحص (Test) | النتيجة (Value) | النتيجة الطبيعية (Range) | الوحدة (Unit) | ملاحظات (Notes)
+===== STEP 2: TABLE EXTRACTION =====
+This is a CBC (Complete Blood Count) report. The table is RTL (right-to-left).
 
-EXTRACT EACH ROW - stay on same row:
-Row 1: Fasting Blood Sugar (FBS) → value=109, range=(74-110), unit=mg/dl
-Row 2: Creatinine, serum → value=0.56, range=(0.5-0.9), unit=mg/dl
-Row 3: Cholesterol, Total → value=230, range=(0-200), unit=mg/dl
-Row 4: Alanine transaminase ALT (GPT) → value=32, range=(0-33), unit=U/L
-Row 5: HDL-Cholesterol → value=74, range=(35-80), unit=mg/dl
-Row 6: LDL-Cholesterol → value=128, range=(0-130), unit=mg/dl
+TABLE COLUMNS (from RIGHT to LEFT):
+1. الفحص (Test Name) - RIGHTMOST column, contains English test names
+2. النتيجة (Result Value) - the numeric value
+3. النتيجة الطبيعية (Normal Range) - in parentheses like (12-16)
+4. الوحدة (Unit) - like %, g/dL, fL, pg, K/uL, M/uL
+5. ملاحظات (Notes) - LEFTMOST column, usually empty or has *
 
-IMPORTANT: HDL value is 74, LDL value is 128. Do NOT swap these!
+CRITICAL: READ EACH ROW HORIZONTALLY!
+For each row, the test name on the RIGHT pairs with the value DIRECTLY to its LEFT.
 
-JSON OUTPUT (only JSON, no markdown):
+Example rows from this CBC:
+- Test: "Red blood cell distribution width..." | Value: 14.4 | Range: (-) | Unit: %
+- Test: "Platelet Crit" | Value: 0.23 | Range: (-) | Unit: %
+- Test: "Monocytes" | Value: 0.1 | Range: (-) | Unit: K/uL
+- Test: "White blood cells" | Value: 7.1 | Range: (4.6-11) | Unit: cells/L
+- Test: "Neutrophils Granulocyte" | Value: 4.1 | Range: (-) | Unit: K/uL
+- Test: "Neutrophils granulocyte%" | Value: 57.8 | Range: (37.0-92.0) | Unit: %G
+- Test: "Lymphocytes%" | Value: 41.1 | Range: (-) | Unit: %L
+- Test: "Red blood cells (RBC)" | Value: 5.2 | Range: (4.1-5.5) | Unit: M/uL
+- Test: "Haemoglobin (HGB)" | Value: 12.6 | Range: (12-16) | Unit: g/dL
+- Test: "Hematocrit (HCT)" | Value: 40.2 | Range: (37-48) | Unit: %
+- Test: "Mean cell volume (MCV)" | Value: 77.3 | Range: (80-100) | Unit: fL
+- Test: "Mean cell haemoglobin (MCH)" | Value: 24.2 | Range: (27-31.2) | Unit: pg
+- Test: "Mean cell haemoglobin concentration (MCHC)" | Value: 31.3 | Range: (31-35) | Unit: %
+- Test: "Monocytes(%)" | Value: 1.1 | Range: (3-7) | Unit: %
+- Test: "Red blood cell distribution width" | Value: (-) | Range: (11.5-14.5) | Unit: %
+- Test: "Platelets Count" | Value: 257 | Range: (140-450) | Unit: K/uL
+- Test: "Eosinophils(%)" | Value: (-) | Range: (1-3) | Unit: %
+- Test: "Mean Platelet Volume(MPV)" | Value: 9 | Range: (-) | Unit: fL
+- Test: "Lymphocytes" | Value: 2.9 | Range: (0.7-4.8) | Unit: K/UL
+- Test: "Basophiles(%)" | Value: (-) | Range: (0-0.75) | Unit: %
+- Test: "Platelet Distribution Width" | Value: 17.7 | Range: (-) | Unit: 10(GSD)
+
+DO NOT MIX VALUES BETWEEN ROWS!
+Each test name must have the value from THE SAME ROW.
+
+===== OUTPUT FORMAT =====
+Return ONLY valid JSON (no markdown, no extra text):
 {{
-    "patient_name": "",
-    "patient_age": "",
-    "patient_gender": "",
-    "report_date": "YYYY-MM-DD",
-    "report_name": "",
-    "report_type": "",
-    "doctor_names": "",
-    "total_fields_in_image": 0,
+    "patient_name": "رئيسة خضر طالب خطيب",
+    "patient_age": "50",
+    "patient_gender": "Female",
+    "report_date": "2025-12-31",
+    "report_name": "HEMATOLOGY - Complete Blood Count (CBC)",
+    "report_type": "Complete Blood Count (CBC)",
+    "doctor_names": "جهاد العملة",
+    "total_fields_in_image": 20,
     "medical_data": [
         {{
-            "field_name": "",
-            "field_value": "",
-            "field_unit": "",
-            "normal_range": "",
-            "category": "Clinical Chemistry",
+            "field_name": "Use English test name from rightmost column",
+            "field_value": "Value from same row",
+            "field_unit": "Unit from same row",
+            "normal_range": "Range from same row or empty",
+            "category": "HEMATOLOGY",
             "notes": ""
         }}
     ]
