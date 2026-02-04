@@ -273,39 +273,64 @@ HEADER/METADATA EXTRACTION:
 Look for these fields in the HEADER section (not the table):
 
 For ENGLISH reports, look for:
-- "Patient Name:" or "Name:" → patient_name (extract ONLY the person's name, remove titles)
-- "Age:" or "DOB:" → patient_age (extract number only)
-- "Gender:" or "Sex:" → patient_gender
-- "Date:" or "Report Date:" → report_date
+- "Patient Name:" or "Name:" → patient_name (extract THE COMPLETE FULL NAME as written, including all words - first, middle, last names)
+- "Age:" or "DOB:" or "Date of Birth:" → patient_age 
+  * If shows "Age: XX" → extract the number only (XX)
+  * If shows "DOB:" or "Date of Birth:" → extract the date, then CALCULATE age: (report_date - DOB)
+- "Gender:" or "Sex:" → patient_gender (must extract: look for "M", "F", "Male", "Female", "ذكر" (male), "أنثى" (female))
+- "Date:" or "Report Date:" → report_date (use THIS date from the report, NOT today's date)
 
 For ARABIC reports, look for:
-- "اسم المريض:" or "الاسم:" or "اسم" → patient_name (extract ONLY the Arabic name, remove medical titles)
-- "العمر:" or "السن:" → patient_age (numbers only, ignore Arabic words)
-- "الجنس:" or "النوع:" → patient_gender (male/female)
-- "التاريخ:" or "تاريخ التقرير:" → report_date
-- "الطبيب:" or "المراجع:" or "اسم الطبيب:" → doctor_names (extract ONLY the doctor name, ignore titles like "د." "دكتور")
+- "اسم المريض:" or "الاسم:" or "اسم" → patient_name (extract THE COMPLETE FULL NAME as written, including all Arabic words)
+- "العمر:" or "السن:" → patient_age (if shows number, extract it)
+- "تاريخ الميلاد:" or "DOB:" → if shows date, CALCULATE age: (report_date - DOB)
+- "الجنس:" or "النوع:" → patient_gender (look for: "ذكر", "أنثى", "M", "F", "Male", "Female")
+- "التاريخ:" or "تاريخ التقرير:" or "التاريخ:" → report_date (use the report date from the header)
+- "الطبيب:" or "المراجع:" or "اسم الطبيب:" → doctor_names
+
+IMPORTANT - FULL NAMES:
+- Extract the COMPLETE name as written in the report
+- If name is "Ahmed Mohamed Hassan Ali" → extract ALL: "Ahmed Mohamed Hassan Ali" (not just "Ahmed Ali")
+- If name is "أحمد محمد حسن علي" → extract ALL: "أحمد محمد حسن علي"
+- Do NOT abbreviate or shorten names - keep the exact full name
+
+IMPORTANT - GENDER EXTRACTION:
+Gender MUST be extracted. Look carefully for:
+- ENGLISH: "Male", "M", "male", "m"
+- ENGLISH: "Female", "F", "female", "f"
+- ARABIC: "ذكر" (male), "م" (male abbreviation)
+- ARABIC: "أنثى" (female), "ا" (female abbreviation)
+- If you see gender field, extract it - do NOT leave blank
+
+IMPORTANT - AGE CALCULATION FROM DOB:
+If report shows "Date of Birth" or "DOB" instead of age:
+1. Extract the DOB date (format: DD/MM/YYYY or similar)
+2. Extract the Report Date from the report
+3. Calculate: Age = (Report Date - DOB) in years
+4. Return the calculated age as a number
+Example: If DOB = 1980-05-15 and Report Date = 2026-02-04
+         Age = 2026 - 1980 = 46 years old → return "46"
 
 CRITICAL NAME CLEANING:
 After extracting patient_name or doctor_names:
-1. Remove ALL medical/professional titles: "د." "دكتور" "Dr" "Prof" "أ.د" "الدكتور" "البروفيسور"
-2. Remove ALL position titles: "رئيسة" "مدير" "مسؤول" "مساعد" "معاون"
-3. Remove word fragments that are parts of titles (e.g., "خـير" might be part of title)
-4. Extract ONLY the actual person's name
-5. Arabic names: Keep them in Arabic, just clean the title words
-6. If result is empty after cleaning, return ""
-
-Examples of cleaning:
-- Input: "رئيسة خـير طابـب خطبـب" 
-  Remove: "رئيسة" (title), "خـير" (word fragment), "طابـب"/"خطبـب" (corrupted/title)
-  Result: "" (all removed) OR extract the meaningful name part if visible
+1. Remove ONLY medical/professional titles at the START: "د." "دكتور" "Dr" "Prof" "أ.د" "الدكتور" "البروفيسور" "MD" "Dr." "Prof."
+2. Remove ONLY position titles at the START: "رئيسة" "رئيس" "مدير" "مسؤول" "مساعد" "معاون"
+3. Keep the actual person's name - ALL their names (first, middle, last)
+4. Arabic names: Keep them in Arabic
+5. Do NOT remove words that are part of the actual name
+Example: "Dr. Ahmed Mohamed Hassan" → remove "Dr." → keep "Ahmed Mohamed Hassan"
+Example: "رئيسة أسماء محمد علي" → remove "رئيسة" → keep "أسماء محمد علي"
+Example: "رئيسة خـير طابـب خطبـب" → all text is titles, return "" (no actual name found)
 
 For BILINGUAL reports: Look in the HEADER for BOTH English and Arabic labels
 
 Date Format Handling:
+- Extract the REPORT DATE from the report (not today's date)
 - If date is DD/MM/YYYY format: Convert to YYYY-MM-DD
 - If date is MM/DD/YYYY format: Convert to YYYY-MM-DD
 - If date is already YYYY-MM-DD: Keep as is
 - Extract only the DATE part, ignore time
+- Use this date for age calculation if DOB is present
 
 REPORT TYPE AND NAME:
 - report_type: Match from list: {', '.join(report_types)}

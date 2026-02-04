@@ -27,11 +27,20 @@ class MedicalDataPostProcessor:
             Cleaned data with invalid entries removed
         """
         
+        # Clean report date first (needed for DOB to age calculation)
+        cleaned_report_date = MedicalDataPostProcessor._clean_date(extracted_data.get("report_date", ""))
+        
+        # Clean age - may involve calculating from DOB
+        cleaned_age = MedicalDataPostProcessor._clean_age(
+            extracted_data.get("patient_age", ""),
+            report_date=cleaned_report_date
+        )
+        
         cleaned = {
             "patient_name": MedicalDataPostProcessor._clean_patient_name(extracted_data.get("patient_name", "")),
-            "patient_age": MedicalDataPostProcessor._clean_age(extracted_data.get("patient_age", "")),
+            "patient_age": cleaned_age,
             "patient_gender": MedicalDataPostProcessor._clean_gender(extracted_data.get("patient_gender", "")),
-            "report_date": MedicalDataPostProcessor._clean_date(extracted_data.get("report_date", "")),
+            "report_date": cleaned_report_date,
             "report_name": extracted_data.get("report_name", ""),
             "report_type": extracted_data.get("report_type", ""),
             "doctor_names": extracted_data.get("doctor_names", ""),
@@ -228,23 +237,124 @@ class MedicalDataPostProcessor:
         return name
     
     @staticmethod
-    def _clean_age(age: str) -> str:
-        """Clean and validate age."""
+    def _clean_age(age: str, report_date: str = "") -> str:
+        """
+        Clean and validate age.
+        If age is a date (DOB), calculate age from report_date.
+        
+        Args:
+            age: Age or DOB string
+            report_date: Report date to use for DOB calculation (YYYY-MM-DD format)
+        
+        Returns:
+            Age as a number string
+        """
         if not age:
             return ""
         
         age_str = str(age).strip()
         
-        # Try to extract numeric age
+        # First try to extract numeric age
         numeric_age = ''.join(c for c in age_str if c.isdigit())
         
-        if numeric_age:
-            age_num = int(numeric_age)
-            # Validate age is within reasonable bounds (1-150)
-            if 1 <= age_num <= 150:
-                return numeric_age
+        # If we have a 4-digit number that looks like a year, it might be a DOB
+        if len(numeric_age) == 4:
+            # Could be a year (DOB)
+            try:
+                year = int(numeric_age)
+                if 1900 <= year <= 2100:
+                    # Try to parse as DOB and calculate age
+                    calculated_age = MedicalDataPostProcessor._calculate_age_from_dob(age_str, report_date)
+                    if calculated_age:
+                        return str(calculated_age)
+            except:
+                pass
+        
+        # If we have 6 or 8 digits, likely a DOB (DDMMYYYY or YYYYMMDD)
+        if len(numeric_age) in [6, 8]:
+            calculated_age = MedicalDataPostProcessor._calculate_age_from_dob(age_str, report_date)
+            if calculated_age:
+                return str(calculated_age)
+        
+        # Try regular numeric age
+        if numeric_age and len(numeric_age) <= 3:
+            try:
+                age_num = int(numeric_age)
+                # Validate age is within reasonable bounds (1-150)
+                if 1 <= age_num <= 150:
+                    return numeric_age
+            except:
+                pass
         
         return ""
+    
+    @staticmethod
+    def _calculate_age_from_dob(dob_str: str, report_date_str: str = "") -> Optional[int]:
+        """
+        Calculate age from Date of Birth and report date.
+        
+        Args:
+            dob_str: Date of birth string (various formats)
+            report_date_str: Report date in YYYY-MM-DD format
+        
+        Returns:
+            Calculated age in years, or None if cannot calculate
+        """
+        try:
+            from datetime import datetime
+            import re
+            
+            # Parse DOB
+            dob_patterns = [
+                (r'(\d{4})[/-](\d{1,2})[/-](\d{1,2})', 'ymd'),  # YYYY-MM-DD
+                (r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', 'dmy'),  # DD-MM-YYYY
+            ]
+            
+            dob_date = None
+            for pattern, format_type in dob_patterns:
+                match = re.search(pattern, dob_str)
+                if match:
+                    if format_type == 'ymd':
+                        year, month, day = match.groups()
+                    else:  # dmy
+                        day, month, year = match.groups()
+                    
+                    try:
+                        dob_date = datetime(int(year), int(month), int(day))
+                        break
+                    except:
+                        pass
+            
+            if not dob_date:
+                return None
+            
+            # Parse report date
+            report_date = None
+            if report_date_str:
+                try:
+                    report_date = datetime.strptime(report_date_str, "%Y-%m-%d")
+                except:
+                    pass
+            
+            # Use current date if no report date
+            if not report_date:
+                report_date = datetime.now()
+            
+            # Calculate age
+            age = report_date.year - dob_date.year
+            
+            # Adjust if birthday hasn't occurred yet this year
+            if (report_date.month, report_date.day) < (dob_date.month, dob_date.day):
+                age -= 1
+            
+            # Validate age is reasonable
+            if 0 <= age <= 150:
+                return age
+            
+            return None
+        except:
+            return None
+    
     
     @staticmethod
     def _clean_gender(gender: str) -> str:
