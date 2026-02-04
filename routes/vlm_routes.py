@@ -25,6 +25,7 @@ from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_p
 from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt, generate_prompt_enhancement_request
 from utils.vlm_self_extraction_prompt import get_self_prompting_analysis_prompt, get_self_directed_extraction_prompt, get_simplified_extraction_prompt
 from utils.vlm_line_by_line_verifier import verify_extracted_fields_against_image_openai
+from utils.vlm_strict_table_extraction import get_strict_table_extraction_prompt, get_alignment_verification_prompt
 from utils.medical_data_postprocessor import MedicalDataPostProcessor
 from ollama import Client
 from utils.extract_personal_info import extract_personal_info, extract_medical_data
@@ -982,15 +983,14 @@ class ChatResource(Resource):
             except Exception as e:
                 print(f"⚠️  OCR failed: {e}, using image-only mode")
             
-            # Step 2: VLM Extraction with Self-Prompting
-            print(f"🤖 Step 2: Extracting medical data...")
-            yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Understanding medical values on page {idx}...'})}\n\n"
+            # Step 2: VLM Extraction with Strict Table Reading
+            print(f"🤖 Step 2: Extracting medical data with strict row-by-row alignment...")
+            yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Reading table data carefully on page {idx}...'})}\n\n"
             
-            # Use simplified extraction prompt (model writes its own logic)
-            prompt_text = get_simplified_extraction_prompt(
+            # Use strict table extraction prompt for accurate results
+            prompt_text = get_strict_table_extraction_prompt(
                 idx=idx,
-                total_pages=total_pages,
-                report_types=REPORT_TYPES
+                total_pages=total_pages
             )
             
             try:
@@ -1051,6 +1051,31 @@ class ChatResource(Resource):
                     print(f"   Response text: {response_text[:200]}")
                 
                 if extracted_data.get('medical_data'):
+                    print(f"✅ Initial extraction: {len(extracted_data['medical_data'])} field(s)")
+                    
+                    # Step 2b: Verify alignment with alignment verification prompt
+                    print(f"🔍 Verifying table alignment...")
+                    alignment_prompt = get_alignment_verification_prompt(extracted_data, idx)
+                    
+                    try:
+                        content = [
+                            {'type': 'text', 'text': alignment_prompt},
+                            {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
+                        ]
+                        
+                        alignment_response = ollama_client.chat.completions.create(
+                            model=Config.OLLAMA_MODEL,
+                            messages=[{'role': 'user', 'content': content}],
+                            temperature=0.1
+                        )
+                        alignment_text = alignment_response.choices[0].message.content.strip()
+                        print(f"   ✓ Alignment check complete")
+                        if 'MISALIGNED' in alignment_text or 'NEEDS_CORRECTION' in alignment_text:
+                            print(f"   ⚠️  Alignment issues detected: {alignment_text[:200]}")
+                    except Exception as e:
+                        print(f"   ⚠️  Alignment verification failed: {e}")
+                    
+                    # Step 2c: Run line-by-line verification
                     print(f"🔎 Running line-by-line verification for page {idx}...")
                     verified_fields, verification_report = verify_extracted_fields_against_image_openai(
                         extracted_data['medical_data'],
@@ -1072,6 +1097,7 @@ class ChatResource(Resource):
                     print(f"✅ Extracted {field_count} field(s) from page {idx}")
                 else:
                     print(f"⚠️  No medical_data found in extracted_data for page {idx}")
+
                 
                 # Capture patient info from first good page
                 if not patient_info and extracted_data.get('patient_name'):
