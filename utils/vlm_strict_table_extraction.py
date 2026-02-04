@@ -6,9 +6,21 @@ Enforces spatial alignment and careful sequential reading.
 
 def get_strict_table_extraction_prompt(idx: int, total_pages: int) -> str:
     """Generate a strict table extraction prompt that enforces row-by-row alignment."""
+    
+    page_context = ""
+    if total_pages > 1:
+        page_context = f"""\n
+⚠️  MULTI-PAGE REPORT:
+This report has {total_pages} pages total. You are extracting page {idx}.
+- Each page may contain DIFFERENT TEST SECTIONS (page 1 = Chemistry, page 2 = CBC/Hematology)
+- Extract ALL tests from THIS page - do NOT skip them
+- Do NOT skip data that appeared on a different page
+- Complementary tests on different pages are normal and should all be extracted
+"""
+    
     return f"""
 🔬 EXTRACT MEDICAL TABLE DATA - RTL & LTR AWARE
-Page {idx}/{total_pages}
+Page {idx}/{total_pages}{page_context}
 
 CRITICAL: This may be a RIGHT-TO-LEFT (RTL) or LEFT-TO-RIGHT (LTR) table.
 

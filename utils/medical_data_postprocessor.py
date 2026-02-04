@@ -73,29 +73,37 @@ class MedicalDataPostProcessor:
     @staticmethod
     def _deduplicate_entries(medical_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Remove duplicate entries (same field name + value combination).
-        Common in multi-page RTL reports where rows get extracted twice.
+        Remove ONLY exact consecutive duplicates (same field name + value + unit).
+        Does NOT remove same tests from different pages (e.g., Chemistry then Hematology).
+        
+        This trusts that the VLM extraction prompt "DO NOT extract duplicate test names"
+        is working correctly and only removes true duplicates from the same page.
         
         Args:
             medical_data: List of extracted medical data entries
         
         Returns:
-            Deduplicated list (keeps first occurrence of each unique entry)
+            Deduplicated list (removes only exact consecutive duplicates)
         """
-        seen = {}  # Key: (field_name, field_value), Value: index
+        if not medical_data:
+            return medical_data
+        
         unique_entries = []
+        last_entry_key = None
         
         for entry in medical_data:
             field_name = entry.get("field_name", "").strip().lower()
             field_value = entry.get("field_value", "").strip()
+            field_unit = entry.get("field_unit", "").strip().lower()
             
-            # Create unique key from field name and value
-            entry_key = (field_name, field_value)
+            # Create key from field name, value, AND unit
+            entry_key = (field_name, field_value, field_unit)
             
-            # Only add if we haven't seen this exact combination before
-            if entry_key not in seen and field_name and field_value:
-                seen[entry_key] = len(unique_entries)
+            # Only skip if this is EXACTLY the same as the previous entry
+            # This removes true duplicates while keeping same test names from different pages
+            if entry_key != last_entry_key and field_name and field_value:
                 unique_entries.append(entry)
+                last_entry_key = entry_key
         
         return unique_entries
     

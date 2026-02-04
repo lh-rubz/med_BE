@@ -133,7 +133,18 @@ def get_simplified_extraction_prompt(idx: int, total_pages: int, report_types: l
     Generic prompt that works on any report structure.
     """
     
-    return f"""Extract ALL medical tests from this medical report image (page {idx}/{total_pages}).
+    page_context = ""
+    if total_pages > 1:
+        page_context = f"""\n
+===== THIS IS A MULTI-PAGE REPORT =====
+This report has {total_pages} total pages. You are viewing page {idx}.
+- Each page may have DIFFERENT TEST SECTIONS (e.g., page 1 = Chemistry, page 2 = Hematology/CBC)
+- Extract ALL tests from THIS page ({idx}) regardless of section
+- Do NOT skip data just because it appeared on a previous page
+- If this page has different tests from page 1, extract them all - they are complementary
+"""
+    
+    return f"""Extract ALL medical tests from this medical report image (page {idx}/{total_pages}).{page_context}
 
 ===== STEP 1: DETECT REPORT LAYOUT =====
 First, identify if this is:
@@ -164,11 +175,12 @@ Look for labeled fields like "Patient Name:", "Gender:", "Date:", "Doctor:"
 The main data table contains medical test results.
 
 TABLE READING RULES:
-1. First identify ALL column headers
+1. First identify ALL column headers on THIS page
 2. For RTL tables: columns go RIGHT to LEFT (Test Name is usually rightmost)
 3. For LTR tables: columns go LEFT to RIGHT (Test Name is usually leftmost)
 4. Read ONE ROW at a time - stay on the same horizontal line
 5. Each test name pairs ONLY with values in the SAME ROW
+6. Extract ALL rows visible on this page
 
 COMMON COLUMNS:
 - Test Name (الفحص) - the name of the medical test (often in English)
@@ -183,7 +195,8 @@ CRITICAL EXTRACTION RULES:
 3. DO NOT mix values between different rows
 4. If value cell is empty, has only "-" or "(-)", skip that row entirely
 5. Extract test names EXACTLY as written (preserve English names)
-6. Each test should appear only ONCE
+6. Each test should appear only ONCE PER PAGE
+7. For multi-page reports: Different pages can have different tests - extract them all
 
 ===== OUTPUT FORMAT =====
 Return ONLY valid JSON (no markdown, no code blocks, no extra text):
@@ -192,7 +205,7 @@ Return ONLY valid JSON (no markdown, no code blocks, no extra text):
     "patient_age": "Calculated age as number",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
-    "report_name": "Report section title",
+    "report_name": "Report section title or test type from this page",
     "report_type": "Match to one of the available types",
     "doctor_names": "Doctor name if found",
     "total_fields_in_image": 0,
@@ -202,7 +215,7 @@ Return ONLY valid JSON (no markdown, no code blocks, no extra text):
             "field_value": "Numeric value from SAME row",
             "field_unit": "Unit from SAME row",
             "normal_range": "Range from SAME row or empty string",
-            "category": "Section name from report",
+            "category": "Section name from report or page section",
             "notes": ""
         }}
     ]
