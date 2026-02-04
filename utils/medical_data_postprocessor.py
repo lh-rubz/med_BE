@@ -51,9 +51,43 @@ class MedicalDataPostProcessor:
             if cleaned_entry:  # Only add if it passes validation
                 cleaned["medical_data"].append(cleaned_entry)
         
+        # Deduplicate entries (remove exact duplicates from multi-page extraction)
+        cleaned["medical_data"] = MedicalDataPostProcessor._deduplicate_entries(
+            cleaned["medical_data"]
+        )
+        
         cleaned["total_fields_in_image"] = len(cleaned["medical_data"])
         
         return cleaned
+    
+    @staticmethod
+    def _deduplicate_entries(medical_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Remove duplicate entries (same field name + value combination).
+        Common in multi-page RTL reports where rows get extracted twice.
+        
+        Args:
+            medical_data: List of extracted medical data entries
+        
+        Returns:
+            Deduplicated list (keeps first occurrence of each unique entry)
+        """
+        seen = {}  # Key: (field_name, field_value), Value: index
+        unique_entries = []
+        
+        for entry in medical_data:
+            field_name = entry.get("field_name", "").strip().lower()
+            field_value = entry.get("field_value", "").strip()
+            
+            # Create unique key from field name and value
+            entry_key = (field_name, field_value)
+            
+            # Only add if we haven't seen this exact combination before
+            if entry_key not in seen and field_name and field_value:
+                seen[entry_key] = len(unique_entries)
+                unique_entries.append(entry)
+        
+        return unique_entries
     
     @staticmethod
     def standardize_field_names(medical_data: List[Dict[str, Any]], learned_synonyms: Dict[str, str] = None) -> List[Dict[str, Any]]:

@@ -143,16 +143,60 @@ LANGUAGE & LAYOUT DETECTION:
   - If table headers and first column are on the LEFT: Read as LTR
   - Patient data section (header area) is often in the SAME direction as the main table
 
-TABLE READING STRATEGY:
-For LTR (English) reports: Read columns left-to-right
-For RTL (Arabic) reports: Read columns right-to-left, but maintain logical order:
-  - Find the TEST NAME column (rightmost in RTL, leftmost in LTR)
-  - Find the VALUE column (usually next to test name)
-  - Find the UNIT column (often after value)
-  - Find the REFERENCE RANGE column (usually rightmost in LTR, leftmost in RTL)
+TABLE READING STRATEGY - CRITICAL FOR RTL/LTR:
+
+For LTR (English/Left-to-Right) reports:
+  Read the table LEFT to RIGHT:
+  Column 1 (Leftmost) → Column 2 → Column 3 → Column 4 (Rightmost)
+  
+  Typical LTR structure:
+  Test Name | Value | Unit | Reference Range | Notes
+  
+  Example row (LTR):
+  Hemoglobin | 14.5 | g/dL | (12-16) | —
+
+For RTL (Arabic/Right-to-Left) reports:
+  Read the table RIGHT to LEFT:
+  Column 1 (Rightmost visually) → Column 2 → Column 3 → Column 4 (Leftmost visually)
+  
+  BUT the LOGICAL order is still: Test Name, Value, Unit, Range
+  
+  Visual RTL structure (what you see on screen):
+  Notes | Reference Range | Unit | Value | Test Name
+  (Leftmost visually)                    (Rightmost visually)
+  
+  Example row (RTL visual):
+  — | (12-16) | g/dL | 14.5 | Hemoglobin
+  
+  HOW TO EXTRACT FROM RTL:
+  1. IDENTIFY THE TEST NAME:
+     - It's the RIGHTMOST column in the table (visually on the right side)
+     - Usually the longest text, descriptive names like "الهيموجلوبين" or "Hemoglobin"
+     - Examples: "red blood cell", "white blood cell", "platelet count"
+  
+  2. IDENTIFY THE VALUE:
+     - It's NEXT TO the test name (to the left of test name in visual RTL layout)
+     - Always a number, possibly with decimals or operators (< > ≤ ≥)
+     - Examples: "14.5", "12.6", "40.2", "< 5.0"
+  
+  3. IDENTIFY THE UNIT:
+     - It's NEXT TO the value (to the left in visual RTL)
+     - Short abbreviations or symbols: "g/dL", "mg/dL", "%", "K/uL", "cells/L"
+     - Can be empty in some reports
+  
+  4. IDENTIFY THE RANGE:
+     - It's NEXT TO the unit (to the left in visual RTL, usually near leftmost)
+     - Format: "(min-max)" or "[min-max]" or "(value)"
+     - Examples: "(12-16)", "(0-33)", "(74-110)"
+
+IMPORTANT RTL CORRECTION RULES:
+- If you extract the same test twice on the same page, it's a duplicate - KEEP ONLY THE FIRST
+- If rows have mixed order in RTL, match Test Name + Value together (they should be adjacent)
+- Do NOT skip rows because they look different - all rows in the table should be extracted
+- After reading RIGHT to LEFT, the extracted data should still have logical order
 
 EXTRACTION RULES:
-1. Read ALL test rows in the main table
+1. Read ALL test rows in the main table (do not skip any rows)
 2. For EACH test row, extract:
    - field_name: Test name (exactly as shown, can be Arabic or English)
    - field_value: Result value (exactly as shown, including < > operators, preserve decimals)
@@ -165,6 +209,7 @@ EXTRACTION RULES:
 4. If a field is empty, return ""
 5. Preserve exact values: decimals, operators (< > ≤ ≥), spacing
 6. If normal_range appears as separate columns, combine into one field
+7. DEDUPLICATE: If you see the same test name twice with identical values, report only once
 
 HEADER/METADATA EXTRACTION:
 Look for these fields in the HEADER section (not the table):
