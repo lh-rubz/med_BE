@@ -4,6 +4,7 @@ Handles validation, cleanup, and structure-aware corrections.
 """
 from typing import Dict, List, Any, Optional
 import json
+import re
 
 
 class MedicalDataPostProcessor:
@@ -153,6 +154,15 @@ class MedicalDataPostProcessor:
         if MedicalDataPostProcessor._is_value_malformed(field_value, field_unit, normal_range):
             return None
         
+        # Sanitize normal range if it looks malformed or wildly mismatched
+        normal_range, notes = MedicalDataPostProcessor._sanitize_normal_range(
+            field_name,
+            field_value,
+            field_unit,
+            normal_range,
+            notes
+        )
+
         # normal_range can be empty - that's OK
         # field_unit can be empty - that's OK
         # category and notes can be empty - that's OK
@@ -205,6 +215,77 @@ class MedicalDataPostProcessor:
             return True
         
         return False
+
+    @staticmethod
+    def _sanitize_normal_range(
+        field_name: str,
+        field_value: str,
+        field_unit: str,
+        normal_range: str,
+        notes: str
+    ) -> (str, str):
+        """
+        Sanitize normal_range when it looks malformed or severely mismatched.
+        Returns (cleaned_range, updated_notes).
+        """
+        if not normal_range:
+            return normal_range, notes
+
+        range_str = str(normal_range).strip()
+        if not range_str:
+            return "", notes
+
+        # If range has no digits and no inequality, it's unusable
+        has_digit = bool(re.search(r"\d", range_str))
+        has_inequality = any(sym in range_str for sym in ["<", ">"])
+        if not has_digit and not has_inequality:
+            return "", MedicalDataPostProcessor._append_note(notes, "range_invalid")
+
+        # Extract numeric values from the range
+        range_numbers = re.findall(r"[\d.]+", range_str)
+        if len(range_numbers) < 2 and not has_inequality:
+            return "", MedicalDataPostProcessor._append_note(notes, "range_invalid")
+
+        # Validate percent-like ranges
+        name_lower = str(field_name).lower()
+        unit_lower = str(field_unit).lower()
+        is_percent = "%" in unit_lower or "%" in range_str or "percent" in name_lower
+        if is_percent and range_numbers:
+            try:
+                max_val = max(float(n) for n in range_numbers)
+                min_val = min(float(n) for n in range_numbers)
+                if min_val < 0 or max_val > 100:
+                    return "", MedicalDataPostProcessor._append_note(notes, "range_invalid")
+            except ValueError:
+                return "", MedicalDataPostProcessor._append_note(notes, "range_invalid")
+
+        # If we can parse a value and a two-sided range, sanity check for extreme mismatch
+        value_match = re.search(r"[\d.]+", str(field_value))
+        if value_match and len(range_numbers) >= 2:
+            try:
+                value_num = float(value_match.group())
+                min_val = float(range_numbers[0])
+                max_val = float(range_numbers[1])
+                if min_val > max_val:
+                    min_val, max_val = max_val, min_val
+
+                # If value is an order of magnitude outside range, treat range as unreliable
+                if value_num < (min_val * 0.1) or value_num > (max_val * 10):
+                    return "", MedicalDataPostProcessor._append_note(notes, "range_unreliable")
+            except ValueError:
+                return "", MedicalDataPostProcessor._append_note(notes, "range_invalid")
+
+        return range_str, notes
+
+    @staticmethod
+    def _append_note(existing: str, note: str) -> str:
+        if not note:
+            return existing
+        if not existing:
+            return note
+        if note in existing:
+            return existing
+        return f"{existing}; {note}"
     
     @staticmethod
     def _clean_patient_name(name: str) -> str:
