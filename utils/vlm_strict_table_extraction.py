@@ -93,10 +93,10 @@ For EACH extracted row, verify in the image:
 5. If counts don't match → rows are missing or reordered
 
 RESPOND WITH:
-- For each misaligned row: "Row #N ({field_name}): MISALIGNED - image shows value [X] in that row"
+- For each misaligned row: "Row #N (field_name): MISALIGNED - image shows value [X] in that row"
 - Summary: "Total table rows: X, Extracted rows: Y"
-- If Y < X: "Missing {X-Y} rows - which ones?"
-- If Y > X: "Over-extracted - duplicates or hallucinations?"
+- If rows are less: "Missing rows - which ones?"
+- If rows are more: "Over-extracted - duplicates or hallucinations?"
 - Overall: "Status: ALIGNED" or "Status: NEEDS_CORRECTION"
 
 If status is NEEDS_CORRECTION, provide:
