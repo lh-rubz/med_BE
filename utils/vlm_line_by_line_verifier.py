@@ -29,7 +29,7 @@ def get_line_by_line_verification_prompt(extracted_fields: List[Dict], page_num:
         f"Value: {f.get('field_value', '')} | "
         f"Unit: {f.get('field_unit', '')} | "
         f"Range: {f.get('normal_range', '')}"
-        for idx, f in enumerate(extracted_fields[:20])  # First 20 fields
+        for idx, f in enumerate(extracted_fields)
     ])
     
     return f"""🔍 LINE-BY-LINE VERIFICATION PASS
@@ -297,6 +297,78 @@ def verify_extracted_fields_against_image(
         verification_report['raw_response'] = verification_response.get('response', '')
         return verified_fields, verification_report
         
+    except Exception as e:
+        return extracted_fields, {
+            'status': 'VERIFICATION_ERROR',
+            'error': str(e),
+            'total_fields': len(extracted_fields)
+        }
+
+
+def verify_extracted_fields_against_image_openai(
+    extracted_fields: List[Dict],
+    image_base64: str,
+    image_format: str,
+    client: Any,
+    model: str,
+    page_num: int = 1,
+    total_pages: int = 1,
+    run_detailed_check: bool = True
+) -> Tuple[List[Dict], Dict[str, Any]]:
+    """
+    Verify extracted fields against the original image using OpenAI-compatible chat API.
+    """
+
+    if not extracted_fields:
+        return [], {'status': 'NO_FIELDS_TO_VERIFY', 'total_fields': 0}
+
+    verification_prompt = get_line_by_line_verification_prompt(
+        extracted_fields, page_num, total_pages
+    )
+    full_prompt = verification_prompt + "\n\n" + get_column_distinction_prompt()
+
+    try:
+        content = [
+            {'type': 'text', 'text': full_prompt},
+            {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
+        ]
+
+        completion = client.chat.completions.create(
+            model=model,
+            messages=[{'role': 'user', 'content': content}],
+            temperature=0.1
+        )
+        response_text = completion.choices[0].message.content.strip()
+
+        verification_report = create_verification_report(
+            extracted_fields,
+            response_text
+        )
+
+        verified_fields = extracted_fields.copy()
+
+        if run_detailed_check and verification_report['verification_status'] in ['MOSTLY_VERIFIED', 'NEEDS_CORRECTION']:
+            for idx, field in enumerate(extracted_fields):
+                if _should_verify_field_individually(field, response_text):
+                    field_prompt = get_field_specific_verification_prompt(field, page_num)
+                    field_content = [
+                        {'type': 'text', 'text': field_prompt},
+                        {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
+                    ]
+                    field_completion = client.chat.completions.create(
+                        model=model,
+                        messages=[{'role': 'user', 'content': field_content}],
+                        temperature=0.1
+                    )
+                    field_response_text = field_completion.choices[0].message.content.strip()
+                    corrected_field = _apply_field_verification_corrections(
+                        field, field_response_text
+                    )
+                    verified_fields[idx] = corrected_field
+
+        verification_report['raw_response'] = response_text
+        return verified_fields, verification_report
+
     except Exception as e:
         return extracted_fields, {
             'status': 'VERIFICATION_ERROR',

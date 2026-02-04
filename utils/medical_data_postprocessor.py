@@ -146,13 +146,13 @@ class MedicalDataPostProcessor:
         category = str(entry.get("category", "")).strip()
         notes = str(entry.get("notes", "")).strip()
         
-        # CRITICAL: Skip entries with empty field_name or field_value
-        if not field_name or not field_value:
+        # Drop only if everything is missing
+        if not field_name and not field_value and not field_unit and not normal_range and not category and not notes:
             return None
-        
-        # Skip entries that are clearly malformed (e.g., field_value is a unit)
+
+        # Flag clearly malformed rows but keep them
         if MedicalDataPostProcessor._is_value_malformed(field_value, field_unit, normal_range):
-            return None
+            notes = MedicalDataPostProcessor._append_note(notes, "value_malformed")
         
         # Sanitize normal range if it looks malformed or wildly mismatched
         normal_range, notes = MedicalDataPostProcessor._sanitize_normal_range(
@@ -195,7 +195,7 @@ class MedicalDataPostProcessor:
         """
         
         if not field_value:
-            return True
+            return False
         
         lower_value = field_value.lower()
         
