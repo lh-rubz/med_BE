@@ -130,85 +130,79 @@ Return ONLY valid JSON (no markdown).
 def get_simplified_extraction_prompt(idx: int, total_pages: int, report_types: list) -> str:
     """
     Simplified one-shot extraction for LTR and RTL medical reports.
+    Generic prompt that works on any report structure.
     """
     
-    return f"""Extract ALL medical tests from this Arabic medical report (page {idx}/{total_pages}).
+    return f"""Extract ALL medical tests from this medical report image (page {idx}/{total_pages}).
 
-===== STEP 1: HEADER EXTRACTION =====
-The header is a TWO-COLUMN table at the top.
+===== STEP 1: DETECT REPORT LAYOUT =====
+First, identify if this is:
+- LTR (English): Read left-to-right
+- RTL (Arabic): Read right-to-left, header often has two columns side by side
 
-RIGHT SIDE OF HEADER (look for these Arabic labels):
-- اسم المريض = Patient Name → copy the Arabic name next to it to patient_name
-- الجنس = Gender → أنثى = Female, ذكر = Male
-- تاريخ الميلاد = Date of Birth → calculate age from this date
+===== STEP 2: EXTRACT HEADER INFO =====
+Look for these fields in the header area:
 
-LEFT SIDE OF HEADER (look for these Arabic labels):
-- تاريخ الطلب = Request Date → use as report_date (format: YYYY-MM-DD)
-- الطبيب = Doctor → copy the Arabic name next to it to doctor_names
+FOR ARABIC REPORTS (RTL - two column header):
+The header typically has TWO separate boxes/columns side by side.
+- RIGHT box contains: اسم المريض (Patient Name), الجنس (Gender), تاريخ الميلاد (DOB)
+- LEFT box contains: تاريخ الطلب (Report Date), الطبيب (Doctor Name)
 
-HEADER EXAMPLE from this image:
-- اسم المريض: رئيسة خضر طالب خطيب ← this is patient_name
-- الجنس: أنثى ← this means Female
-- تاريخ الميلاد: 01/05/1975 ← calculate age: 2025 - 1975 = 50 years
-- الطبيب: جهاد العملة ← this is doctor_names
+Extract:
+- patient_name: Find "اسم المريض" label, copy the COMPLETE name (ALL words, do not skip any)
+- patient_gender: Find "الجنس" → أنثى = Female, ذكر = Male
+- patient_age: Find "تاريخ الميلاد" (DOB), calculate: current_year - birth_year
+- report_date: Find "تاريخ الطلب", convert to YYYY-MM-DD format
+- doctor_names: Find "الطبيب" label, copy the name
 
-===== STEP 2: TABLE EXTRACTION =====
-This is a CBC (Complete Blood Count) report. The table is RTL (right-to-left).
+IMPORTANT: patient_name and doctor_names are DIFFERENT people in DIFFERENT boxes!
 
-TABLE COLUMNS (from RIGHT to LEFT):
-1. الفحص (Test Name) - RIGHTMOST column, contains English test names
-2. النتيجة (Result Value) - the numeric value
-3. النتيجة الطبيعية (Normal Range) - in parentheses like (12-16)
-4. الوحدة (Unit) - like %, g/dL, fL, pg, K/uL, M/uL
-5. ملاحظات (Notes) - LEFTMOST column, usually empty or has *
+FOR ENGLISH REPORTS (LTR):
+Look for labeled fields like "Patient Name:", "Gender:", "Date:", "Doctor:"
 
-CRITICAL: READ EACH ROW HORIZONTALLY!
-For each row, the test name on the RIGHT pairs with the value DIRECTLY to its LEFT.
+===== STEP 3: EXTRACT TABLE DATA =====
+The main data table contains medical test results.
 
-Example rows from this CBC:
-- Test: "Red blood cell distribution width..." | Value: 14.4 | Range: (-) | Unit: %
-- Test: "Platelet Crit" | Value: 0.23 | Range: (-) | Unit: %
-- Test: "Monocytes" | Value: 0.1 | Range: (-) | Unit: K/uL
-- Test: "White blood cells" | Value: 7.1 | Range: (4.6-11) | Unit: cells/L
-- Test: "Neutrophils Granulocyte" | Value: 4.1 | Range: (-) | Unit: K/uL
-- Test: "Neutrophils granulocyte%" | Value: 57.8 | Range: (37.0-92.0) | Unit: %G
-- Test: "Lymphocytes%" | Value: 41.1 | Range: (-) | Unit: %L
-- Test: "Red blood cells (RBC)" | Value: 5.2 | Range: (4.1-5.5) | Unit: M/uL
-- Test: "Haemoglobin (HGB)" | Value: 12.6 | Range: (12-16) | Unit: g/dL
-- Test: "Hematocrit (HCT)" | Value: 40.2 | Range: (37-48) | Unit: %
-- Test: "Mean cell volume (MCV)" | Value: 77.3 | Range: (80-100) | Unit: fL
-- Test: "Mean cell haemoglobin (MCH)" | Value: 24.2 | Range: (27-31.2) | Unit: pg
-- Test: "Mean cell haemoglobin concentration (MCHC)" | Value: 31.3 | Range: (31-35) | Unit: %
-- Test: "Monocytes(%)" | Value: 1.1 | Range: (3-7) | Unit: %
-- Test: "Red blood cell distribution width" | Value: (-) | Range: (11.5-14.5) | Unit: %
-- Test: "Platelets Count" | Value: 257 | Range: (140-450) | Unit: K/uL
-- Test: "Eosinophils(%)" | Value: (-) | Range: (1-3) | Unit: %
-- Test: "Mean Platelet Volume(MPV)" | Value: 9 | Range: (-) | Unit: fL
-- Test: "Lymphocytes" | Value: 2.9 | Range: (0.7-4.8) | Unit: K/UL
-- Test: "Basophiles(%)" | Value: (-) | Range: (0-0.75) | Unit: %
-- Test: "Platelet Distribution Width" | Value: 17.7 | Range: (-) | Unit: 10(GSD)
+TABLE READING RULES:
+1. First identify ALL column headers
+2. For RTL tables: columns go RIGHT to LEFT (Test Name is usually rightmost)
+3. For LTR tables: columns go LEFT to RIGHT (Test Name is usually leftmost)
+4. Read ONE ROW at a time - stay on the same horizontal line
+5. Each test name pairs ONLY with values in the SAME ROW
 
-DO NOT MIX VALUES BETWEEN ROWS!
-Each test name must have the value from THE SAME ROW.
+COMMON COLUMNS:
+- Test Name (الفحص) - the name of the medical test (often in English)
+- Result/Value (النتيجة) - the numeric result
+- Normal Range (النتيجة الطبيعية) - reference range, often in parentheses
+- Unit (الوحدة) - measurement unit (%, g/dL, mg/dL, fL, pg, K/uL, M/uL, etc.)
+- Notes (ملاحظات) - flags or comments
+
+CRITICAL EXTRACTION RULES:
+1. Read test name from the Test column
+2. Read value from the Value column IN THE SAME ROW
+3. DO NOT mix values between different rows
+4. If value cell is empty, has only "-" or "(-)", skip that row entirely
+5. Extract test names EXACTLY as written (preserve English names)
+6. Each test should appear only ONCE
 
 ===== OUTPUT FORMAT =====
-Return ONLY valid JSON (no markdown, no extra text):
+Return ONLY valid JSON (no markdown, no code blocks, no extra text):
 {{
-    "patient_name": "رئيسة خضر طالب خطيب",
-    "patient_age": "50",
-    "patient_gender": "Female",
-    "report_date": "2025-12-31",
-    "report_name": "HEMATOLOGY - Complete Blood Count (CBC)",
-    "report_type": "Complete Blood Count (CBC)",
-    "doctor_names": "جهاد العملة",
-    "total_fields_in_image": 20,
+    "patient_name": "Complete patient name as shown",
+    "patient_age": "Calculated age as number",
+    "patient_gender": "Male or Female",
+    "report_date": "YYYY-MM-DD",
+    "report_name": "Report section title",
+    "report_type": "Match to one of the available types",
+    "doctor_names": "Doctor name if found",
+    "total_fields_in_image": 0,
     "medical_data": [
         {{
-            "field_name": "Use English test name from rightmost column",
-            "field_value": "Value from same row",
-            "field_unit": "Unit from same row",
-            "normal_range": "Range from same row or empty",
-            "category": "HEMATOLOGY",
+            "field_name": "Test name exactly as shown",
+            "field_value": "Numeric value from SAME row",
+            "field_unit": "Unit from SAME row",
+            "normal_range": "Range from SAME row or empty string",
+            "category": "Section name from report",
             "notes": ""
         }}
     ]
