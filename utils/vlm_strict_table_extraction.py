@@ -7,62 +7,88 @@ Enforces spatial alignment and careful sequential reading.
 def get_strict_table_extraction_prompt(idx: int, total_pages: int) -> str:
     """Generate a strict table extraction prompt that enforces row-by-row alignment."""
     return f"""
-🔬 EXTRACT MEDICAL TABLE DATA - CAREFUL LINE-BY-LINE
+🔬 EXTRACT MEDICAL TABLE DATA - RTL & LTR AWARE
 Page {idx}/{total_pages}
 
-GOAL: Extract every test name and value from the table. Read line-by-line from top to bottom.
+CRITICAL: This may be a RIGHT-TO-LEFT (RTL) or LEFT-TO-RIGHT (LTR) table.
 
-STEPS:
-1. Find the data table (ignore headers)
-2. For each row in the table (top to bottom):
-   - Find the test name (left side usually)
-   - Find the value (middle-right side)
-   - Find the unit (small text near value)
-   - Find the normal range if shown (usually in parentheses)
-3. Make sure: value is in SAME ROW as test name
-4. Translate Arabic test names to English
-5. Extract EVERY row - don't skip any
+STEP 1 - IDENTIFY TABLE DIRECTION:
+Look at the table headers and structure:
+- If test names are on the RIGHT side → This is RTL (Arabic-style)
+- If test names are on the LEFT side → This is LTR (English-style)
 
-IMPORTANT:
-- If test name has a value in the same row → EXTRACT IT
-- If unsure about column alignment → STILL EXTRACT with note "uncertain_alignment"
-- Do NOT skip rows because they might be misaligned
-- Include ALL data even if some fields might be in wrong columns
+STEP 2 - IDENTIFY COLUMN POSITIONS:
+For RTL tables (test names on right):
+   Position 1 (RIGHTMOST): Test name (English or Arabic)
+   Position 2: Result value (number)
+   Position 3: Reference range (X-Y format)
+   Position 4: Unit (mg/dl, %, etc)
+   Position 5 (LEFTMOST): Notes (Arabic or empty)
 
-EXAMPLE 1 - Horizontal table:
-Image: "Glucose | 95 | mg/dl | (70-100)"
-Extract: field_name="Glucose", field_value="95", field_unit="mg/dl", normal_range="(70-100)"
+For LTR tables (test names on left):
+   Position 1 (LEFTMOST): Test name
+   Position 2: Result value
+   Position 3: Unit
+   Position 4: Reference range
+   Position 5 (RIGHTMOST): Notes
 
-EXAMPLE 2 - Vertical table with Arabic:
-Image row: "السكر | 109 | mg/dl"
-Extract: field_name="Blood Sugar", field_value="109", field_unit="mg/dl"
+STEP 3 - EXTRACT ROW-BY-ROW:
+Start from TOP row, go DOWN. For EACH row:
+1. Find test name position
+2. Move HORIZONTALLY in SAME ROW to find value
+3. Stay in SAME ROW to find unit and range
+4. DO NOT jump to different rows
 
-EXAMPLE 3 - Marked abnormal:
-Image: "Creatinine | * 230 | mg/dl"  
-Extract: field_name="Creatinine", field_value="230", field_unit="mg/dl", notes="marked_abnormal"
+EXAMPLE - RTL Table (Arabic report):
+```
+ملاحظات | الوحدة | النتيجة الطبيعية | النتيجة | الفحص
+         | mg/dl  | (74-110)        | 109    | Fasting Blood Sugar (FBS)
+    *    | mg/dl  | (0.5-0.9)       | 0.56   | Creatinine,serum
+    *    | mg/dl  | (0-200)         | 230    | Cholesterol,Total
+         | U/L    | (0-33)          | 32     | Alanine transaminase ALT (GPT)
+```
+Extract as:
+- Row 1: field_name="Fasting Blood Sugar", field_value="109", field_unit="mg/dl", normal_range="(74-110)"
+- Row 2: field_name="Creatinine serum", field_value="0.56", field_unit="mg/dl", normal_range="(0.5-0.9)", notes="marked_abnormal"
+- Row 3: field_name="Total Cholesterol", field_value="230", field_unit="mg/dl", normal_range="(0-200)", notes="marked_abnormal"
+- Row 4: field_name="Alanine aminotransferase ALT", field_value="32", field_unit="U/L", normal_range="(0-33)"
 
-RETURN JSON (REQUIRED):
+VALIDATION RULES:
+✓ Value must be in SAME horizontal row as test name
+✓ If you see a * or flag → add notes="marked_abnormal"
+✓ Translate Arabic test names to English
+✓ Extract EVERY row in order top-to-bottom
+✗ DO NOT take a value from row above or below
+✗ DO NOT skip rows
+✗ DO NOT reorder rows
+
+COMMON RTL MISTAKES TO AVOID:
+❌ Reading "Cholesterol" row but taking "Creatinine" value (wrong row!)
+❌ Reading left-to-right when table is right-to-left
+❌ Confusing column positions in RTL layout
+
+RETURN JSON:
 {{
-    "patient_name": "from report header",
-    "patient_age": "number only",
+    "patient_name": "from header",
+    "patient_age": "number",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
-    "report_name": "test name from header",
+    "report_name": "test type",
     "report_type": "Clinical Chemistry / Hematology / etc",
-    "doctor_names": "from signature or header",
+    "doctor_names": "from signature",
     "medical_data": [
         {{
-            "field_name": "test name",
-            "field_value": "value",
-            "field_unit": "unit",
-            "normal_range": "(X-Y) or empty",
-            "category": "section name if visible",
-            "notes": "empty or uncertain_alignment or marked_abnormal"
+            "field_name": "English test name",
+            "field_value": "number from SAME row as test name",
+            "field_unit": "unit from SAME row",
+            "normal_range": "(X-Y) from SAME row",
+            "category": "section name",
+            "notes": "marked_abnormal or empty"
         }}
     ]
 }}
 
-EXTRACT NOW - Read every row, translate Arabic, return JSON only.
+EXTRACT NOW - Identify RTL/LTR first, then extract row-by-row carefully.
 """
 
 

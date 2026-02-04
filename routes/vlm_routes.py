@@ -1139,31 +1139,12 @@ class ChatResource(Resource):
                     if extracted_data.get('medical_data') and len(extracted_data['medical_data']) > 0:
                         print(f"✅ Extraction succeeded: {len(extracted_data['medical_data'])} field(s)")
                         
-                        # Step 2b: Verify alignment with alignment verification prompt (only if strict mode)
-                        if extraction_method == "strict":
-                            print(f"🔍 Verifying table alignment...")
-                            alignment_prompt = get_alignment_verification_prompt(extracted_data, idx)
-                            
-                            try:
-                                content = [
-                                    {'type': 'text', 'text': alignment_prompt},
-                                    {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
-                                ]
-                                
-                                alignment_response = ollama_client.chat.completions.create(
-                                    model=Config.OLLAMA_MODEL,
-                                    messages=[{'role': 'user', 'content': content}],
-                                    temperature=0.1
-                                )
-                                alignment_text = alignment_response.choices[0].message.content.strip()
-                                print(f"   ✓ Alignment check complete")
-                                if 'MISALIGNED' in alignment_text or 'NEEDS_CORRECTION' in alignment_text:
-                                    print(f"   ⚠️  Alignment issues detected: {alignment_text[:200]}")
-                            except Exception as e:
-                                print(f"   ⚠️  Alignment verification failed: {e}")
+                        # Disabled: Alignment verification (not helping, just adds overhead)
+                        # if extraction_method == "strict":
+                        #     print(f"🔍 Verifying table alignment...")
                         
-                        # Step 2c: Run line-by-line verification
-                        print(f"🔎 Running line-by-line verification for page {idx}...")
+                        # Step 2c: Run line-by-line verification (only for critical misalignments)
+                        print(f"🔎 Running verification for page {idx}...")
                         verified_fields, verification_report = verify_extracted_fields_against_image_openai(
                             extracted_data['medical_data'],
                             image_base64,
@@ -1172,7 +1153,7 @@ class ChatResource(Resource):
                             Config.OLLAMA_MODEL,
                             page_num=idx,
                             total_pages=total_pages,
-                            run_detailed_check=True
+                            run_detailed_check=False  # Disable detailed field-by-field checks
                         )
                         extracted_data['medical_data'] = verified_fields
                         print(
