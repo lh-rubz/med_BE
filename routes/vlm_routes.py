@@ -993,6 +993,9 @@ class ChatResource(Resource):
                 total_pages=total_pages
             )
             
+            # Flag to track extraction method used
+            extraction_method = "strict"
+            
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                 image_format = image_info['format']
@@ -1015,10 +1018,19 @@ class ChatResource(Resource):
                     temperature=0.1
                 )
                 response_text = completion.choices[0].message.content.strip()
-                print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
+                print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:500]}...\n{'-'*40}")
                 
                 # Parsing logic - More robust JSON extraction
-                extracted_data = {}
+                extracted_data = {
+                    "patient_name": "",
+                    "patient_age": "",
+                    "patient_gender": "",
+                    "report_date": "",
+                    "report_name": "",
+                    "report_type": "",
+                    "doctor_names": "",
+                    "medical_data": []
+                }
                 try:
                     import re
                     # Try multiple strategies to extract JSON
@@ -1038,75 +1050,158 @@ class ChatResource(Resource):
                                 break
                     
                     if json_str:
-                        extracted_data = json.loads(json_str)
+                        extracted_data_parsed = json.loads(json_str)
+                        # Merge with defaults
+                        for key in extracted_data:
+                            if key in extracted_data_parsed:
+                                extracted_data[key] = extracted_data_parsed[key]
                         print(f"✅ JSON extracted for Image {idx} - {len(json_str)} chars")
+                        print(f"   Medical data entries: {len(extracted_data.get('medical_data', []))}")
                     else:
                         # Fallback: use regex
                         json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
                         if json_match:
-                            extracted_data = json.loads(json_match.group())
+                            extracted_data_parsed = json.loads(json_match.group())
+                            # Merge with defaults
+                            for key in extracted_data:
+                                if key in extracted_data_parsed:
+                                    extracted_data[key] = extracted_data_parsed[key]
                             print(f"✅ JSON extracted via regex for Image {idx}")
+                            print(f"   Medical data entries: {len(extracted_data.get('medical_data', []))}")
                 except Exception as parse_err:
                     print(f"⚠️  JSON Parse Error on page {idx}: {parse_err}")
-                    print(f"   Response text: {response_text[:200]}")
+                    print(f"   Response text: {response_text[:300]}")
                 
                 if extracted_data.get('medical_data'):
-                    print(f"✅ Initial extraction: {len(extracted_data['medical_data'])} field(s)")
+                    print(f"✅ Initial extraction: {len(extracted_data['medical_data'])} field(s) using {extraction_method} prompt")
                     
-                    # Step 2b: Verify alignment with alignment verification prompt
-                    print(f"🔍 Verifying table alignment...")
-                    alignment_prompt = get_alignment_verification_prompt(extracted_data, idx)
-                    
-                    try:
-                        content = [
-                            {'type': 'text', 'text': alignment_prompt},
-                            {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
-                        ]
+                    # If strict extraction returned 0 fields, fallback to simplified extraction
+                    if extraction_method == "strict" and len(extracted_data.get('medical_data', [])) == 0:
+                        print(f"   ⚠️  Strict extraction returned no fields, falling back to simplified extraction...")
+                        extraction_method = "simplified"
+                        prompt_text = get_simplified_extraction_prompt(
+                            idx=idx,
+                            total_pages=total_pages,
+                            report_types=REPORT_TYPES
+                        )
                         
-                        alignment_response = ollama_client.chat.completions.create(
+                        content = []
+                        if ocr_text:
+                            enhanced_prompt = f"{prompt_text}\n\nOCR-EXTRACTED TEXT FOR REFERENCE:\n{ocr_text}"
+                            content.append({'type': 'text', 'text': enhanced_prompt})
+                        else:
+                            content.append({'type': 'text', 'text': prompt_text})
+                        
+                        content.append({
+                            'type': 'image_url',
+                            'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                        })
+                        
+                        completion = ollama_client.chat.completions.create(
                             model=Config.OLLAMA_MODEL,
                             messages=[{'role': 'user', 'content': content}],
                             temperature=0.1
                         )
-                        alignment_text = alignment_response.choices[0].message.content.strip()
-                        print(f"   ✓ Alignment check complete")
-                        if 'MISALIGNED' in alignment_text or 'NEEDS_CORRECTION' in alignment_text:
-                            print(f"   ⚠️  Alignment issues detected: {alignment_text[:200]}")
-                    except Exception as e:
-                        print(f"   ⚠️  Alignment verification failed: {e}")
+                        response_text = completion.choices[0].message.content.strip()
+                        
+                        try:
+                            json_str = None
+                            brace_count = 0
+                            start_idx = -1
+                            for i, char in enumerate(response_text):
+                                if char == '{':
+                                    if brace_count == 0:
+                                        start_idx = i
+                                    brace_count += 1
+                                elif char == '}':
+                                    brace_count -= 1
+                                    if brace_count == 0 and start_idx != -1:
+                                        json_str = response_text[start_idx:i+1]
+                                        break
+                            
+                            if json_str:
+                                extracted_data_parsed = json.loads(json_str)
+                                for key in extracted_data:
+                                    if key in extracted_data_parsed:
+                                        extracted_data[key] = extracted_data_parsed[key]
+                                print(f"   ✅ Fallback extraction succeeded: {len(extracted_data.get('medical_data', []))} field(s)")
+                            else:
+                                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                                if json_match:
+                                    extracted_data_parsed = json.loads(json_match.group())
+                                    for key in extracted_data:
+                                        if key in extracted_data_parsed:
+                                            extracted_data[key] = extracted_data_parsed[key]
+                                    print(f"   ✅ Fallback extraction via regex: {len(extracted_data.get('medical_data', []))} field(s)")
+                        except Exception as fallback_err:
+                            print(f"   ❌ Fallback extraction also failed: {fallback_err}")
                     
-                    # Step 2c: Run line-by-line verification
-                    print(f"🔎 Running line-by-line verification for page {idx}...")
-                    verified_fields, verification_report = verify_extracted_fields_against_image_openai(
-                        extracted_data['medical_data'],
-                        image_base64,
-                        image_format,
-                        ollama_client,
-                        Config.OLLAMA_MODEL,
-                        page_num=idx,
-                        total_pages=total_pages,
-                        run_detailed_check=True
-                    )
-                    extracted_data['medical_data'] = verified_fields
-                    print(
-                        f"✅ Verification status: {verification_report.get('verification_status', 'UNKNOWN')}"
-                    )
+                    if extracted_data.get('medical_data') and len(extracted_data['medical_data']) > 0:
+                        print(f"✅ Extraction succeeded: {len(extracted_data['medical_data'])} field(s)")
+                        
+                        # Step 2b: Verify alignment with alignment verification prompt (only if strict mode)
+                        if extraction_method == "strict":
+                            print(f"🔍 Verifying table alignment...")
+                            alignment_prompt = get_alignment_verification_prompt(extracted_data, idx)
+                            
+                            try:
+                                content = [
+                                    {'type': 'text', 'text': alignment_prompt},
+                                    {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
+                                ]
+                                
+                                alignment_response = ollama_client.chat.completions.create(
+                                    model=Config.OLLAMA_MODEL,
+                                    messages=[{'role': 'user', 'content': content}],
+                                    temperature=0.1
+                                )
+                                alignment_text = alignment_response.choices[0].message.content.strip()
+                                print(f"   ✓ Alignment check complete")
+                                if 'MISALIGNED' in alignment_text or 'NEEDS_CORRECTION' in alignment_text:
+                                    print(f"   ⚠️  Alignment issues detected: {alignment_text[:200]}")
+                            except Exception as e:
+                                print(f"   ⚠️  Alignment verification failed: {e}")
+                        
+                        # Step 2c: Run line-by-line verification
+                        print(f"🔎 Running line-by-line verification for page {idx}...")
+                        verified_fields, verification_report = verify_extracted_fields_against_image_openai(
+                            extracted_data['medical_data'],
+                            image_base64,
+                            image_format,
+                            ollama_client,
+                            Config.OLLAMA_MODEL,
+                            page_num=idx,
+                            total_pages=total_pages,
+                            run_detailed_check=True
+                        )
+                        extracted_data['medical_data'] = verified_fields
+                        print(
+                            f"✅ Verification status: {verification_report.get('verification_status', 'UNKNOWN')}"
+                        )
 
-                    field_count = len(extracted_data['medical_data'])
-                    all_extracted_data.extend(extracted_data['medical_data'])
-                    print(f"✅ Extracted {field_count} field(s) from page {idx}")
+                        field_count = len(extracted_data['medical_data'])
+                        all_extracted_data.extend(extracted_data['medical_data'])
+                        print(f"✅ Extracted {field_count} field(s) from page {idx}")
+                    else:
+                        print(f"⚠️  No valid medical_data after extraction and fallback for page {idx}")
                 else:
                     print(f"⚠️  No medical_data found in extracted_data for page {idx}")
 
                 
-                # Capture patient info from first good page
-                if not patient_info and extracted_data.get('patient_name'):
-                     patient_info = extracted_data
+                # Capture patient info from first good page (before verification)
+                if not patient_info or not patient_info.get('patient_name'):
+                    if extracted_data.get('patient_name'):
+                        patient_info = extracted_data
+                    elif extracted_data.get('medical_data'):
+                        # Even if no explicit patient_name, capture what we have
+                        patient_info = extracted_data
 
                 print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")
                      
             except Exception as e:
                 print(f"❌ VLM Error on page {idx}: {e}")
+                import traceback
+                traceback.print_exc()
 
         # Step 4: Post-Processing & Validation
         yield f"data: {json.dumps({'percent': 75, 'message': 'Cleaning and validating results...'})}\n\n"

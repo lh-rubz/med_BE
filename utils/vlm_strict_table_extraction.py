@@ -7,161 +7,62 @@ Enforces spatial alignment and careful sequential reading.
 def get_strict_table_extraction_prompt(idx: int, total_pages: int) -> str:
     """Generate a strict table extraction prompt that enforces row-by-row alignment."""
     return f"""
-🔬 MEDICAL TABLE EXTRACTION - STRICT ROW-BY-ROW MODE
+🔬 EXTRACT MEDICAL TABLE DATA - CAREFUL LINE-BY-LINE
 Page {idx}/{total_pages}
 
-YOUR TASK: Extract EVERY test result from the medical table(s) on this page.
-Each row in the table contains ONE test result with multiple columns.
+GOAL: Extract every test name and value from the table. Read line-by-line from top to bottom.
 
-⚠️ CRITICAL RULES - DO NOT VIOLATE:
+STEPS:
+1. Find the data table (ignore headers)
+2. For each row in the table (top to bottom):
+   - Find the test name (left side usually)
+   - Find the value (middle-right side)
+   - Find the unit (small text near value)
+   - Find the normal range if shown (usually in parentheses)
+3. Make sure: value is in SAME ROW as test name
+4. Translate Arabic test names to English
+5. Extract EVERY row - don't skip any
 
-1️⃣ READ TABLES ROW-BY-ROW FROM TOP TO BOTTOM:
-   - Start at the FIRST data row (after headers)
-   - Move DOWN one row at a time
-   - DO NOT skip rows
-   - DO NOT read out of order
-   - DO NOT rearrange values from different rows
+IMPORTANT:
+- If test name has a value in the same row → EXTRACT IT
+- If unsure about column alignment → STILL EXTRACT with note "uncertain_alignment"
+- Do NOT skip rows because they might be misaligned
+- Include ALL data even if some fields might be in wrong columns
 
-2️⃣ FOR EACH ROW, IDENTIFY THE 4 COLUMNS:
-   Column A: Test Name/Parameter name (left or right, depends on table orientation)
-   Column B: Measured Value (the number/result)
-   Column C: Unit of Measurement (mg/dl, %, U/L, etc.)
-   Column D: Normal/Reference Range ((X-Y) format)
+EXAMPLE 1 - Horizontal table:
+Image: "Glucose | 95 | mg/dl | (70-100)"
+Extract: field_name="Glucose", field_value="95", field_unit="mg/dl", normal_range="(70-100)"
 
-3️⃣ SPATIAL ALIGNMENT - CRITICAL:
-   - The VALUE must be physically in the SAME ROW as the TEST NAME in the image
-   - If value is in a different row than the test name → THAT IS MISALIGNMENT
-   - Do NOT take a value from above or below the test name row
-   - Verify each value is aligned horizontally with its test name
+EXAMPLE 2 - Vertical table with Arabic:
+Image row: "السكر | 109 | mg/dl"
+Extract: field_name="Blood Sugar", field_value="109", field_unit="mg/dl"
 
-4️⃣ MARKED/ABNORMAL VALUES:
-   - If a value is marked with * or ^ or has a flag → KEEP the value exactly, add note "marked_abnormal"
-   - Example: If you see "* 230" → extract "230" with notes "marked_abnormal"
-   - Do NOT remove the value or the marker
+EXAMPLE 3 - Marked abnormal:
+Image: "Creatinine | * 230 | mg/dl"  
+Extract: field_name="Creatinine", field_value="230", field_unit="mg/dl", notes="marked_abnormal"
 
-5️⃣ HANDLE ARABIC TEXT:
-   - If test name is in Arabic, translate it to English
-   - Examples:
-     - "صوديوم" → "Sodium"
-     - "بوتاسيوم" → "Potassium"
-     - "الجلوكوز" → "Glucose"
-     - "كرات الدم البيضاء" → "White Blood Cells"
-
-6️⃣ COLUMN SEPARATION - VALIDATE:
-   Before extracting, verify:
-   - [ ] Test Name: looks like a medical test → NOT a number, NOT a range, NOT a unit
-   - [ ] Value: is a number (possibly with %) → NOT a test name, NOT a range description
-   - [ ] Unit: is a unit symbol (mg/dl, %, U/L, etc.) → NOT a number, NOT a range
-   - [ ] Range: is (X-Y) or X-Y format → NOT a single number, NOT a unit
-   If ANY check fails, you have column misalignment → DO NOT extract that row
-
-7️⃣ EMPTY/MISSING VALUES:
-   - If a cell shows "-" or "(-)" or is blank → write "" (empty string)
-   - If a cell shows "*" alone → write "" 
-   - DO NOT invent values
-
-8️⃣ TABLE LAYOUT VARIANTS:
-   This report may have:
-   - Horizontal tables (columns left-to-right)
-   - Vertical tables (columns top-to-bottom)
-   - Mixed Arabic/English text
-   - Multiple separate table sections
-   - Rows with sub-rows or merged cells
-   Use spatial position to determine which value belongs to which test.
-
-📋 EXTRACTION PROCESS:
-
-Step 1: Identify all table sections on the page
-Step 2: For EACH table section:
-   - Locate the header row
-   - Number the data rows (1st, 2nd, 3rd, etc.)
-Step 3: For EACH data row (top to bottom):
-   - Find test name position
-   - Find value position in SAME row
-   - Find unit position in SAME row  
-   - Find range position in SAME row
-   - Verify spatial alignment before extraction
-Step 4: Extract ONLY rows with both test name AND value
-
-🚨 COMMON MISTAKES TO AVOID:
-   ❌ Reading value from row below the test name
-   ❌ Reading value from row above the test name
-   ❌ Merging two different rows' data
-   ❌ Taking range as the value
-   ❌ Taking unit as the value
-   ❌ Extracting values without test names
-   ❌ Reading in wrong order (not top to bottom)
-
-✅ CORRECT EXAMPLE:
-   Image row: "Glucose | 95 | mg/dl | (70-100)"
-   Extract:
-   {{
-     "field_name": "Glucose",
-     "field_value": "95",
-     "field_unit": "mg/dl",
-     "normal_range": "(70-100)"
-   }}
-
-✅ CORRECT EXAMPLE (RTL/Arabic):
-   Image row: "السكر الصائم | 109 | mg/dl | (74-110)"
-   Extract:
-   {{
-     "field_name": "Fasting Blood Sugar",
-     "field_value": "109",
-     "field_unit": "mg/dl",
-     "normal_range": "(74-110)"
-   }}
-
-✅ CORRECT EXAMPLE (Marked abnormal):
-   Image row: "الكوليسترول | * 230 | mg/dl | (0-200)"
-   Extract:
-   {{
-     "field_name": "Total Cholesterol",
-     "field_value": "230",
-     "field_unit": "mg/dl",
-     "normal_range": "(0-200)",
-     "notes": "marked_abnormal"
-   }}
-
-EXTRACTION CHECKLIST FOR EACH ROW:
-   Before submitting a row, verify:
-   [✓] Test name is present and is a medical test
-   [✓] Value is present and is numeric or "-" or empty
-   [✓] Value is in the SAME row as test name (spatial alignment verified)
-   [✓] Unit is in the SAME row
-   [✓] Range is in the SAME row
-   [✓] No column shifting detected
-   [✓] Reading in order from top to bottom
-
-JSON OUTPUT FORMAT (exactly this structure, no variations):
+RETURN JSON (REQUIRED):
 {{
-    "patient_name": "name from report header",
-    "patient_age": "age number only",
+    "patient_name": "from report header",
+    "patient_age": "number only",
     "patient_gender": "Male or Female",
-    "report_date": "YYYY-MM-DD format",
-    "report_name": "extract from header",
+    "report_date": "YYYY-MM-DD",
+    "report_name": "test name from header",
     "report_type": "Clinical Chemistry / Hematology / etc",
-    "doctor_names": "name from signature or header",
+    "doctor_names": "from signature or header",
     "medical_data": [
         {{
-            "field_name": "Test name (English, translated if Arabic)",
-            "field_value": "numeric value or empty string",
-            "field_unit": "unit symbol or empty string",
-            "normal_range": "(X-Y) or empty string",
-            "category": "section name (Clinical Chemistry, Hematology, etc)",
-            "notes": "marked_abnormal or empty"
+            "field_name": "test name",
+            "field_value": "value",
+            "field_unit": "unit",
+            "normal_range": "(X-Y) or empty",
+            "category": "section name if visible",
+            "notes": "empty or uncertain_alignment or marked_abnormal"
         }}
     ]
 }}
 
-FINAL VALIDATION:
-- medical_data should contain EVERY row with both test name AND value
-- NO missing rows (count table rows in image and match in output)
-- NO reordered rows (must be top to bottom)
-- Values must exactly match image
-- Column alignment must be verified for each row
-
-BEGIN EXTRACTION NOW - Remember: ROW-BY-ROW, SAME ROW, TOP-TO-BOTTOM, SPATIAL ALIGNMENT VERIFIED FOR EACH ROW.
+EXTRACT NOW - Read every row, translate Arabic, return JSON only.
 """
 
 
