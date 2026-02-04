@@ -12,6 +12,21 @@ Page {idx}/{total_pages}
 
 CRITICAL: This may be a RIGHT-TO-LEFT (RTL) or LEFT-TO-RIGHT (LTR) table.
 
+STEP 0 - EXTRACT HEADER INFORMATION CAREFULLY:
+Look at the TOP of the page for patient information table:
+- Patient Name (اسم المريض / Name)
+- Patient ID (رقم المريض)
+- Date of Birth (تاريخ الميلاد) - This is DOB, NOT report date!
+- Report Date (تاريخ الطلب / Report Date / Sample Date) - This is the actual report date!
+- Doctor Name (الطبيب)
+- Gender (الجنس / Sex)
+
+IMPORTANT DATE EXTRACTION:
+- "تاريخ الميلاد" or older date (e.g., 1975) = Date of Birth (DOB) → Put in patient_age field
+- "تاريخ الطلب" or "Report Date" or recent date (e.g., 2025) = Actual report date → Put in report_date field
+- If you see TWO dates: The older one is likely DOB, the recent one is report date
+- DO NOT confuse DOB with report date!
+
 STEP 1 - IDENTIFY TABLE DIRECTION:
 Look at the table headers and structure:
 - If test names are on the RIGHT side → This is RTL (Arabic-style)
@@ -32,63 +47,63 @@ For LTR tables (test names on left):
    Position 4: Reference range
    Position 5 (RIGHTMOST): Notes
 
-STEP 3 - EXTRACT ROW-BY-ROW:
+STEP 3 - EXTRACT ROW-BY-ROW (TOP TO BOTTOM, NO SKIPPING):
 Start from TOP row, go DOWN. For EACH row:
 1. Find test name position
 2. Move HORIZONTALLY in SAME ROW to find value
 3. Stay in SAME ROW to find unit and range
 4. DO NOT jump to different rows
+5. DO NOT extract duplicate test names
+6. If test name shows UNIT (e.g., "%"), clarify in field_name (e.g., "Lymphocyte %" vs "Lymphocyte Count")
 
 EXAMPLE - RTL Table (Arabic report):
 ```
 ملاحظات | الوحدة | النتيجة الطبيعية | النتيجة | الفحص
          | mg/dl  | (74-110)        | 109    | Fasting Blood Sugar (FBS)
-    *    | mg/dl  | (0.5-0.9)       | 0.56   | Creatinine,serum
+         | mg/dl  | (0.5-0.9)       | 0.56   | Creatinine,serum
     *    | mg/dl  | (0-200)         | 230    | Cholesterol,Total
          | U/L    | (0-33)          | 32     | Alanine transaminase ALT (GPT)
 ```
 Extract as:
 - Row 1: field_name="Fasting Blood Sugar", field_value="109", field_unit="mg/dl", normal_range="(74-110)"
-- Row 2: field_name="Creatinine serum", field_value="0.56", field_unit="mg/dl", normal_range="(0.5-0.9)", notes="marked_abnormal"
-- Row 3: field_name="Total Cholesterol", field_value="230", field_unit="mg/dl", normal_range="(0-200)", notes="marked_abnormal"
+- Row 2: field_name="Creatinine serum", field_value="0.56", field_unit="mg/dl", normal_range="(0.5-0.9)"
+- Row 3: field_name="Total Cholesterol", field_value="230", field_unit="mg/dl", normal_range="(0-200)", notes="*"
 - Row 4: field_name="Alanine aminotransferase ALT", field_value="32", field_unit="U/L", normal_range="(0-33)"
 
 VALIDATION RULES:
 ✓ Value must be in SAME horizontal row as test name
-✓ If you see a * or flag → add notes="marked_abnormal"
+✓ If you see a * or flag in notes column → add that to notes field exactly as shown
 ✓ Translate Arabic test names to English
+✓ Include unit type in field_name if clarifies (e.g., "Lymphocyte %" vs "Lymphocyte Count")
 ✓ Extract EVERY row in order top-to-bottom
+✓ DO NOT extract the same test name twice (skip duplicate rows)
 ✗ DO NOT take a value from row above or below
-✗ DO NOT skip rows
+✗ DO NOT skip rows unless duplicate
 ✗ DO NOT reorder rows
-
-COMMON RTL MISTAKES TO AVOID:
-❌ Reading "Cholesterol" row but taking "Creatinine" value (wrong row!)
-❌ Reading left-to-right when table is right-to-left
-❌ Confusing column positions in RTL layout
+✗ DO NOT confuse DOB (old date like 1975) with report date (recent date like 2025)
 
 RETURN JSON:
 {{
-    "patient_name": "from header",
-    "patient_age": "number",
+    "patient_name": "actual patient name from header",
+    "patient_age": "FULL DATE if you see تاريخ الميلاد or older date like 1975 (format: DD/MM/YYYY or YYYY-MM-DD), otherwise just number",
     "patient_gender": "Male or Female",
-    "report_date": "YYYY-MM-DD",
-    "report_name": "test type",
+    "report_date": "YYYY-MM-DD from تاريخ الطلب or Report Date field ONLY (recent date like 2025, NOT old date like 1975)",
+    "report_name": "test type from header",
     "report_type": "Clinical Chemistry / Hematology / etc",
-    "doctor_names": "from signature",
+    "doctor_names": "from header",
     "medical_data": [
         {{
-            "field_name": "English test name",
+            "field_name": "English test name with clarification if needed (e.g., Lymphocyte % or Lymphocyte Count) - unique",
             "field_value": "number from SAME row as test name",
             "field_unit": "unit from SAME row",
             "normal_range": "(X-Y) from SAME row",
             "category": "section name",
-            "notes": "marked_abnormal or empty"
+            "notes": "exact text from notes column or empty"
         }}
     ]
 }}
 
-EXTRACT NOW - Identify RTL/LTR first, then extract row-by-row carefully.
+EXTRACT NOW - Distinguish DOB from report date, include unit clarification in field names, extract row-by-row.
 """
 
 

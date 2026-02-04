@@ -374,6 +374,13 @@ class MedicalDataPostProcessor:
         
         age_str = str(age).strip()
         
+        # Check if age contains date separators (/ or -)
+        if '/' in age_str or '-' in age_str:
+            # This looks like a date (DOB), try to calculate age
+            calculated_age = MedicalDataPostProcessor._calculate_age_from_dob(age_str, report_date)
+            if calculated_age:
+                return str(calculated_age)
+        
         # First try to extract numeric age
         numeric_age = ''.join(c for c in age_str if c.isdigit())
         
