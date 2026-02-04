@@ -134,40 +134,39 @@ def get_simplified_extraction_prompt(idx: int, total_pages: int, report_types: l
     
     return f"""Extract ALL medical tests from this report image (page {idx}/{total_pages}).
 
-STEP 1: EXTRACT HEADER INFO FIRST
-Look at the TOP section of the report (before the table).
-Find these Arabic labels and extract the value NEXT TO each label:
+STEP 1: EXTRACT HEADER INFO
+The header has TWO columns. Look carefully:
 
-| Arabic Label | English | What to Extract |
-|-------------|---------|-----------------|
-| اسم المريض | Patient Name | Full name next to this label |
-| الجنس | Gender | أنثى=Female, ذكر=Male |
-| تاريخ الميلاد | DOB | Date like 01/05/1975 |
-| تاريخ الطلب | Report Date | Date like 2025-12-31 |
-| الطبيب | Doctor | Doctor name next to this label |
+RIGHT COLUMN (rightmost):
+- رقم المريض (Patient ID): number
+- اسم المريض (Patient Name): EXTRACT THIS → patient_name
+- رقم الهوية (ID Number): number  
+- الجنس (Gender): أنثى means Female, ذكر means Male → patient_gender
+- تاريخ الميلاد (DOB): date like 01/05/1975 → use to calculate age
 
-IMPORTANT: 
-- "اسم المريض" and "الطبيب" are DIFFERENT fields - don't confuse them!
-- Patient name is at "اسم المريض:", Doctor name is at "الطبيب:"
-- Calculate age: Report Year - Birth Year (e.g., 2025 - 1975 = 50)
+LEFT COLUMN (leftmost):
+- تاريخ الطلب (Report Date): date like 2025-12-31 → report_date
+- الطبيب (Doctor): EXTRACT THIS → doctor_names
+
+CRITICAL RULES FOR NAMES:
+- patient_name comes from "اسم المريض" row (RIGHT column)
+- doctor_names comes from "الطبيب" row (LEFT column)
+- These are DIFFERENT people - do not mix them!
+- Extract the FULL text exactly as written
 
 STEP 2: EXTRACT TABLE DATA
-The table has these columns (RIGHT to LEFT for Arabic headers):
-| ملاحظات | الوحدة | النتيجة الطبيعية | النتيجة | الفحص |
-| Notes | Unit | Normal Range | Value | Test Name |
+Read the table row by row. The table columns from RIGHT to LEFT are:
+الفحص (Test) | النتيجة (Value) | النتيجة الطبيعية (Range) | الوحدة (Unit) | ملاحظات (Notes)
 
-For EACH row, read from RIGHT to LEFT:
-1. Test Name (الفحص) - rightmost column
-2. Value (النتيجة) - next column left
-3. Normal Range (النتيجة الطبيعية) - next column left  
-4. Unit (الوحدة) - next column left
-5. Notes (ملاحظات) - leftmost column
+EXTRACT EACH ROW - stay on same row:
+Row 1: Fasting Blood Sugar (FBS) → value=109, range=(74-110), unit=mg/dl
+Row 2: Creatinine, serum → value=0.56, range=(0.5-0.9), unit=mg/dl
+Row 3: Cholesterol, Total → value=230, range=(0-200), unit=mg/dl
+Row 4: Alanine transaminase ALT (GPT) → value=32, range=(0-33), unit=U/L
+Row 5: HDL-Cholesterol → value=74, range=(35-80), unit=mg/dl
+Row 6: LDL-Cholesterol → value=128, range=(0-130), unit=mg/dl
 
-CRITICAL: Stay on the SAME ROW. Each test name matches the value directly to its left.
-
-Example from this report:
-- Row: "Fasting Blood Sugar (FBS)" | 109 | (74-110) | mg/dl | 
-- Extract: field_name="Fasting Blood Sugar (FBS)", field_value="109", normal_range="(74-110)", field_unit="mg/dl"
+IMPORTANT: HDL value is 74, LDL value is 128. Do NOT swap these!
 
 JSON OUTPUT (only JSON, no markdown):
 {{
