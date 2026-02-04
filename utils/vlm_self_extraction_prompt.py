@@ -213,6 +213,54 @@ For LTR (English/Left-to-Right) reports:
   Example row (LTR):
   Hemoglobin | 14.5 | g/dL | (12-16) | —
 
+CRITICAL: LTR Table Column Mapping for English Medical Reports
+==============================================================
+
+For LTR tables, IDENTIFY COLUMNS BY VISUAL POSITION (LEFT to RIGHT):
+1. Column A (Leftmost):        Test Name - The medical test name (e.g., "Hemoglobin", "Fasting Blood Sugar")
+2. Column B (Left-middle):     Value - The numeric result (e.g., "14.5", "109", "0.56")
+3. Column C (Center):          Unit - Measurement unit (e.g., "g/dL", "mg/dl", "U/L")
+4. Column D (Right-middle):    Normal Range - Reference range in parentheses like "(12-16)" or "(74-110)"
+5. Column E (Rightmost):       Notes/Remarks - Optional flags or additional info (often empty or "*")
+
+EXTRACTION MAPPING FOR LTR (Left to Right):
+- TEST NAME:      From Column A (Leftmost) - the descriptive test name
+- VALUE:          From Column B (Left-middle) - the numeric result value
+- UNIT:           From Column C (Center) - the measurement unit
+- NORMAL RANGE:   From Column D (Right-middle) - reference range in parentheses
+- NOTES:          From Column E (Rightmost) - any flags or remarks
+
+ROW-BY-ROW EXTRACTION FOR LTR:
+1. For EACH row in the table:
+   - Start from the LEFTMOST column
+   - Read: Test Name → Value → Unit → Range → Notes
+   - STAY ON THE SAME ROW - do NOT mix columns from different rows
+   - Each row contains ONE test with all its data
+
+2. CRITICAL: Do NOT confuse columns:
+   - Value column is NEXT TO test name (2nd column from left)
+   - Unit column is NEXT TO value (3rd column from left)
+   - Range column is NEXT TO unit (4th column from left)
+   - Do NOT read values from wrong columns
+
+3. Example of CORRECT extraction:
+   Row: "Fasting Blood Sugar | 109 | mg/dl | (74-110) | "
+   Extract: field_name="Fasting Blood Sugar", field_value="109", field_unit="mg/dl", normal_range="(74-110)"
+
+4. Example of WRONG extraction:
+   If you mistakenly read: "Creatinine | 230 | mg/dl | (0.5-0.9) | "
+   This is WRONG because 230 is from a different row's value
+   CORRECT is: "Creatinine, serum | 0.56 | mg/dl | (0.5-0.9) | "
+
+COMMON LTR ROW-MIXING ERRORS TO AVOID:
+- ❌ Reading test name from row 1, but value from row 2
+- ❌ Reading value that doesn't match the test name
+- ❌ Skipping rows because they look different
+- ❌ Reading the same row twice with different interpretations
+- ✅ Read each row completely from left to right, one row at a time
+- ✅ Verify value is logically correct for the test name
+- ✅ Example: "Creatinine" should have value 0.56, NOT 230 (230 is cholesterol)
+
 For RTL (Arabic/Right-to-Left) reports:
   Read the table RIGHT to LEFT:
   Column 1 (Rightmost visually) → Column 2 → Column 3 → Column 4 (Leftmost visually)
@@ -318,9 +366,25 @@ After extracting patient_name or doctor_names:
 3. Keep the actual person's name - ALL their names (first, middle, last)
 4. Arabic names: Keep them in Arabic
 5. Do NOT remove words that are part of the actual name
+6. CLEAN CORRUPTED TEXT: If text contains symbols, parentheses, or corrupted characters mixed with names:
+   - Remove symbols: ")" "(" "[" "]" "{" "}" 
+   - Remove corrupted fragments that don't look like Arabic or English words
+   - Keep only readable text that looks like a real name
+   
 Example: "Dr. Ahmed Mohamed Hassan" → remove "Dr." → keep "Ahmed Mohamed Hassan"
 Example: "رئيسة أسماء محمد علي" → remove "رئيسة" → keep "أسماء محمد علي"
-Example: "رئيسة خـير طابـب خطبـب" → all text is titles, return "" (no actual name found)
+Example: "الطب المطم ) منبررا صعة رل الله" → This is corrupted/nonsensical
+         Remove: symbols ")", corrupted words "المطم", "منبررا", "صعة", "رل"
+         Keep: ONLY if meaningful name found, otherwise return ""
+         Result: "" (because "الطب" is "medicine" not a name)
+
+IMPORTANT: If extracted text contains:
+- Random symbols or parentheses mixed with words
+- Words that don't form a logical name
+- Corrupted/garbled text
+- Medical terms mixed with names (like "الطب" = medicine)
+Then return "" (empty) instead of the corrupted text
+It's better to return empty than to store corrupted data
 
 For BILINGUAL reports: Look in the HEADER for BOTH English and Arabic labels
 
