@@ -208,20 +208,39 @@ class MedicalDataPostProcessor:
     
     @staticmethod
     def _clean_patient_name(name: str) -> str:
-        """Clean patient name."""
+        """
+        Clean patient name.
+        Remove titles and position words.
+        Reject corrupted/nonsensical text.
+        """
         if not name:
             return ""
         
         name = str(name).strip()
         
+        # Check for corrupted text (symbols, parentheses mixed with words)
+        # Indicators of corruption: random symbols, medical terms, parentheses
+        corruption_indicators = [")", "(", "[", "]", "{", "}", "الطب", "مختبر", "مرفق", "مستشفى"]
+        for indicator in corruption_indicators:
+            if indicator in name:
+                # This might be corrupted, need more careful check
+                # Count how many normal word characters vs special chars
+                normal_chars = sum(1 for c in name if c.isalnum() or c in ' ـ')
+                special_chars = sum(1 for c in name if c in ')([]{}<>')
+                if special_chars > 0 or "الطب" in name:
+                    # Likely corrupted
+                    return ""
+        
         # Remove common titles
         titles = ["dr.", "dr", "prof.", "prof", "د.", "دكتور", "أ.د", "الدكتور", 
-                 "أستاذ", "البروفيسور", "mr.", "mr", "mrs.", "mrs", "ms.", "ms"]
+                 "أستاذ", "البروفيسور", "mr.", "mr", "mrs.", "mrs", "ms.", "ms",
+                 "رئيسة", "رئيس", "مدير", "مسؤول", "مساعد", "معاون"]
         
+        name_lower = name.lower()
         for title in titles:
-            if name.lower().startswith(title):
+            if name_lower.startswith(title):
                 name = name[len(title):].strip()
-                break
+                name_lower = name.lower()
         
         # Must be at least 3 characters and look like a name (not a facility)
         if len(name) < 3:
@@ -229,9 +248,29 @@ class MedicalDataPostProcessor:
         
         # Exclude facility names
         facilities = ["clinic", "hospital", "lab", "laboratory", "phc", "center", "centre", 
-                     "مختبر", "مرفق", "مستشفى", "عيادة", "جهاز"]
+                     "مختبر", "مرفق", "مستشفى", "عيادة", "جهاز", "الطب", "دارة", "وزارة"]
         
-        if any(facility in name.lower() for facility in facilities):
+        if any(facility in name_lower for facility in facilities):
+            return ""
+        
+        # Check if name contains meaningful Arabic or English words
+        # If mostly gibberish, reject it
+        words = name.split()
+        if len(words) == 0:
+            return ""
+        
+        # Reject if contains too many unusual characters or patterns
+        # Corrupted text often has garbled Unicode or unusual patterns
+        has_corruption = False
+        for word in words:
+            # Check for patterns like "خـير" (corrupted text)
+            if "ـ" in word and len(word) < 3:  # Short words with diacritics
+                has_corruption = True
+            # Check for words that are just punctuation
+            if not any(c.isalnum() for c in word):
+                has_corruption = True
+        
+        if has_corruption and len(words) <= 2:
             return ""
         
         return name
