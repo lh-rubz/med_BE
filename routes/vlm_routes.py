@@ -23,7 +23,8 @@ from utils.medical_mappings import add_new_alias
 from utils.ocr_extractor import get_ocr_instance
 from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_personal_info_prompt
 from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt, generate_prompt_enhancement_request
-from utils.vlm_self_prompt import get_report_analysis_prompt, get_custom_extraction_prompt
+from utils.vlm_self_extraction_prompt import get_self_prompting_analysis_prompt, get_self_directed_extraction_prompt, get_simplified_extraction_prompt
+from utils.medical_data_postprocessor import MedicalDataPostProcessor
 from ollama import Client
 from utils.extract_personal_info import extract_personal_info, extract_medical_data
 
@@ -977,119 +978,30 @@ class ChatResource(Resource):
                 ocr = get_ocr_instance(languages=['ar', 'en'])
                 ocr_text = ocr.extract_text(image_info['data'])
                 print(f"✅ OCR extracted {len(ocr_text)} characters")
-                print(f"📄 OCR Text Preview:\n{ocr_text[:300]}...\n")
             except Exception as e:
                 print(f"⚠️  OCR failed: {e}, using image-only mode")
             
-            # Step 2: VLM
-            print(f"🤖 Step 2: Structuring data with VLM (hybrid mode)...")
+            # Step 2: VLM Extraction with Self-Prompting
+            print(f"🤖 Step 2: Extracting medical data...")
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Understanding medical values on page {idx}...'})}\n\n"
             
-            # Build prompt (Reusing logic)
-            # Build OPTIMIZED extraction prompt (reduced by ~40%)
-            prompt_text = f"""Extract EVERY SINGLE test result from this medical report image (page {idx}/{total_pages}).
-
-CRITICAL RULES FOR COMPLETE EXTRACTION:
-1. MANDATORY: Extract ALL test results visible on the page:
-   - Do NOT skip any tests - extract complete lists from all sections
-   - Do NOT summarize or group - each test is a SEPARATE entry
-   - Do NOT omit tests just because they seem similar
-   - COUNT EVERY ROW that has a test name and result value
-   
-2. Per-test rules:
-   - field_name: EXACT test name as written (e.g., "Haemoglobin", "C-Reactive Proteins")
-   - field_value: EXACT numeric or qualitative result shown INCLUDING any operators:
-     * If result shows "< 5.7", capture as "< 5.7" (preserve the operator)
-     * If result shows "> 6.5", capture as "> 6.5"
-     * If result shows "<= 100", capture as "<= 100"
-     * If result shows "5.1", capture as "5.1"
-     * Never strip or remove operators - keep them exactly as displayed
-   - field_unit: Unit of measurement (e.g., "g/dL", "mg/dL", "" for qualitative)
-   - normal_range: COMPLETE range text from the SAME ROW, preserved exactly character-by-character:
-     * For multi-category ranges, INCLUDE ALL CATEGORIES with their separators:
-       - Example: "Normal: <5.7 | Prediabetes: 5.7-6.4 | Diabetes: >6.5" (keep separators)
-       - Example: "Deficient: <10, Insufficient: 11-30, Sufficient: 31-100" (keep all commas)
-     * DO NOT concatenate without spaces - preserve exact formatting
-     * DO NOT mix ranges from different rows
-   
-3. Report metadata:
-   - report_name: EXACT title (e.g., "Haematology Report", "Biochemistry Profile")
-   - report_type: Match to: {', '.join(REPORT_TYPES)}
-   - report_date: Extract as YYYY-MM-DD from "Report Date:" or "Date:" field
-   - patient_name, patient_age, patient_gender: Extract from header
-   - doctor_names: Look for "Ref. By:", "Ref By:", "Referring Doctor:" - extract name without "Dr." title
-
-4. Categories:
-   - Extract section header (e.g., "HAEMATOLOGY", "BIOCHEMISTRY") for each test
-   - Multiple sections mean multiple tests with different categories
-
-5. Quality checks:
-   - If value marked "High", "Low", "Critical", add to notes
-   - Preserve exact decimal precision (14.5 not 14.50)
-
-Return ONLY valid JSON (no markdown, no code blocks):
-{{
-    "patient_name": "...",
-    "patient_age": "...",
-    "patient_gender": "...",
-    "report_date": "2024-02-01",
-    "report_name": "HAEMATOLOGY REPORT",
-    "report_type": "...",
-    "doctor_names": "",
-    "total_fields_in_image": <count>,
-    "medical_data": [
-        {{
-            "field_name": "Haemoglobin",
-            "field_value": "14.5",
-            "field_unit": "g/dL",
-            "normal_range": "12 - 16 g/dL",
-            "is_normal": true,
-            "field_type": "measurement",
-            "category": "HAEMATOLOGY REPORT",
-            "notes": ""
-        }},
-        {{
-            "field_name": "C - Reactive Proteins",
-            "field_value": "6.0",
-            "field_unit": "mg/dL",
-            "normal_range": "Normal: <6 mg/dL",
-            "is_normal": false,
-            "field_type": "measurement",
-            "category": "SEROLOGY REPORT",
-            "notes": ""
-        }},
-        {{
-            "field_name": "TSH Level",
-            "field_value": "< 0.5",
-            "field_unit": "mIU/L",
-            "normal_range": "0.4 - 4.0",
-            "is_normal": false,
-            "field_type": "measurement",
-            "category": "ENDOCRINOLOGY",
-            "notes": "Low TSH"
-        }},
-        {{
-            "field_name": "Glucose",
-            "field_value": "> 200",
-            "field_unit": "mg/dL",
-            "normal_range": "70 - 100",
-            "is_normal": false,
-            "field_type": "measurement",
-            "category": "BIOCHEMISTRY",
-            "notes": "High glucose"
-        }}
-    ]
-}}"""
+            # Use simplified extraction prompt (model writes its own logic)
+            prompt_text = get_simplified_extraction_prompt(
+                idx=idx,
+                total_pages=total_pages,
+                report_types=REPORT_TYPES
+            )
+            
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                 image_format = image_info['format']
                 
                 content = []
                 if ocr_text:
-                     enhanced_prompt = f"{prompt_text}\n\nIMPORTANT: I've also extracted the text using OCR below. Use this OCR text for ACCURATE Arabic character recognition.\n\nOCR EXTRACTED TEXT:\n{ocr_text}"
-                     content.append({'type': 'text', 'text': enhanced_prompt})
+                    enhanced_prompt = f"{prompt_text}\n\nOCR-EXTRACTED TEXT FOR REFERENCE:\n{ocr_text}"
+                    content.append({'type': 'text', 'text': enhanced_prompt})
                 else:
-                     content.append({'type': 'text', 'text': prompt_text})
+                    content.append({'type': 'text', 'text': prompt_text})
                 
                 content.append({
                     'type': 'image_url',
@@ -1153,12 +1065,12 @@ Return ONLY valid JSON (no markdown, no code blocks):
             except Exception as e:
                 print(f"❌ VLM Error on page {idx}: {e}")
 
-        # Step 3: Validation
-        yield f"data: {json.dumps({'percent': 75, 'message': 'Double-checking the results...'})}\n\n"
-        print(f"🔍 Validating aggregated data ({len(all_extracted_data)} total items)...")
+        # Step 4: Post-Processing & Validation
+        yield f"data: {json.dumps({'percent': 75, 'message': 'Cleaning and validating results...'})}\n\n"
+        print(f"🧹 Cleaning {len(all_extracted_data)} extracted items...")
         
-        # Combine data
-        final_data = {
+        # Combine raw data
+        raw_data = {
             'patient_name': patient_info.get('patient_name', ''),
             'patient_age': patient_info.get('patient_age', ''),
             'patient_gender': patient_info.get('patient_gender', ''),
@@ -1169,107 +1081,141 @@ Return ONLY valid JSON (no markdown, no code blocks):
             'medical_data': all_extracted_data
         }
         
-        # Validation Logic (Call utils)
+        # Clean data: remove empty fields, validate entries
+        print(f"   - Removing incomplete entries, validating structure...")
+        final_data = MedicalDataPostProcessor.clean_extracted_data(
+            raw_data,
+            strict_validation=True
+        )
+        
+        # Calculate is_normal for all entries
+        final_data['medical_data'] = MedicalDataPostProcessor.add_is_normal_to_entries(
+            final_data['medical_data']
+        )
+        
+        # Validate extraction quality
+        quality_report = MedicalDataPostProcessor.validate_extraction_quality(final_data)
+        print(f"   ✅ Quality Report:")
+        print(f"      - Total fields: {quality_report['total_fields_extracted']}")
+        print(f"      - Has patient name: {quality_report['has_patient_name']}")
+        print(f"      - Has report date: {quality_report['has_report_date']}")
+        if quality_report['issues']:
+            print(f"      - Issues: {', '.join(quality_report['issues'])}")
+        if quality_report['warnings']:
+            print(f"      - Warnings: {', '.join(quality_report['warnings'])}")
+        
+        # Step 5: Synonym Learning & Field Standardization
+        yield f"data: {json.dumps({'percent': 80, 'message': 'Learning field name variations...'})}\n\n"
+        print("🧠 Learning and standardizing field names...")
+        
         try:
-            # ---------------------------------------------------------
-            # AUTO-LEARNING SYNONYM STANDARDIZATION
-            # ---------------------------------------------------------
-            yield f"data: {json.dumps({'percent': 80, 'message': 'Standardizing and learning field names...'})}\n\n"
-            print("🧠 Standardizing and learning field names...")
-            
-            # Create a modifiable list for synonym processing
             medical_data_list = final_data.get('medical_data', [])
             unknown_terms = []
+            learned_synonyms = {}  # Maps lowercase variations to standard names
             
-            # 1. First Pass: check DB for existing synonyms
+            # Step 1: Identify unknown terms AND build learned synonyms from DB
             for item in medical_data_list:
                 original_name = item.get('field_name', '').strip()
                 if not original_name or len(original_name) < 2:
                     continue
-                    
+                
+                # Check if we know this field already
                 synonym_record = MedicalSynonym.query.filter_by(synonym=original_name.lower()).first()
                 if synonym_record:
-                    # Known alias -> Use standard name (KEEP ORIGINAL NAME as requested)
-                    print(f"   ✓ Recognized: '{original_name}' (Standard: '{synonym_record.standard_name}')")
-                    # item['field_name'] = synonym_record.standard_name  <-- KEEP ORIGINAL NAME
-                else:
-                    # Unknown -> Queue for batch learning
-                    if original_name not in unknown_terms:
-                        unknown_terms.append(original_name)
+                    # Known field - add to learned_synonyms mapping
+                    learned_synonyms[original_name.lower()] = synonym_record.standard_name
+                    print(f"   ✓ Known: '{original_name}' → '{synonym_record.standard_name}'")
+                elif original_name not in unknown_terms:
+                    # Unknown field - queue for learning
+                    unknown_terms.append(original_name)
             
-            # 2. Batch Processing for Unknown Terms
+            # Step 2: Batch learn ALL unknown terms at once
             if unknown_terms:
-                print(f"   ❓ Found {len(unknown_terms)} unknown terms. Asking AI in BATCH mode...")
+                print(f"   - Learning {len(unknown_terms)} new field name variations (batch)...")
                 try:
-                    terms_list_str = json.dumps(unknown_terms)
-                    learning_prompt = f"""Identify the standard medical name for these tests: {terms_list_str}.
-                    Return a JSON object mapping each original name to its standard name.
-                    Example format: {{"original_name1": "Standard Name 1", "original_name2": "Standard Name 2"}}
-                    If a term is already standard, map it to itself.
-                    If not a valid medical test, map to "UNKNOWN".
-                    Return ONLY the JSON."""
+                    # Create comprehensive learning prompt
+                    terms_json = json.dumps(unknown_terms)
+                    learning_prompt = f"""You are a medical data standardizer.
+For each test name below, identify its STANDARD medical name.
+These are actual field names from medical reports that need standardization.
+
+Input: {terms_json}
+
+For each term, do this:
+1. Check if it's a common medical test name
+2. Find the STANDARD English name for it
+3. If it's already standard, map to itself
+4. If it's a variation (spelling, abbreviation, translation), map to the standard form
+
+Examples:
+- "Hemoglobin" and "Haemoglobin" both → "Haemoglobin" (British standard)
+- "WBC" and "White Blood Cell Count" both → "WBC" or "White Blood Cell Count" (pick one)
+- "Glucose (Fasting)" and "Fasting Glucose" both → "Glucose (Fasting)"
+- "Hgb" and "HGB" and "Hemoglobin" → "Haemoglobin"
+- "C-Reactive Protein" and "CRP" → "C-Reactive Protein"
+
+Return ONLY valid JSON (no markdown):
+{{"term": "standard_name", "term2": "standard_name2"}}
+
+Be aggressive in standardization - group all variations together."""
                     
-                    # Using the larger model as requested by user, but batched for speed
-                    # Use the existing OpenAI-compatible client to avoid URL/Proxy issues
                     response = ollama_client.chat.completions.create(
-                        model='gemma3:12b', 
-                        messages=[
-                            {'role': 'user', 'content': learning_prompt}
-                        ]
+                        model=Config.OLLAMA_MODEL,
+                        messages=[{'role': 'user', 'content': learning_prompt}]
                     )
                     
                     response_text = response.choices[0].message.content.strip()
-                    # Clean markdown code blocks if present
-                    if "```json" in response_text:
-                        response_text = response_text.split("```json")[1].split("```")[0].strip()
-                    elif "```" in response_text:
-                        response_text = response_text.split("```")[1].split("```")[0].strip()
-                        
+                    # Clean markdown if present
+                    for marker in ['```json', '```']:
+                        if marker in response_text:
+                            response_text = response_text.split(marker)[1].split('```')[0].strip()
+                    
                     learned_map = json.loads(response_text)
                     
-                    # 3. Process learned terms
-                    for original, standardized in learned_map.items():
-                        standardized = standardized.strip()
-                        if standardized and standardized != 'UNKNOWN' and len(standardized) < 50:
-                            # Learn it (save to DB)
-                            if standardized.lower() != original.lower():
-                                print(f"   💡 Learned: '{original}' is alias for '{standardized}'")
-                                add_new_alias(original, standardized)
-                                # Also ensure standard name is in DB as a self-mapping
-                                add_new_alias(standardized, standardized)
+                    # Step 3: Save ALL learned synonyms to database
+                    for original, standard in learned_map.items():
+                        original = str(original).strip()
+                        standard = str(standard).strip()
+                        
+                        if standard and standard != 'UNKNOWN' and len(standard) < 100:
+                            # Save this synonym mapping
+                            add_new_alias(original, standard)
+                            
+                            # Also ensure standard name is a self-mapping
+                            standard_lower = standard.lower()
+                            existing = MedicalSynonym.query.filter_by(synonym=standard_lower).first()
+                            if not existing:
+                                add_new_alias(standard, standard)
+                            
+                            # Add to our local learned_synonyms for immediate use
+                            learned_synonyms[original.lower()] = standard
+                            
+                            if standard.lower() != original.lower():
+                                print(f"   💡 Learned: '{original}' → '{standard}'")
                             else:
-                                print(f"   📝 registered new standard term: '{standardized}'")
-                                add_new_alias(standardized, standardized)
-                                
-                            # Update items in the list (KEEP ORIGINAL NAME as requested)
-                            # for item in medical_data_list:
-                            #     if item.get('field_name') == original:
-                            #         item['field_name'] = standardized
-                                    
-                except Exception as learn_err:
-                    print(f"   ⚠️ Batch learning failed: {learn_err}")
-
-            # Update final_data with standardized list
-            final_data['medical_data'] = medical_data_list
-
-            # Apply medical validator for 100% accuracy
-            validated_data = validate_medical_data(final_data)
+                                print(f"   📝 Standardized: '{standard}'")
+                
+                except Exception as e:
+                    print(f"   ⚠️  Learning failed: {e}")
+                    import traceback
+                    traceback.print_exc()
             
-            original_count = len(final_data.get('medical_data', []))
-            validated_count = len(validated_data.get('medical_data', []))
+            # Step 4: Apply standardization to current report's data
+            print(f"   - Standardizing {len(medical_data_list)} field names in this report...")
+            final_data['medical_data'] = MedicalDataPostProcessor.standardize_field_names(
+                medical_data_list,
+                learned_synonyms=learned_synonyms
+            )
             
-            print(f"✅ Validation complete!")
-            print(f"   - Original fields: {original_count}")
-            print(f"   - After deduplication: {validated_count}")
+            print(f"   ✅ Field name standardization complete ({len(learned_synonyms)} mappings)")
             
-            final_data = validated_data
         except Exception as e:
-            print(f"Validation Error: {e}")
+            print(f"   ⚠️  Synonym learning/standardization error: {e}")
             import traceback
             traceback.print_exc()
-
-        # Step 4: Duplicate Check (using report hash)
-        yield f"data: {json.dumps({'percent': 85, 'message': 'Ensuring this is a new report...'})}\n\n"
+        
+        # Step 6: Duplicate Check
+        yield f"data: {json.dumps({'percent': 85, 'message': 'Checking for duplicates...'})}\n\n"
         
         try:
             medical_data_list = final_data.get('medical_data', [])
@@ -1287,13 +1233,12 @@ Return ONLY valid JSON (no markdown, no code blocks):
                     error_msg = f'This report appears to be a duplicate of an existing report (#{existing_report.id})'
                     yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_REPORT', 'report_id': existing_report.id})}\n\n"
                     return
-                
         except Exception as e:
-             print(f"Duplicate Check Error: {e}")
-
-        # Step 5: Saving
+            print(f"Duplicate check error: {e}")
+        
+        # Step 7: Saving to Database
         yield f"data: {json.dumps({'percent': 90, 'message': 'Saving your report...'})}\n\n"
-        print(f"💾 Saving report to database...")
+        print(f"💾 Saving {len(final_data['medical_data'])} fields to database...")
         
         new_report_id = None
         try:
