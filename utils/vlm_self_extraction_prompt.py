@@ -136,14 +136,72 @@ def get_simplified_extraction_prompt(idx: int, total_pages: int, report_types: l
     return f"""Extract EVERY medical test from this report image (page {idx}/{total_pages}).
 
 LANGUAGE & LAYOUT DETECTION:
-- If the report is mostly ARABIC text: It's likely RTL (right-to-left)
-- If the report is mostly ENGLISH text: It's likely LTR (left-to-right)
-- If BILINGUAL (Arabic + English): Check the main table structure
-  - If table headers and first column are on the RIGHT: Read as RTL
-  - If table headers and first column are on the LEFT: Read as LTR
-  - Patient data section (header area) is often in the SAME direction as the main table
+- If the report is mostly ARABIC text: It's likely RTL (right-to-left reading direction)
+- If the report is mostly ENGLISH text: It's likely LTR (left-to-right reading direction)
+- If BILINGUAL (Arabic + English): Check the table headers language and determine reading direction
+  - Arabic headers = RTL reading direction
+  - English headers in RTL table = Still read columns from right to left logically
 
-TABLE READING STRATEGY - CRITICAL FOR RTL/LTR:
+CRITICAL: RTL Table Column Mapping for Arabic Medical Reports
+===============================================================
+
+IMPORTANT: On the screen (visual), RTL Arabic medical tables appear as:
+    Visual Position: Left    Mid-Left   Mid    Mid-Right   Right
+    (what you see):  Notes → Unit    → Range → Value   → Test Name
+
+But the logical reading order (how to extract) is OPPOSITE:
+    Logical Order:   Test Name ← Value ← Range ← Unit ← Notes
+    (right column)   (rightmost) 
+
+EXACT COLUMN MAPPING FOR RTL MEDICAL TABLES:
+
+1. IDENTIFY COLUMNS BY VISUAL POSITION ON SCREEN:
+   - Column A (Leftmost visual):     Usually "ملاحظات" (Notes) or "Remarks"
+   - Column B (Left-middle visual):  Usually "الوحدة" (Unit) or "Unit"
+   - Column C (Center visual):       Usually "النسبة الطبيعية" (Normal Range) or "Normal"
+   - Column D (Right-middle visual): Usually "النسبة" (Value) or a numeric column
+   - Column E (Rightmost visual):    Usually "المختبر" (Test Name) or long descriptive text
+
+2. EXTRACTION MAPPING (Logical Order - Right to Left):
+   - TEST NAME:      From Column E (Rightmost) - it's the longest text, descriptive
+   - VALUE:          From Column D (Right-middle) - it's numeric, matches the test
+   - NORMAL RANGE:   From Column C (Center) - it's in parentheses like "(80-100)" or shows "-" if none
+   - UNIT:           From Column B (Left-middle) - short abbreviations like "g/dL", "%", "K/uL"
+   - NOTES:          From Column A (Leftmost) - flags or additional info
+
+3. VERIFICATION - Match Test Name to Value:
+   After extraction, VERIFY that:
+   - The VALUE is logically correct for the TEST NAME
+   - Examples:
+     ✓ "Haemoglobin" = "12.6" (numeric value makes sense)
+     ✓ "Platelet Count" = "257" (numeric value makes sense)
+     ✗ "Red Blood Cell Distribution Width" = "257" (wrong - 257 is platelet count)
+     ✗ "Basophils" = "17.7" with unit "%" (only if 17.7 makes sense for basophils)
+
+4. ROW-BY-ROW EXTRACTION:
+   For EACH row in the table:
+   - Identify Test Name first (rightmost column)
+   - Then find its Value (next column to left)
+   - Then find Range/Unit/Notes (remaining columns)
+   - DO NOT skip columns or read them out of order
+   - Each value must stay with its test name on the same row
+
+5. SPECIAL HANDLING FOR ARABIC RTL TABLES:
+   - Some tables may have column order variations (rare)
+   - If a numeric value doesn't make sense for a test name, you likely read it from wrong row
+   - If you see a test name twice with different values, extract BOTH (not a duplicate)
+   - If Range column shows "-" or blank, return empty string ""
+   - Units may be in different columns depending on lab format
+
+6. COMMON MISTAKES TO AVOID:
+   ✗ Reading the same column twice
+   ✗ Matching values from one row to test names from another row
+   ✗ Confusing Unit and Normal Range columns
+   ✗ Missing or inventing data
+   ✗ Extracting test names in wrong language order
+
+TABLE READING STRATEGY - IMPLEMENTATION:
+For LTR (English/Left-to-Right) reports: Read columns LEFT to RIGHT
 
 For LTR (English/Left-to-Right) reports:
   Read the table LEFT to RIGHT:
@@ -215,17 +273,31 @@ HEADER/METADATA EXTRACTION:
 Look for these fields in the HEADER section (not the table):
 
 For ENGLISH reports, look for:
-- "Patient Name:" or "Name:" → patient_name
+- "Patient Name:" or "Name:" → patient_name (extract ONLY the person's name, remove titles)
 - "Age:" or "DOB:" → patient_age (extract number only)
 - "Gender:" or "Sex:" → patient_gender
 - "Date:" or "Report Date:" → report_date
 
 For ARABIC reports, look for:
-- "اسم المريض:" or "الاسم:" → patient_name (extract Arabic name)
+- "اسم المريض:" or "الاسم:" or "اسم" → patient_name (extract ONLY the Arabic name, remove medical titles)
 - "العمر:" or "السن:" → patient_age (numbers only, ignore Arabic words)
 - "الجنس:" or "النوع:" → patient_gender (male/female)
-- "التاريخ:" or "تاريخ التقرير:" → report_date (convert format to YYYY-MM-DD)
-- "الطبيب:" or "المراجع:" → doctor_names (extract the doctor name)
+- "التاريخ:" or "تاريخ التقرير:" → report_date
+- "الطبيب:" or "المراجع:" or "اسم الطبيب:" → doctor_names (extract ONLY the doctor name, ignore titles like "د." "دكتور")
+
+CRITICAL NAME CLEANING:
+After extracting patient_name or doctor_names:
+1. Remove ALL medical/professional titles: "د." "دكتور" "Dr" "Prof" "أ.د" "الدكتور" "البروفيسور"
+2. Remove ALL position titles: "رئيسة" "مدير" "مسؤول" "مساعد" "معاون"
+3. Remove word fragments that are parts of titles (e.g., "خـير" might be part of title)
+4. Extract ONLY the actual person's name
+5. Arabic names: Keep them in Arabic, just clean the title words
+6. If result is empty after cleaning, return ""
+
+Examples of cleaning:
+- Input: "رئيسة خـير طابـب خطبـب" 
+  Remove: "رئيسة" (title), "خـير" (word fragment), "طابـب"/"خطبـب" (corrupted/title)
+  Result: "" (all removed) OR extract the meaningful name part if visible
 
 For BILINGUAL reports: Look in the HEADER for BOTH English and Arabic labels
 
@@ -239,6 +311,57 @@ REPORT TYPE AND NAME:
 - report_type: Match from list: {', '.join(report_types)}
 - report_name: Look for section headers like "CLINICAL CHEMISTRY", "HAEMATOLOGY", "كيمياء سريرية", etc.
 - If multiple sections: Use the section name corresponding to the current table
+
+CRITICAL: VALIDATE FIELD-VALUE LOGICAL CORRECTNESS:
+Before finalizing extraction, verify each row makes logical sense:
+
+For test name + value pairings, check:
+1. NUMERICAL REASONABLENESS:
+   - "red blood cell distribution width" should have value ~11-14% NOT 257 K/uL
+   - "platelet count" should have value ~150-450 K/uL, NOT 77.3 fL (that's MCV)
+   - "hemoglobin" should have 12-16 g/dL, NOT 40.2 (that's hematocrit %)
+   - "hematocrit" should have 37-48 %, NOT 12.6 g/dL
+   - "mean cell volume" (MCV) should have 80-100 fL, NOT values >100 (unless truly abnormal)
+
+2. UNIT-VALUE MATCHING:
+   - If field_name contains "count" (RBC, WBC, Platelet) → unit should be K/uL or cells/L
+   - If field_name contains "hemoglobin" → unit should be g/dL or g/L
+   - If field_name contains "%" or "percentage" → unit should be % or blank
+   - If field_name contains "volume" (MCV) → unit should be fL
+   - If field_name contains "concentration" (MCH, MCHC) → unit should be pg or g/dL
+
+3. RANGE-VALUE MATCHING:
+   - "hemoglobin" with value 12.6 should have range (12-16) or (11.5-15.5), NOT (37-48)
+   - "hematocrit" with value 40.2 should have range (37-48), NOT (12-16)
+   - "platelet count" with value 230 should have range (140-450), NOT (12-16)
+   - "basophils" with value 0.2% should have range (0-1) or (0-3), NOT (11.5-14.5)
+
+4. IF A ROW SEEMS MISMATCHED:
+   - Check if the value actually belongs to the PREVIOUS or NEXT field
+   - Check if the normal_range was swapped with the actual value
+   - If you cannot match correctly, SKIP that mismatched pairing
+   - It's better to skip one field than to include wrong data
+
+COMMON ROW-MIXING ERRORS TO DETECT & CORRECT:
+- Value 257 paired with "red blood cell distribution width" (WRONG - 257 is platelet count)
+  Fix: Look for the actual RDW value (should be ~11-14%) and pair correctly
+  
+- Value 40.2 with unit % paired with "mean cell hemoglobin" (WRONG - 40.2% is hematocrit)
+  Fix: MCH should be ~27-32 pg, not a percentage
+
+- "monocytes" = "17.7%" with range (0-1) (WRONG - wrong field pair from next row)
+  Fix: Normal monocytes are (4-9)%, value 17.7% seems like it came from a different field
+
+Example: If in RTL table you see:
+  — | (0-1) | % | 17.7 | Basophils
+  — | (4-9) | % | 4.1 | Monocytes
+
+The WRONG extraction (row mixing):
+  field_name: "Basophils", field_value: "17.7", field_unit: "%", normal_range: "(4-9)" ← WRONG RANGE!
+
+The CORRECT extraction:
+  field_name: "Basophils", field_value: "17.7", field_unit: "%", normal_range: "(0-1)"
+  field_name: "Monocytes", field_value: "4.1", field_unit: "%", normal_range: "(4-9)"
 
 JSON OUTPUT (only this, no markdown, no extra text):
 {{
