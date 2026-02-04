@@ -24,6 +24,7 @@ from utils.ocr_extractor import get_ocr_instance
 from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_personal_info_prompt
 from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt, generate_prompt_enhancement_request
 from utils.vlm_self_extraction_prompt import get_self_prompting_analysis_prompt, get_self_directed_extraction_prompt, get_simplified_extraction_prompt
+from utils.vlm_line_by_line_verifier import verify_extracted_fields_against_image_openai
 from utils.medical_data_postprocessor import MedicalDataPostProcessor
 from ollama import Client
 from utils.extract_personal_info import extract_personal_info, extract_medical_data
@@ -1050,6 +1051,22 @@ class ChatResource(Resource):
                     print(f"   Response text: {response_text[:200]}")
                 
                 if extracted_data.get('medical_data'):
+                    print(f"🔎 Running line-by-line verification for page {idx}...")
+                    verified_fields, verification_report = verify_extracted_fields_against_image_openai(
+                        extracted_data['medical_data'],
+                        image_base64,
+                        image_format,
+                        ollama_client,
+                        Config.OLLAMA_MODEL,
+                        page_num=idx,
+                        total_pages=total_pages,
+                        run_detailed_check=True
+                    )
+                    extracted_data['medical_data'] = verified_fields
+                    print(
+                        f"✅ Verification status: {verification_report.get('verification_status', 'UNKNOWN')}"
+                    )
+
                     field_count = len(extracted_data['medical_data'])
                     all_extracted_data.extend(extracted_data['medical_data'])
                     print(f"✅ Extracted {field_count} field(s) from page {idx}")
