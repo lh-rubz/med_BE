@@ -114,13 +114,13 @@ Extracted Data:
 - Reference Range: {normal_range}
 
 VERIFICATION TASK:
-1. Look at the image for the EXACT horizontal row labeled "{field_name}".
+1. Identify the **PHYSICAL GRID LINES** (horizontal dividers) above and below the test "{field_name}".
 2. Draw a mental horizontal line through the center of that test name.
-3. Move your eyes horizontally along that line to find the Result Value.
-4. IMPORTANT: If there is no value on that EXACT line, the value is EMPTY. DO NOT pick a number from a line above or below.
+3. Move your eyes horizontally along that line, staying **GRID-LOCKED** between the same two dividers.
+4. IMPORTANT: Only the number between those SAME dividers is the correct result.
 5. Verify:
    a) Test Name: Does it say "{field_name}"?
-   b) Value: Is "{field_value}" ON THE SAME LINE as "{field_name}"?
+   b) Value: Is "{field_value}" ON THE SAME LINE and between the SAME dividers as "{field_name}"?
    c) If NO, what IS the number on that same line?
 
 RESPOND WITH:

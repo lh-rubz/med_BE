@@ -72,11 +72,16 @@ Start from TOP row, go DOWN. For EACH row:
 9. If a value is flagged with "*" or "#", extract the number to field_value and the symbol to notes.
 
 1-OFF ERROR & STRUCTURAL GROUNDING:
+- **GRID-LOCK STRATEGY**: Notice the physical horizontal lines (gray or black dividers) separating rows. 
+  - A Result value is ONLY valid for a Test Name if it resides between the SAME PAIR of horizontal lines. 
+  - If you move horizontally from a Test Name and hit a blank space before the Result column, that test has NO result. DO NOT borrow the value from the row below.
+- **ROW IDENTIFICATION**: Mentally tag each row (Row #1, Row #2, etc.). Scan them one by one. If Row #3 (Monocytes) has 0.1, do not report 7.1 (which is on Row #4).
 - **BOX-CENTRIC ALIGNMENT**: Each row is a physical box. The Test Name (right) and Result (left) share the EXACT same box. 
-- **IMMEDIATE LEFT**: In RTL tables, the Result is the VERY FIRST number you hit when moving LEFT from the Test Name text.
-- **Y-BASELINE LOCK**: Draw a mental horizontal line under the Test Name. Any number ABOVE or BELOW that line belongs to a DIFFERENT test. 
-- **NO NEIGHBOR DEBT**: If you find 14.4 for "Red blood cell...", do NOT look at the row below (Platelet Crit) until you finished the current one.
-- **RTL SEQUENCE**: Test(Right) -> Result -> Range -> Unit -> Notes(Left).
+- **RTL SEQUENCE**: Test Name (Rightmost) -> Result -> Range -> Unit -> Notes (Leftmost).
+
+RAMALLAH PHC HEADER RULES:
+- **PATIENT NAME**: Top-Right Table, 1st Row. Label is "اسم المريض". Value is to its LEFT.
+- **INSURANCE**: Top-Left Table, 2nd Row. Label is "التأمين". Value is "[ شؤون اجتماعية ] Social". DO NOT use this as the patient name.
 
 EXAMPLE - RTL Table (Arabic report):
 ```

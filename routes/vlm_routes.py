@@ -993,34 +993,32 @@ class ChatResource(Resource):
                     
                     patient_prompt = """Extract patient and report information from this medical lab report image.
 
-LOOK FOR THESE FIELDS (check header area, top of page):
+LOOK FOR THESE FIELDS (check the header area with two distinct tables):
 
-### HEADER TABLES (There are TWO tables at the top):
-1. **RIGHT-HAND TABLE** (contains Patient ID, Name, Gender, etc.):
-   - PATIENT NAME (اسم المريض): The text directly to the LEFT of "اسم المريض". 
-     Example: "رئيسة خضر طالب خطيب"
-     CRITICAL: DO NOT take "شؤون اجتماعية" (that is Insurance). The Name is 3-4 Arabic words.
-   - GENDER (الجنس): Find "الجنس" and extract "ذكر" (Male) or "أنثى" (Female).
-   - DOB (تاريخ الميلاد): Find "تاريخ الميلاد" and extract the date (e.g., 01/05/1975).
+### 1. **RIGHT-HAND TOP TABLE** (The primary patient info table on the right):
+   - **PATIENT NAME (اسم المريض)**: Find the label "اسم المريض" on the far right. The value is text directly to its LEFT (e.g., "رئيسة خضر طالب خطيب").
+   - **GENDER (الجنس)**: Find "الجنس" and extract "ذكر" (Male) or "أنثى" (Female).
+   - **PATIENT ID (رقم المريض)**: Find "رقم المريض" and extract the number.
+   - **DOB (تاريخ الميلاد)**: Find "تاريخ الميلاد" and extract the date.
 
-2. **LEFT-HAND TABLE** (contains Report Dates, Insurance, etc.):
-   - REPORT DATE (تاريخ الطلب): Find "تاريخ الطلب" and extract the date (e.g., 2025-12-31).
-   - INSURANCE (التأمين): This contains "Social" or "شؤون اجتماعية". DO NOT use this as patient name.
-   - DOCTOR (الطبيب): Find "الطبيب" and extract name (e.g., "جهاد العملة").
+### 2. **LEFT-HAND TOP TABLE** (The report/administrative info table on the left):
+   - **REPORT DATE (تاريخ الطلب)**: Find "تاريخ الطلب" and extract the date (e.g., 2025-12-31).
+   - **INSURANCE (التأمين)**: Find "التأمين". It usually says "[ شؤون اجتماعية ] Social". 
+     CRITICAL: DO NOT extract this as the patient name. This is insurance.
+   - **DOCTOR (الطبيب)**: Find "الطبيب" and extract the name (e.g., "جهاد العملة").
 
 Return JSON only:
 {
-    "patient_name": "exact name found in RIGHT table",
-    "patient_age": "calculated age or number found",
+    "patient_name": "Arabic name from RIGHT table",
+    "patient_age": "Calculated years or number found",
     "patient_gender": "Male or Female",
-    "report_date": "YYYY-MM-DD format",
-    "doctor_names": "doctor name found in LEFT table"
+    "report_date": "YYYY-MM-DD",
+    "doctor_names": "Doctor name from LEFT table"
 }
 
 RULES:
-- Convert date to YYYY-MM-DD.
 - Return empty string "" if not found.
-- Arabic names stay in Arabic."""
+- Leave names in Arabic."""
                     
                     content = [
                         {'type': 'text', 'text': patient_prompt},
@@ -1057,6 +1055,10 @@ RULES:
                     image_format = image_info['format']
                     
                     print(f"🔎 Running verification for page {idx}...")
+                    
+                    # Force detailed check for complex tables (Ramallah PHC reports are usually complex)
+                    force_detailed = len(extracted_data['medical_data']) > 10 or "ramallah" in str(extracted_data.get('lab_name', '')).lower()
+                    
                     verified_fields, verification_report = verify_extracted_fields_against_image_openai(
                         extracted_data['medical_data'],
                         image_base64,
@@ -1065,7 +1067,7 @@ RULES:
                         Config.OLLAMA_MODEL,
                         page_num=idx,
                         total_pages=total_pages,
-                        run_detailed_check=True  # Enable detailed field-by-field checks
+                        run_detailed_check=force_detailed  # Dynamic high-precision mode
                     )
                     extracted_data['medical_data'] = verified_fields
                     print(f"✅ Verification status: {verification_report.get('verification_status', 'UNKNOWN')}")
