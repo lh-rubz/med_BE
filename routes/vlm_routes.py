@@ -29,6 +29,7 @@ from utils.vlm_strict_table_extraction import get_strict_table_extraction_prompt
 from utils.medical_data_postprocessor import MedicalDataPostProcessor
 from ollama import Client
 from utils.extract_personal_info import extract_personal_info, extract_medical_data
+from utils.llm_text_organizer import get_text_organizer_prompt, get_enhanced_extraction_prompt, parse_organized_text
 
 # Create namespace
 vlm_ns = Namespace('vlm', description='VLM and Report operations')
@@ -983,25 +984,66 @@ class ChatResource(Resource):
             except Exception as e:
                 print(f"⚠️  OCR failed: {e}, using image-only mode")
             
+            # Step 1.5: LLM Text Organizer (Stage 1 of two-stage extraction)
+            organized_text = None
+            organized_data = None
+            if ocr_text and len(ocr_text) > 100:  # Only organize if we have enough text
+                print(f"🧹 Step 1.5: Organizing OCR text with LLM...")
+                yield f"data: {json.dumps({'percent': current_progress + 5, 'message': f'Organizing text from page {idx}...'})}\n\n"
+                
+                try:
+                    organizer_prompt = get_text_organizer_prompt() + ocr_text
+                    
+                    # Text-only LLM call (no image, faster)
+                    organizer_completion = ollama_client.chat.completions.create(
+                        model=Config.OLLAMA_MODEL,
+                        messages=[{'role': 'user', 'content': organizer_prompt}],
+                        temperature=0.1
+                    )
+                    organized_text = organizer_completion.choices[0].message.content.strip()
+                    print(f"✅ LLM organized text ({len(organized_text)} chars)")
+                    print(f"📋 Organized preview:\n{organized_text[:500]}...")
+                    
+                    # Parse organized text as backup
+                    organized_data = parse_organized_text(organized_text)
+                    if organized_data.get('medical_data'):
+                        print(f"   📊 Parsed {len(organized_data['medical_data'])} test results from organized text")
+                    if organized_data.get('patient_name'):
+                        print(f"   👤 Found patient: {organized_data['patient_name']}")
+                except Exception as org_err:
+                    print(f"⚠️  Text organization failed: {org_err}, continuing with raw OCR")
+            
             # Step 2: VLM Extraction with Strict Table Reading
             print(f"🤖 Step 2: Extracting medical data with strict row-by-row alignment...")
             yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Reading table data carefully on page {idx}...'})}\n\n"
             
-            # Use strict table extraction prompt for accurate results
-            prompt_text = get_strict_table_extraction_prompt(
-                idx=idx,
-                total_pages=total_pages
-            )
-            
             # Flag to track extraction method used
             extraction_method = "strict"
+            
+            # Choose prompt based on whether we have organized text
+            if organized_text:
+                # Use enhanced extraction with organized text (Stage 2)
+                prompt_text = get_enhanced_extraction_prompt(organized_text, idx, total_pages)
+                extraction_method = "two_stage"
+                print(f"   📊 Using two-stage extraction with organized text")
+            else:
+                # Fallback to strict table extraction prompt
+                prompt_text = get_strict_table_extraction_prompt(
+                    idx=idx,
+                    total_pages=total_pages
+                )
+                print(f"   📊 Using strict table extraction (no organized text)")
             
             try:
                 image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                 image_format = image_info['format']
                 
                 content = []
-                if ocr_text:
+                # If using two-stage, organized text is already in prompt
+                # Otherwise, append raw OCR text
+                if extraction_method == "two_stage":
+                    content.append({'type': 'text', 'text': prompt_text})
+                elif ocr_text:
                     enhanced_prompt = f"{prompt_text}\n\nOCR-EXTRACTED TEXT FOR REFERENCE:\n{ocr_text}"
                     content.append({'type': 'text', 'text': enhanced_prompt})
                 else:
@@ -1165,17 +1207,50 @@ class ChatResource(Resource):
                         print(f"✅ Extracted {field_count} field(s) from page {idx}")
                     else:
                         print(f"⚠️  No valid medical_data after extraction and fallback for page {idx}")
+                        
+                        # FALLBACK: Use organized_data from Stage 1 if available
+                        if organized_data and organized_data.get('medical_data'):
+                            print(f"   🔄 Using organized text data as fallback ({len(organized_data['medical_data'])} fields)")
+                            extracted_data['medical_data'] = organized_data['medical_data']
+                            all_extracted_data.extend(organized_data['medical_data'])
+                            
+                            # Also use patient info from organized data if available
+                            for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
+                                if organized_data.get(key) and not extracted_data.get(key):
+                                    extracted_data[key] = organized_data[key]
                 else:
                     print(f"⚠️  No medical_data found in extracted_data for page {idx}")
+                    
+                    # FALLBACK: Use organized_data from Stage 1 if available
+                    if organized_data and organized_data.get('medical_data'):
+                        print(f"   🔄 Using organized text data as fallback ({len(organized_data['medical_data'])} fields)")
+                        extracted_data['medical_data'] = organized_data['medical_data']
+                        all_extracted_data.extend(organized_data['medical_data'])
+                        
+                        # Also use patient info from organized data if available
+                        for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
+                            if organized_data.get(key) and not extracted_data.get(key):
+                                extracted_data[key] = organized_data[key]
 
                 
                 # Capture patient info from first good page (before verification)
                 if not patient_info or not patient_info.get('patient_name'):
                     if extracted_data.get('patient_name'):
                         patient_info = extracted_data
+                    elif organized_data and organized_data.get('patient_name'):
+                        # Use organized data for patient info
+                        print(f"   👤 Using patient info from organized text: {organized_data.get('patient_name')}")
+                        patient_info = organized_data
                     elif extracted_data.get('medical_data'):
                         # Even if no explicit patient_name, capture what we have
                         patient_info = extracted_data
+                
+                # Enrich patient_info with organized_data if available
+                if organized_data:
+                    for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
+                        if organized_data.get(key) and not patient_info.get(key):
+                            patient_info[key] = organized_data[key]
+                            print(f"   ✨ Enriched {key} from organized text: {organized_data[key]}")
 
                 print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")
                      
