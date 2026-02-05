@@ -30,6 +30,22 @@ IMPORTANT RULES:
 4. Separate patient information from test results
 5. Keep original values exactly as they appear (don't calculate or convert)
 
+CRITICAL FOR ARABIC TABLES:
+Arabic lab reports have columns in RIGHT-TO-LEFT order:
+- RIGHTMOST column = Test Name (الفحص)
+- Next column = Result/Value (النتيجة) - THIS IS THE NUMERIC RESULT
+- Next column = Normal Range (النتيجة الطبيعية) - contains dash like "74-110"
+- Next column = Unit (الوحدة) - like mg/dL, U/L, %
+- LEFTMOST column = Notes (ملاحظات)
+
+When you see a table row like:
+"mg/dL (74-110) 109 Fasting Blood Sugar"
+Reading RIGHT-TO-LEFT:
+- Test Name: Fasting Blood Sugar
+- Result: 109
+- Range: (74-110)
+- Unit: mg/dL
+
 OUTPUT FORMAT (use this exact structure):
 
 ===PATIENT INFORMATION===
@@ -45,21 +61,10 @@ Doctor Name: [extracted name or "NOT FOUND"]
 [Test Name] | [Value] | [Unit] | [Normal Range]
 ...
 
-EXAMPLE INPUT:
-"اسم المريض خضر طالب  الجنس ذكر العمر 45  Glucose  98  mg/dL  70-110  Creatinine  0.8  mg/dL"
-
-EXAMPLE OUTPUT:
-===PATIENT INFORMATION===
-Patient Name: خضر طالب
-Gender: Male
-Age: 45
-Date of Birth: NOT FOUND
-Report Date: NOT FOUND
-Doctor Name: NOT FOUND
-
-===MEDICAL TESTS===
-Glucose | 98 | mg/dL | 70-110
-Creatinine | 0.8 | mg/dL | NOT FOUND
+VALIDATION:
+- Value should be a simple number (e.g., 109, 0.56, 12.6)
+- Normal Range contains a dash or parentheses (e.g., "74-110", "(0.5-0.9)")
+- DO NOT confuse Value with Normal Range!
 
 ---
 RAW OCR TEXT TO ORGANIZE:
@@ -73,25 +78,41 @@ def get_enhanced_extraction_prompt(organized_text, page_idx, total_pages):
     """
     return f"""You are extracting medical data from a lab report image (page {page_idx}/{total_pages}).
 
-I have pre-processed the OCR text into an organized format below. Use this AS A GUIDE, but verify against the image.
+I have pre-processed the OCR text into an organized format below. Use this AS A GUIDE, but VERIFY against the image.
 
 PRE-ORGANIZED TEXT:
 {organized_text}
 
-YOUR TASK:
-1. Look at the IMAGE to verify the organized text is correct
-2. Extract ALL test results into the JSON format below
-3. If the organized text has errors, trust the IMAGE
-4. Extract EVERY row from the table - do not stop early
+🚨 CRITICAL: ARABIC TABLE COLUMN ORDER (RIGHT-TO-LEFT) 🚨
 
-CRITICAL RULES:
-- Each test result must come from the SAME ROW (don't mix values)
-- field_value must be the NUMERIC RESULT only (not the range)
-- normal_range is the reference range (e.g., "70-110", "(0.6-1.2)")
-- If organized text shows "NOT FOUND", look harder in the image
+This is an Arabic medical report. The table columns read RIGHT-TO-LEFT:
+
+| ملاحظات | الوحدة | النتيجة الطبيعية | النتيجة | الفحص |
+| Notes   | Unit   | Normal Range     | Result  | Test  |
+| (LEFT)  |   ←    |       ←          |    ←    | (RIGHT)|
+
+For example, a row showing: "mg/dL | (74-110) | 109 | | Fasting Blood Sugar (FBS)"
+Reading RIGHT-TO-LEFT:
+- Test Name (الفحص): "Fasting Blood Sugar (FBS)" (rightmost)
+- Result (النتيجة): "109" (the NUMERIC VALUE - second from right)
+- Normal Range (النتيجة الطبيعية): "(74-110)" (middle - contains dash/parentheses)
+- Unit (الوحدة): "mg/dL" (second from left)
+
+🔴 COMMON MISTAKES TO AVOID:
+- DO NOT put the range "(74-110)" as the value - that's the NORMAL RANGE
+- DO NOT put the value "109" as the range
+- The VALUE is always a simple number: 109, 0.56, 12.6, 230
+- The RANGE always has a dash or slash: 74-110, (0.5-0.9), 0-200
+
+EXTRACTION RULES:
+1. Read each row RIGHT-TO-LEFT
+2. field_value = The numeric result (second column from right)
+3. normal_range = The reference range with dashes (middle column)
+4. field_unit = The unit abbreviation (second column from left)
+5. Extract EVERY row - do not stop early
 
 OUTPUT (JSON only, no markdown):
-{{
+{{{{
   "patient_name": "",
   "patient_age": "",
   "patient_gender": "",
@@ -100,14 +121,14 @@ OUTPUT (JSON only, no markdown):
   "report_name": "",
   "report_type": "",
   "medical_data": [
-    {{
-      "field_name": "Test name",
-      "field_value": "Numeric result",
-      "field_unit": "Unit",
-      "normal_range": "Reference range"
-    }}
+    {{{{
+      "field_name": "Test name from rightmost column",
+      "field_value": "Numeric result (e.g., 109, 0.56, NOT a range)",
+      "field_unit": "Unit from second-left column",
+      "normal_range": "Range with dash (e.g., 74-110, 0.5-0.9)"
+    }}}}
   ]
-}}
+}}}}
 """
 
 

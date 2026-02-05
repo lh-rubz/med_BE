@@ -632,14 +632,18 @@ def calculate_is_normal(field_value, normal_range, field_type='measurement', pat
     """
     Calculate if a field value is within normal range.
     Handles gender-specific, age-specific, categorical, and simple ranges.
-    Extracts gender from patient_gender parameter (e.g., "Female/20 Years" or "Female").
+    Returns None if no valid normal_range is provided.
     """
     try:
         field_value_str = str(field_value).strip() if field_value else ''
         normal_range_str = str(normal_range).strip() if normal_range else ''
         
-        if not normal_range_str or not field_value_str:
-            return False
+        # Return None if no normal range to compare against
+        if not normal_range_str or normal_range_str.upper() == 'NOT FOUND':
+            return None
+        
+        if not field_value_str or field_value_str.upper() == 'NOT FOUND':
+            return None
         
         # Extract numeric value
         numeric_value = None
@@ -765,7 +769,7 @@ def calculate_is_normal(field_value, normal_range, field_type='measurement', pat
         
     except Exception as e:
         print(f"Error calculating is_normal: {e}")
-        return False
+        return None  # Return None when can't determine
 
 
 def _check_range_value(numeric_value, range_text):
