@@ -114,19 +114,18 @@ Extracted Data:
 - Reference Range: {normal_range}
 
 VERIFICATION TASK:
-1. Identify the **PHYSICAL GRID LINES** (horizontal dividers) above and below the test "{field_name}".
-2. Draw a mental horizontal line through the center of that test name.
-3. Move your eyes horizontally along that line, staying **GRID-LOCKED** between the same two dividers.
-4. IMPORTANT: Only the number between those SAME dividers is the correct result.
-5. Verify:
-   a) Test Name: Does it say "{field_name}"?
-   b) Value: Is "{field_value}" ON THE SAME LINE and between the SAME dividers as "{field_name}"?
-   c) If NO, what IS the number on that same line?
+1. Identify the **HORIZONTAL BASELINE** (laser line) passing through the vertical center of the FIRST word of "{field_name}".
+2. Stay strictly locked on that EXACT baseline.
+3. Move your eyes horizontally to the Result column.
+4. Verify:
+   a) Test Name: Does the text on this baseline say "{field_name}"?
+   b) Value: Is "{field_value}" ON THE EXACT SAME BASELINE? (If it's even slightly above or below, mark as INCORRECT).
+   c) If INCORRECT, what IS the number centered on this exact baseline?
 
 RESPOND WITH:
 FIELD_VERIFICATION:
 Test Name: CORRECT or INCORRECT
-Value: CORRECT or INCORRECT (if incorrect, say "Correct value on this line is [X]")
+Value: CORRECT or INCORRECT (if incorrect, say "Correct baseline value is [X]")
 Unit: CORRECT or INCORRECT
 Range: CORRECT or INCORRECT
 OVERALL: VERIFIED or NEEDS_CORRECTION

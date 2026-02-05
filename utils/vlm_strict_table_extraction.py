@@ -77,10 +77,12 @@ STEP 0 - HEADER INFO (Ramallah PHC Layout):
 
 STEP 1 - CONTINUOUS ROW SCAN:
 Extract EVERY row from top to bottom. For each row:
-1. **HORIZONTAL LOCK**: Every value (Result, Range, Unit) MUST be on the exact same horizontal baseline as the Test Name.
-2. **GRID AWARENESS**: Use the horizontal lines as absolute row dividers. 
-3. **NO LOOK-AHEAD**: If a row has no result, leave it empty. NEVER pull a value from the rows below.
-4. **LASER FOCUS**: Scan Name (Right) -> Result -> Range -> Unit -> Notes (Left).
+1. **VERTICAL CENTER LOCK (Y-Anchor)**: Identify the vertical center (Y-coordinate) of the FIRST word of the Test Name.
+2. **HORIZONTAL LASER-SCAN**: Mentally scan horizontally to the left on that EXACT baseline.
+   - ONLY report numbers that are hit by this horizontal laser.
+   - If a number is slightly higher or lower (the row above or below), IGNORE IT completely.
+3. **GRID AWARENESS**: Use the horizontal line dividers as hard physical barriers.
+4. **NO NEIGHBOR DEBT**: If a row has no result on its laser line, leave `field_value` empty. NEVER borrow from neighbors.
 
 EXAMPLE - RTL Table (Arabic report):
 ```
