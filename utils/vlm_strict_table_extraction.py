@@ -37,8 +37,8 @@ For EACH name you listed in Step 1:
 2. **PATTERN ADHERENCE**: Rows typically alternate (Gray, White, Gray, White).
 3. **HORIZONTAL BASELINE LOCK**: Move horizontally from the test name to find Value, Unit, and Range on the SAME color band.
 4. **UNIT PRECISION**: Extract units precisely (% , K/uL, M/uL, g/dL, fL, pg). Look specifically at the "Unit" column.
-5. **SYMBOL ANCHOR (*)**: If you see a "*" or flag next to a value, this is a physical anchor proving a value exists. DO NOT skip these rows or return "N/A".
-6. **EMPTY VALUE POLICY**: ONLY skip a field if the result value is physically empty white space.
+5. **SYMBOL ANCHOR (*, #)**: If you see a "*" or flag next to a value area, this is a physical anchor proving a field row has focus or data. DO NOT skip these rows. Even if the numeric value is missing, capture the existence of the flag.
+6. **EMPTY VALUE POLICY**: ONLY skip a field if the result value AND the flag area are physically empty white space.
 
 VALIDATION RULES:
 ✓ Value must share the EXACT SAME color band as the test name.

@@ -29,13 +29,16 @@ PATIENT NAME (CRITICAL - MUST FIND)
 - Arabic labels: "اسم المريض", "اسم المرضى", "اسم", "Patient Name", "Name"
 - Location: Header area, often in RIGHT side (Arabic) AND/OR LEFT side (English) - look for BOTH
 - Extract: Text immediately following the label (right-to-left for Arabic, left-to-right for English)
+- SPECIFIC BOX: In Arabic reports with a grid header, look at the top-right box labeled "اسم المريض". The value is usually below or to the left of the label.
 - Clean: Remove titles like Dr., Mr., Mrs., Prof., د., دكتور, السيد, السيدة, أ.د
 - If TWO names found (one Arabic, one English), use the LONGER/MORE COMPLETE one
 - Validate: 3+ characters, looks like a person's name (NOT: "Patient", "N/A", numbers, facility names)
 - CRITICAL FILTERS - SKIP these (they are NOT patient names):
+  * "عيادة الطب العام (مستوصف صحة رب الله)" or similar - this is a CLINIC name.
   * Any text containing: "facility", "جهاز" (device), "مختبر" (lab), "مرفق", "مستشفى" (hospital), "clinic", "equipment", "laboratory", "centre", "center"
   * Single words that are place/thing names: "Ramallah", "PHC", "مختبر رمالله", facility codes/IDs
   * Abbreviations like "PHC", "Lab", "CDC", "WHO" - these are facilities, not patient names
+- Return: Original language text or "" if uncertain
   * If header shows "Laboratory(Ramallah PHC)" or similar - skip it, find the ACTUAL patient name nearby
 - Return: Original language text or "" if uncertain
 
@@ -81,6 +84,7 @@ DOCTOR / PHYSICIAN (CRITICAL - SEARCH THOROUGHLY AND AGGRESSIVELY)
   5. SIDE panels - any information boxes
   6. After any line containing "doctor", "physician", "Dr.", "د.", "طبيب"
 - Extract Rules:
+  * In reports with a grid header, look at the box labeled "الطبيب" or "Doctor". The name is often "جهاد العملة" or similar.
   * If you see "Dr. [Name]" or "الطبيب [الاسم]" → Extract the [Name] part
   * If you see a label like "الطبيب:" or "Doctor:" → Extract the text IMMEDIATELY following
   * Remove ALL titles and prefixes: Dr., Dr, Prof., Prof, د., دكتور, أ.د, الدكتور, أستاذ, البروفيسور
@@ -180,7 +184,9 @@ VALIDATION BEFORE RETURN
 - CRITICAL: Normal_range must NOT look like a value, and field_value must NOT look like a unit or range.
 - Duplicate ranges allowed when units differ or the source shows the same range; re-check only if same unit and the range clearly belongs to another row.
 - Common sense: WBC ~4-11 K/uL; RBC ~4-5.5 M/uL; Hgb ~12-16 g/dL. If wildly off, re-check.
-- Do NOT return medical_data entries with empty field_name or field_value. Skip those rows entirely.
+- SYMBOL ANCHORS (*, #): If a row has a "*" or "#" but no numeric value, DO NOT skip it. Capture the test name and the symbol in field_value or notes.
+- Do NOT return medical_data entries with empty field_name.
+- If field_value is empty but a "*" exists, capture the "*" as the value.
 - If ANY extracted row looks misaligned (e.g., value is a %, unit is a range, range is a value), RE-CHECK that row's alignment before including it.
 
 JSON OUTPUT (exactly this structure, no extra text):

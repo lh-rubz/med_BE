@@ -169,6 +169,15 @@ class MedicalDataPostProcessor:
         if not field_name and not field_value and not field_unit and not normal_range and not category and not notes:
             return None
 
+        # Special check: if field_value is empty but other signals exist, keep it
+        if not field_value:
+            # If it's a flagged row from VLM retry, we keep it
+            if "*" in field_name or "#" in field_name:
+                pass
+            elif not field_unit and not normal_range:
+                # Truly empty row
+                return None
+
         # Flag clearly malformed rows but keep them
         if MedicalDataPostProcessor._is_value_malformed(field_value, field_unit, normal_range):
             notes = MedicalDataPostProcessor._append_note(notes, "value_malformed")
@@ -327,7 +336,7 @@ class MedicalDataPostProcessor:
         name = str(name).strip()
         
         # Indicators of corruption: random symbols, facility words, insurance terms
-        corruption_indicators = ["الطب", "مختبر", "مرفق", "مستشفى", "شؤون", "تأمين", "عيادة", "وزارة", "مديرية"]
+        corruption_indicators = ["مختبر", "مرفق", "مستشفى", "تأمين", "وزارة"]
         for indicator in corruption_indicators:
             if indicator in name:
                 # Likely a facility/insurance not a person
@@ -349,7 +358,7 @@ class MedicalDataPostProcessor:
         
         # Exclude facility names
         facilities = ["clinic", "hospital", "lab", "laboratory", "phc", "center", "centre", 
-                     "مختبر", "مرفق", "مستشفى", "عيادة", "جهاز", "الطب", "دارة", "وزارة"]
+                     "مختبر", "مرفق", "مستشفى", "عيادة", "جهاز", "دارة", "وزارة"]
         
         if any(facility in name_lower for facility in facilities):
             return ""
