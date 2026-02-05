@@ -147,12 +147,12 @@ class MedicalDataPostProcessor:
         Returns None if entry fails validation (incomplete data).
         """
         
-        field_name = str(entry.get("field_name", "")).strip()
-        field_value = str(entry.get("field_value", "")).strip()
-        field_unit = str(entry.get("field_unit", "")).strip()
-        normal_range = str(entry.get("normal_range", "")).strip()
-        category = str(entry.get("category", "")).strip()
-        notes = str(entry.get("notes", "")).strip()
+        field_name = str(entry.get("field_name", "")).strip().strip('[]')
+        field_value = str(entry.get("field_value", "")).strip().strip('[]')
+        field_unit = str(entry.get("field_unit", "")).strip().strip('[]')
+        normal_range = str(entry.get("normal_range", "")).strip().strip('[]')
+        category = str(entry.get("category", "")).strip().strip('[]')
+        notes = str(entry.get("notes", "")).strip().strip('[]')
         
         # Drop only if everything is missing
         if not field_name and not field_value and not field_unit and not normal_range and not category and not notes:
@@ -592,13 +592,21 @@ class MedicalDataPostProcessor:
                 min_val = float(range_match.group(1))
                 max_val = float(range_match.group(2))
                 
-                # If operator present (< > <= >=), use it
+                # If operator present (< > <= >=), check if the resulting value is within range
+                # For example, if value is "< 5" and range is "10-20", it is abnormal (False)
                 if operator:
                     op = operator.group(1)
-                    if op == '<' or op == '<=':
-                        return value < min_val or (op == '<=' and value <= min_val)
-                    elif op == '>' or op == '>=':
-                        return value > max_val or (op == '>=' and value >= max_val)
+                    if op == '<':
+                        # If result is "< 5", it's normal if 5 <= max_val (assuming it doesn't drop below min_val)
+                        # More accurately, if "< 5" is the result, it is normal ONLY IF the entire range < 5 is normal.
+                        # Usually, "< 5" is abnormal if min_val is 10.
+                        return value >= min_val and value <= max_val
+                    elif op == '<=':
+                        return value >= min_val and value <= max_val
+                    elif op == '>':
+                        return value >= min_val and value <= max_val
+                    elif op == '>=':
+                        return value >= min_val and value <= max_val
                 
                 # Otherwise check if in range
                 return min_val <= value <= max_val

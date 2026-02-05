@@ -49,24 +49,25 @@ Reading RIGHT-TO-LEFT:
 OUTPUT FORMAT (use this exact structure):
 
 ===PATIENT INFORMATION===
-Patient Name: [full name - look for "اسم المريض", "Patient Name", "Name:", or name near top]
-Patient ID: [ID number if found]
-Gender: [Male/Female - look for "الجنس", "Gender", "Sex", "ذكر"=Male, "أنثى"=Female]
-Age: [number only - look for "العمر", "Age", or number followed by "years"/"سنة"]
-Date of Birth: [YYYY-MM-DD or DD/MM/YYYY - look for "تاريخ الميلاد", "DOB", "Date of Birth"]
-Report Date: [YYYY-MM-DD or DD/MM/YYYY - look for "تاريخ التقرير", "Date", "Report Date", date near top]
-Doctor Name: [doctor name - look for "الطبيب", "Doctor", "Dr.", "Physician"]
-Lab Name: [laboratory name if found]
+Patient Name: full name - look for "اسم المريض", "Patient Name", "Name:", or name near top
+Patient ID: ID number if found
+Gender: Male/Female - look for "الجنس", "Gender", "Sex", "ذكر"=Male, "أنثى"=Female
+Age: number only - look for "العمر", "Age", or number followed by "years"/"سنة"
+Date of Birth: YYYY-MM-DD or DD/MM/YYYY - look for "تاريخ الميلاد", "DOB", "Date of Birth"
+Report Date: YYYY-MM-DD or DD/MM/YYYY - look for "تاريخ التقرير", "Date", "Report Date", date near top
+Doctor Name: doctor name - look for "الطبيب", "Doctor", "Dr.", "Physician"
+Lab Name: laboratory name if found
 
 ===MEDICAL TESTS===
-[Test Name] | [Value] | [Unit] | [Normal Range]
-[Test Name] | [Value] | [Unit] | [Normal Range]
+Test Name | Value | Unit | Normal Range
+Test Name | Value | Unit | Normal Range
 ...
 
 VALIDATION:
 - Value should be a simple number (e.g., 109, 0.56, 12.6)
 - Normal Range contains a dash or parentheses (e.g., "74-110", "(0.5-0.9)")
 - DO NOT confuse Value with Normal Range!
+- DO NOT put square brackets around names or values (e.g., use "12.5" NOT "[12.5]")
 
 ---
 RAW OCR TEXT TO ORGANIZE:

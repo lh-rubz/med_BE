@@ -61,12 +61,13 @@ For LTR tables (test names on left):
 
 STEP 3 - EXTRACT ROW-BY-ROW (TOP TO BOTTOM, NO SKIPPING):
 Start from TOP row, go DOWN. For EACH row:
-1. Find test name position
-2. Move HORIZONTALLY in SAME ROW to find value
+1. Find test name position (might be followed by a colon ":" or spaces)
+2. Move HORIZONTALLY in SAME ROW to find result value (usually the FIRST number after the name)
 3. Stay in SAME ROW to find unit and range
 4. DO NOT jump to different rows
 5. DO NOT extract duplicate test names
-6. If test name shows UNIT (e.g., "%"), clarify in field_name (e.g., "Lymphocyte %" vs "Lymphocyte Count")
+6. Extract SUB-SECTIONS (e.g., under "DIFFERENTIAL COUNT", extract "Neutrophils", "Lymphocytes", etc.)
+7. If test name shows UNIT (e.g., "%"), clarify in field_name (e.g., "Lymphocyte %" vs "Lymphocyte Count")
 
 EXAMPLE - RTL Table (Arabic report):
 ```
@@ -84,15 +85,16 @@ Extract as:
 
 VALIDATION RULES:
 ✓ Value must be in SAME horizontal row as test name
+✓ The Result is typically the FIRST numeric value after the test name
 ✓ If you see a * or flag in notes column → add that to notes field exactly as shown
-✓ Translate Arabic test names to English
+✓ Translate Arabic test names to English (with original in parentheses if helpful)
 ✓ Include unit type in field_name if clarifies (e.g., "Lymphocyte %" vs "Lymphocyte Count")
-✓ Extract EVERY row in order top-to-bottom
+✓ Extract EVERY row in order top-to-bottom, including all sub-sections
 ✓ DO NOT extract the same test name twice (skip duplicate rows)
 ✗ DO NOT take a value from row above or below
-✗ DO NOT skip rows unless duplicate
-✗ DO NOT reorder rows
+✗ DO NOT jump over the Result column to the Range column
 ✗ DO NOT confuse DOB (old date like 1975) with report date (recent date like 2025)
+✗ DO NOT put square brackets [ ] around names or values
 
 RETURN JSON:
 {{

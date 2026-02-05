@@ -580,8 +580,8 @@ def pdf_to_images(pdf_path):
     
     for page_num in range(len(pdf_document)):
         page = pdf_document[page_num]
-        # Render page to an image with 1.5x zoom (balanced quality/size)
-        pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+        # Render page to an image with 3.0x zoom (Higher quality for OCR ~216 DPI)
+        pix = page.get_pixmap(matrix=fitz.Matrix(3.0, 3.0))
         img_data = pix.tobytes("png")
         
         # Compress the image to reduce size
@@ -614,9 +614,9 @@ def compress_image(image_data, format_hint='png'):
         img = img.resize(new_size, Image.Resampling.LANCZOS)
         print(f"  ↓ Resized image from {image_data.__sizeof__()} to fit {max_dimension}px")
     
-    # Compress to JPEG with quality 85 (good balance)
+    # Compress to JPEG with quality 95 (Very high quality for OCR/VLM)
     output = io.BytesIO()
-    img.save(output, format='JPEG', quality=85, optimize=True)
+    img.save(output, format='JPEG', quality=95, optimize=True)
     compressed_data = output.getvalue()
     
     original_size = len(image_data) / 1024  # KB
@@ -630,146 +630,10 @@ def compress_image(image_data, format_hint='png'):
 
 def calculate_is_normal(field_value, normal_range, field_type='measurement', patient_gender=None):
     """
-    Calculate if a field value is within normal range.
-    Handles gender-specific, age-specific, categorical, and simple ranges.
-    Returns None if no valid normal_range is provided.
+    Consolidated normality calculation.
     """
-    try:
-        field_value_str = str(field_value).strip() if field_value else ''
-        normal_range_str = str(normal_range).strip() if normal_range else ''
-        
-        # Return None if no normal range to compare against
-        if not normal_range_str or normal_range_str.upper() == 'NOT FOUND':
-            return None
-        
-        if not field_value_str or field_value_str.upper() == 'NOT FOUND':
-            return None
-        
-        # Extract numeric value
-        numeric_value = None
-        try:
-            import re
-            num_match = re.search(r'-?\d+\.?\d*', field_value_str)
-            if num_match:
-                numeric_value = float(num_match.group())
-        except (ValueError, AttributeError):
-            pass
-        
-        # Handle qualitative results
-        if numeric_value is None:
-            field_lower = field_value_str.lower()
-            abnormal_keywords = ['high', 'low', 'abnormal', 'positive', 'toxicity', 'deficient', 'insufficient']
-            return not any(kw in field_lower for kw in abnormal_keywords)
-        
-        import re
-        normal_range_lower = normal_range_str.lower()
-        
-        # Extract patient gender
-        extracted_gender = None
-        if patient_gender:
-            gender_str = str(patient_gender).lower()
-            if 'female' in gender_str or 'f' in gender_str or 'woman' in gender_str:
-                extracted_gender = 'female'
-            elif 'male' in gender_str or 'm' in gender_str or 'man' in gender_str:
-                extracted_gender = 'male'
-        
-        # ===== TRY GENDER-SPECIFIC RANGES FIRST =====
-        # Patterns: "Male: 4.5-5.9, Female: 4.1-5.1" or "Men: Up to 40, Women: Up to 32"
-        if extracted_gender:
-            gender_patterns = [
-                (r'female\s*:\s*([^,]+?)(?=,|$)', 'female'),
-                (r'women\s*:\s*([^,]+?)(?=,|$)', 'female'),
-                (r'male\s*:\s*([^,]+?)(?=,|$)', 'male'),
-                (r'men\s*:\s*([^,]+?)(?=,|$)', 'male'),
-                (r'adult\s+female\s*:\s*([^,]+?)(?=,|$)', 'female'),
-                (r'adult\s+male\s*:\s*([^,]+?)(?=,|$)', 'male'),
-            ]
-            
-            for pattern, gender_type in gender_patterns:
-                if gender_type == extracted_gender:
-                    match = re.search(pattern, normal_range_lower)
-                    if match:
-                        gender_range = match.group(1).strip()
-                        if _check_range_value(numeric_value, gender_range):
-                            return True
-        
-        # ===== TRY CATEGORICAL RANGES =====
-        # Patterns: "Deficient: <10, Insufficient: 11-30, Sufficient: 31-100, Toxicity: >100"
-        category_pattern = r'([a-z\s]+?)\s*:\s*([^,]+?)(?=(?:,\s*[a-z]|$))'
-        category_matches = list(re.finditer(category_pattern, normal_range_lower))
-        
-        if category_matches:
-            for match in category_matches:
-                category_name = match.group(1).strip()
-                range_text = match.group(2).strip()
-                
-                if _check_range_value(numeric_value, range_text):
-                    # Value is in this category - check if category is normal
-                    abnormal_cats = ['deficient', 'insufficient', 'high', 'low', 'abnormal', 'toxic', 'toxicity', 'positive', 'elevated']
-                    return not any(abn in category_name for abn in abnormal_cats)
-        
-        # ===== TRY SIMPLE RANGES =====
-        # Handle "Up to", "Below", "Above"
-        if 'up to' in normal_range_lower:
-            match = re.search(r'up to\s+(\d+\.?\d*)', normal_range_lower)
-            if match:
-                return numeric_value <= float(match.group(1))
-        
-        if 'below' in normal_range_lower:
-            match = re.search(r'below\s+(\d+\.?\d*)', normal_range_lower)
-            if match:
-                return numeric_value < float(match.group(1))
-        
-        if 'less than' in normal_range_lower:
-            match = re.search(r'less than\s+(\d+\.?\d*)', normal_range_lower)
-            if match:
-                return numeric_value < float(match.group(1))
-        
-        if 'more than' in normal_range_lower or 'greater than' in normal_range_lower:
-            match = re.search(r'(?:more than|greater than)\s+(\d+\.?\d*)', normal_range_lower)
-            if match:
-                return numeric_value > float(match.group(1))
-        
-        if 'above' in normal_range_lower:
-            match = re.search(r'above\s+(\d+\.?\d*)', normal_range_lower)
-            if match:
-                return numeric_value > float(match.group(1))
-        
-        # Handle comparison operators
-        if normal_range_lower.startswith('<') and not normal_range_lower.startswith('<='):
-            match = re.search(r'<\s*(\d+\.?\d*)', normal_range_lower)
-            if match:
-                return numeric_value < float(match.group(1))
-        
-        if normal_range_lower.startswith('>') and not normal_range_lower.startswith('>='):
-            match = re.search(r'>\s*(\d+\.?\d*)', normal_range_lower)
-            if match:
-                return numeric_value > float(match.group(1))
-        
-        if '<=' in normal_range_lower:
-            match = re.search(r'<=\s*(\d+\.?\d*)', normal_range_lower)
-            if match:
-                return numeric_value <= float(match.group(1))
-        
-        if '>=' in normal_range_lower:
-            match = re.search(r'>=\s*(\d+\.?\d*)', normal_range_lower)
-            if match:
-                return numeric_value >= float(match.group(1))
-        
-        # Handle "min - max" ranges
-        matches = re.findall(r'(\d+\.?\d*)\s*-\s*(\d+\.?\d*)', normal_range_str)
-        if matches:
-            for min_str, max_str in matches:
-                min_val = float(min_str)
-                max_val = float(max_str)
-                if min_val <= numeric_value <= max_val:
-                    return True
-        
-        return False
-        
-    except Exception as e:
-        print(f"Error calculating is_normal: {e}")
-        return None  # Return None when can't determine
+    from utils.medical_validator import MedicalValidator
+    return MedicalValidator.calculate_is_normal(field_value, normal_range)
 
 
 def _check_range_value(numeric_value, range_text):
@@ -1456,6 +1320,10 @@ Be aggressive but intelligent - group all variations of same test together."""
                 creator_id=current_user_id,
                 relationship='Self'
             ).first()
+            
+            # If no 'Self' profile found, use any profile owned by user or none
+            if not user_profile:
+                user_profile = Profile.query.filter_by(creator_id=current_user_id).first()
             
             profile_id = user_profile.id if user_profile else None
             
