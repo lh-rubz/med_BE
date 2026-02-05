@@ -520,8 +520,8 @@ def verify_and_correct_with_llm(extracted_data, raw_text):
     INSTRUCTIONS:
     1. Check every field in EXTRACTED DATA against RAW REPORT TEXT.
     2. CORRECTIONS REQUIRED:
-       - Fix numerical values (e.g., "5.2" vs "52").
-       - Fix units (e.g., "g/L" vs "g/dL").
+       - Fix numerical values (e.g., "5.2" vs "52"). PRESERVE symbols like <, >, <= if present.
+       - Fix units (e.g., "g/L" vs "g/dL"). TRANSLATE Arabic units to standard English units (e.g., "U/L").
        - Fix names (Doctor vs Patient).
        - REMOVE hallucinated fields (not in text).
        - ADD missing fields (visible in text but missing in JSON).
@@ -1135,7 +1135,8 @@ RULES:
         
         # Calculate is_normal for all entries
         final_data['medical_data'] = MedicalDataPostProcessor.add_is_normal_to_entries(
-            final_data['medical_data']
+            final_data['medical_data'],
+            patient_gender=final_data['patient_gender']
         )
         
         # Validate extraction quality
@@ -1383,7 +1384,11 @@ Be aggressive but intelligent - group all variations of same test together."""
                         # Use VLM's value, but validate it by calculating
                         calculated_is_normal = calculate_is_normal(field_value, normal_range, field_type, patient_gender)
                         # Prefer the calculated value if we have a range
-                        is_normal_value = calculated_is_normal if normal_range else bool(vlm_is_normal)
+                        if calculated_is_normal is not None:
+                            is_normal_value = calculated_is_normal
+                        else:
+                            # Use VLM value as fallback, but only if it's not null/empty
+                            is_normal_value = bool(vlm_is_normal) if vlm_is_normal not in [None, ""] else None
                     
                     field = ReportField(
                         report_id=new_report.id,

@@ -66,8 +66,9 @@ Start from TOP row, go DOWN. For EACH row:
 3. Stay in SAME ROW to find unit and range
 4. DO NOT jump to different rows
 5. DO NOT extract duplicate test names
-6. Extract SUB-SECTIONS (e.g., under "DIFFERENTIAL COUNT", extract "Neutrophils", "Lymphocytes", etc.)
-7. If test name shows UNIT (e.g., "%"), clarify in field_name (e.g., "Lymphocyte %" vs "Lymphocyte Count")
+6. Extract EVERY single row - even those that look like sub-headers or have special codes (e.g., "Hb A1c", "Lipid Profile")
+7. Extract SUB-SECTIONS (e.g., under "DIFFERENTIAL COUNT", extract "Neutrophils", "Lymphocytes", etc.)
+8. If test name shows UNIT (e.g., "%"), clarify in field_name (e.g., "Lymphocyte %" vs "Lymphocyte Count")
 
 EXAMPLE - RTL Table (Arabic report):
 ```
@@ -88,6 +89,7 @@ VALIDATION RULES:
 ✓ The Result is typically the FIRST numeric value after the test name
 ✓ If you see a * or flag in notes column → add that to notes field exactly as shown
 ✓ Translate Arabic test names to English (with original in parentheses if helpful)
+✓ Translate Arabic units to standard medical units (e.g., "٧/L" becomes "U/L", "mg/dl" remains "mg/dl")
 ✓ Include unit type in field_name if clarifies (e.g., "Lymphocyte %" vs "Lymphocyte Count")
 ✓ Extract EVERY row in order top-to-bottom, including all sub-sections
 ✓ DO NOT extract the same test name twice (skip duplicate rows)
@@ -109,7 +111,7 @@ RETURN JSON:
     "medical_data": [
         {{
             "field_name": "English test name with clarification if needed (e.g., Lymphocyte % or Lymphocyte Count) - unique",
-            "field_value": "number from SAME row as test name",
+            "field_value": "result from SAME row. INCLUDE symbols like < or > or >= if present in report (e.g., '< 6.0')",
             "field_unit": "unit from SAME row",
             "normal_range": "(X-Y) from SAME row",
             "category": "section name",

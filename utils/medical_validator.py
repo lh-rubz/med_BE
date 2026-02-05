@@ -43,13 +43,19 @@ class MedicalValidator:
         if not value_str or not isinstance(value_str, str):
             return value_str
         
+        # Convert Arabic digits (٠-٩) to ASCII (0-9)
+        arabic_digits = "٠١٢٣٤٥٦٧٨٩"
+        ascii_digits = "0123456789"
+        translation_table = str.maketrans(arabic_digits, ascii_digits)
+        value_str = value_str.translate(translation_table)
+        
         # Remove whitespace
         value_str = value_str.strip()
         
         # Try to parse numeric part but preserve prefix symbols (<, >, +, -)
         try:
-            # Extract numeric part and any preceding symbol
-            match = re.search(r'([<>+-]?)\s*([-+]?\d*\.?\d+)', value_str)
+            # Extract numeric part and any preceding symbol (handles <, >, <=, >=, +, -)
+            match = re.search(r'([<>!=/+-]+)?\s*([-+]?\d*\.?\d+)', value_str)
             if match:
                 symbol = match.group(1)
                 numeric_str = match.group(2)
@@ -67,10 +73,9 @@ class MedicalValidator:
         Parse normal range string into min/max tuple.
         Handles: "13.5-17.5", "< 200", "> 50", "up to 40", "below 10", "above 100".
         """
-        if not range_str or not isinstance(range_str, str):
-            return None
-        
+        # Clean the string and remove leading labels like "Normal: " or "Results: "
         range_str = str(range_str).strip().lower()
+        range_str = re.sub(r'^[a-z\s]+[:]\s*', '', range_str)
         
         # Pattern: number-number or number to number
         match = re.search(r'([-+]?\d*\.?\d+)\s*[-to]+\s*([-+]?\d*\.?\d+)', range_str)
@@ -114,10 +119,15 @@ class MedicalValidator:
 
         # Pattern: single number (interpreted as min threshold if not otherwise specified)
         # e.g., "Normal: 187"
-        match = re.search(r'^([-+]?\d*\.?\d+)$', range_str)
+        match = re.search(r'([-+]?\d*\.?\d+)', range_str)
         if match:
             try:
-                return (float(match.group(1)), float('inf'))
+                val = float(match.group(1))
+                # If we have labels like "max" or "up to", it's an upper bound
+                if any(x in range_str for x in ['max', 'up to', 'below', '<']):
+                    return (float('-inf'), val)
+                # Default to a minimum threshold if it's a single positive number
+                return (val, float('inf'))
             except ValueError:
                 pass
         
@@ -138,11 +148,12 @@ class MedicalValidator:
         if any(pattern in value_raw for pattern in MedicalValidator.ABNORMAL_QUALITATIVE):
             return False
         
-        # Extract numeric value
+        # Extract numeric value and operator
         value = None
         operator = None
         try:
-            numeric_match = re.search(r'([<>=]*)\s*([-+]?\d*\.?\d+)', value_raw)
+            # Handle multiple operator characters like <= or >=
+            numeric_match = re.search(r'([<>!=]+)?\s*([-+]?\d*\.?\d+)', value_raw)
             if numeric_match:
                 operator = numeric_match.group(1)
                 value = float(numeric_match.group(2))
@@ -198,15 +209,11 @@ class MedicalValidator:
                     min_val, max_val = range_tuple
                     
                     # If value has operator, check if it fits contextually
-                    # e.g., value is "< 5", range is "10-20" -> False
-                    if operator == '<':
-                        return value < max_val and value >= min_val
-                    elif operator == '<=':
-                        return value <= max_val and value >= min_val
-                    elif operator == '>':
-                        return value > min_val and value <= max_val
-                    elif operator == '>=':
-                        return value >= min_val and value <= max_val
+                    # e.g., result is "< 6", range is "< 6" -> True
+                    if operator == '<' or operator == '<=':
+                        return value <= max_val
+                    elif operator == '>' or operator == '>=':
+                        return value >= min_val
                     
                     # If range segment itself is an inequality
                     # e.g., range is "< 6", max_val is 6.0, min_val is -inf
