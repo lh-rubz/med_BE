@@ -336,7 +336,7 @@ class MedicalDataPostProcessor:
         name = str(name).strip()
         
         # Indicators of corruption: random symbols, facility words, insurance terms
-        corruption_indicators = ["مختبر", "مرفق", "مستشفى", "تأمين", "وزارة"]
+        corruption_indicators = ["مختبر", "مرفق", "مستشفى", "تأمين", "وزارة", "مديرية", "مستوصف", "رعاية"]
         for indicator in corruption_indicators:
             if indicator in name:
                 # Likely a facility/insurance not a person
@@ -358,7 +358,7 @@ class MedicalDataPostProcessor:
         
         # Exclude facility names
         facilities = ["clinic", "hospital", "lab", "laboratory", "phc", "center", "centre", 
-                     "مختبر", "مرفق", "مستشفى", "عيادة", "جهاز", "دارة", "وزارة"]
+                     "مختبر", "مرفق", "مستشفى", "عيادة", "جهاز", "دارة", "وزارة", "مديرية", "مستوصف", "رعاية"]
         
         if any(facility in name_lower for facility in facilities):
             return ""

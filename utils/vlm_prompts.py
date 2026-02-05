@@ -2,109 +2,34 @@
 
 
 def get_personal_info_prompt(idx, total_pages):
-    """Prompt to extract ONLY patient personal info; no lab values."""
-    return f"""You are an expert bilingual Arabic/English medical document reader.
+    """Prompt to extract ONLY patient personal info from specific Arabic/English grid headers."""
+    return f"""You are an expert medical document digitizer.
+Task: Extract PATIENT & DOCTOR information from this report (page {idx}/{total_pages}).
 
-Task: Extract ONLY PATIENT PERSONAL INFORMATION from this report image (page {idx}/{total_pages}).
-Do NOT extract lab results. Handle multiple reports in one PDF: each report is separate.
-Return exactly one JSON object per report, no markdown.
+🚨 HEADER STRUCTURE (GRID BASED) 🚨
+This report uses two side-by-side grids at the top.
+1. **RIGHT GRID (Patient Info)**:
+   - Rows are labeled on the right side of the cells.
+   - Row 1: "رقم المريض" (Patient ID)
+   - Row 2: "اسم المريض" (Patient Name) -> Extract the string content of this row.
+   - Row 3: "رقم الهوية" (ID Number)
+   - Row 4: "الجنس" (Gender) -> Look for "أنثى" (Female) or "ذكر" (Male).
+   - Row 5: "تاريخ الميلاد" (DOB) -> Extract the date string if present.
+   - Row 6: "جهة الطلب" (Requesting Entity) -> SKIP this for patient name; it's a facility.
 
-FIELDS TO RETURN (all strings): patient_name, patient_gender, patient_age, patient_dob, report_date, doctor_names
+2. **LEFT GRID (Order/Physician Info)**:
+   - Row 1: "تاريخ الطلب" (Order Date) -> Extract the date as YYYY-MM-DD.
+   - Row 6: "الطبيب" (Physician) -> Extract the person name in this row.
 
-BILINGUAL REPORT STRUCTURE
-- Arabic reports often show bilingual headers: Arabic text (RTL) on RIGHT side, English (LTR) on LEFT side.
-- Labels and values appear TOGETHER in both languages.
-- Search RIGHT side first for Arabic labels, then LEFT side for English equivalents.
-- PREFER the field with more actual data content (not just labels).
+CRITICAL RULES:
+1. **PATIENT NAME**: Must be from the "اسم المريض" row in the right grid. 
+   - DO NOT extract names from "جهة الطلب" or the bottom center box.
+2. **DOCTOR NAME**: Must be from the "الطبيب" row in the left grid.
+   - DO NOT extract the clinic name "عيادة الطب العام" as the doctor.
+3. **GENDER**: Convert "أنثى" to "Female" and "ذكر" to "Male".
+4. **REPORT DATE**: Extract "تاريخ الطلب" as YYYY-MM-DD. Remove any time/timestamp.
 
-WHERE TO LOOK (priority order):
-1) TOP-RIGHT header area (Arabic side of bilingual reports)
-2) TOP-LEFT header area (English side)
-3) Center-top section
-4) Entire header row(s) - scan left to right and right to left
-5) Footer and signature areas (especially for doctor names)
-6) Any standalone fields in top 40% of page
-
-PATIENT NAME (CRITICAL - MUST FIND)
-- Arabic labels: "اسم المريض", "اسم المرضى", "اسم", "Patient Name", "Name"
-- Location: Header area, often in RIGHT side (Arabic) AND/OR LEFT side (English) - look for BOTH
-- Extract: Text immediately following the label (right-to-left for Arabic, left-to-right for English)
-- SPECIFIC BOX: In Arabic reports with a grid header, look at the top-right box labeled "اسم المريض". The value is usually below or to the left of the label.
-- Clean: Remove titles like Dr., Mr., Mrs., Prof., د., دكتور, السيد, السيدة, أ.د
-- If TWO names found (one Arabic, one English), use the LONGER/MORE COMPLETE one
-- Validate: 3+ characters, looks like a person's name (NOT: "Patient", "N/A", numbers, facility names)
-- CRITICAL FILTERS - SKIP these (they are NOT patient names):
-  * "عيادة الطب العام (مستوصف صحة رب الله)" or similar - this is a CLINIC name.
-  * Any text containing: "facility", "جهاز" (device), "مختبر" (lab), "مرفق", "مستشفى" (hospital), "clinic", "equipment", "laboratory", "centre", "center"
-  * Single words that are place/thing names: "Ramallah", "PHC", "مختبر رمالله", facility codes/IDs
-  * Abbreviations like "PHC", "Lab", "CDC", "WHO" - these are facilities, not patient names
-- Return: Original language text or "" if uncertain
-  * If header shows "Laboratory(Ramallah PHC)" or similar - skip it, find the ACTUAL patient name nearby
-- Return: Original language text or "" if uncertain
-
-GENDER
-- Arabic labels: "الجنس", "جنس", "النوع", "Gender", "Sex"
-- Arabic values to convert:
-  * "ذكر" (male in Arabic) -> return "Male"
-  * "أنثى" (female in Arabic) -> return "Female"
-  * Any variation like "انثى", "انثي" -> return "Female"
-- English values: 
-  * "Male", "M", "male" -> return "Male"
-  * "Female", "F", "female" -> return "Female"
-- CRITICAL: Your output MUST be ONLY "Male" or "Female" in English, never Arabic text
-- If you see "ذكر" anywhere in the report, check carefully - is this REALLY the patient's gender or is it a label/header?
-- Return: Only "Male", "Female", or "" (if truly not found)
-
-AGE / DOB
-- DOB Arabic labels: "تاريخ الميلاد", "تاريخ الولادة"
-- DOB English labels: "DOB", "Date of Birth"
-- Age Arabic labels: "العمر"
-- Age English labels: "Age"
-- DOB Format: Convert to YYYY-MM-DD (handle both DD/MM/YYYY and MM/DD/YYYY formats)
-- Age: Extract NUMBER only (1-120)
-- Return: Both if available; one if only one available; "" if none
-
-REPORT DATE (CRITICAL - DATE ONLY, NO TIMESTAMP)
-- Arabic labels: "تاريخ الطلب", "تاريخ الفحص", "التاريخ", "تاريخ التقرير"
-- English labels: "Report Date", "Test Date", "Date", "Date/Time"
-- Location: Top section, often MULTIPLE locations (pick most recent/prominent)
-- Extract: ONLY the DATE part in YYYY-MM-DD format
-- CRITICAL: If shows "2025-12-31 10:00:02.0" or similar, EXTRACT ONLY "2025-12-31"
-- Timestamp (time portion after date) must be REMOVED
-- Return: YYYY-MM-DD only, or "" if not found
-
-DOCTOR / PHYSICIAN (CRITICAL - SEARCH THOROUGHLY AND AGGRESSIVELY)
-- Arabic labels: "الطبيب", "طبيب", "الطبيب المعالج", "طبيب المعالجة", "المحيل", "الطبيب المسؤول", "اسم الطبيب"
-- English labels: "Doctor", "Physician", "Ref By", "Referred By", "Signature", "Doctor Name", "Treating Physician"
-- Search ALL locations in this order:
-  1. Header area - scan ENTIRE top section for doctor label + name
-  2. RIGHT margin - Arabic side (RTL text area on right)
-  3. LEFT margin - English side (LTR text area on left)
-  4. BOTTOM of page - signature blocks, footer area
-  5. SIDE panels - any information boxes
-  6. After any line containing "doctor", "physician", "Dr.", "د.", "طبيب"
-- Extract Rules:
-  * In reports with a grid header, look at the box labeled "الطبيب" or "Doctor". The name is often "جهاد العملة" or similar.
-  * If you see "Dr. [Name]" or "الطبيب [الاسم]" → Extract the [Name] part
-  * If you see a label like "الطبيب:" or "Doctor:" → Extract the text IMMEDIATELY following
-  * Remove ALL titles and prefixes: Dr., Dr, Prof., Prof, د., دكتور, أ.د, الدكتور, أستاذ, البروفيسور
-  * Keep only the actual person name
-- Multiple doctors: If signature block shows multiple names, extract first doctor only or join with comma
-- Validate: Must be person name (3+ chars), not facility/lab/abbreviation
-- Return: Clean name or "" if truly not found after thorough search
-
-SELF-VALIDATION BEFORE RETURNING
-- patient_name: Real person name (3+ chars, not ID/number/facility). Return "" if doubt.
-- patient_gender: Exactly "Male", "Female", or "". NEVER return Arabic text like "ذكر" or "أنثى".
-  * If you extracted "ذكر" convert it to "Male"
-  * If you extracted "أنثى" convert it to "Female"
-  * Check your output - does it say "Male" or "Female" in English? If not, fix it!
-- patient_age: Numeric 1-120 or "".
-- patient_dob: YYYY-MM-DD or "".
-- report_date: YYYY-MM-DD ONLY (no time/timestamp). This field is CRITICAL.
-- doctor_names: Person name or "" if not found. No titles included.
-
-JSON OUTPUT (exactly this object, no extra text):
+JSON OUTPUT ONLY:
 {{
   "patient_name": "",
   "patient_age": "",
@@ -117,79 +42,25 @@ JSON OUTPUT (exactly this object, no extra text):
 
 
 def get_main_vlm_prompt(idx, total_pages):
-    """Prompt to extract LAB TABLE data only, enforcing row alignment."""
-    return f"""You are an expert medical data digitizer for Arabic and English lab reports.
+    """Prompt to extract LAB TABLE data with strict row alignment and multi-word test support."""
+    return f"""You are a high-precision lab data digitizer.
+Task: Extract LAB DATA from this image (page {idx}/{total_pages}).
 
-You receive a medical report IMAGE (page {idx}/{total_pages}).
-Primary goal: Extract LAB DATA with PERFECT ROW ALIGNMENT. Do NOT extract patient info.
-Return exactly one JSON object (no markdown) with medical_data array.
+🚨 ALIGNMENT PROTOCOL 🚨
+1. **Vertical Column Lock**: Identify the Result, Unit, and Range columns. 
+   - Note that results are often in the center-left, units in the middle, and ranges on the right.
+2. **Horizontal Row Scan**: Move horizontally from the test name.
+   - If a row has ONLY a flag symbol (like "*" or "#"), its `field_value` is "" (empty string). DO NOT jump to the next numeric value in a different row.
+   - Ensure you align the test name with the result value physically on the same horizontal band.
+3. **Multi-line Names**: Capture full names even if they wrap across multiple lines of text within the same row.
+4. **Missing Rows**: Capture EVERY row in the table. If names look like components of a group, extract ALL of them individually.
 
-🚨 CRITICAL EXTRACTION REQUIREMENT 🚨
-Medical lab reports contain 15-50 test rows. You MUST extract EVERY SINGLE ROW.
-DO NOT STOP after 2-5 rows - this is a CRITICAL ERROR.
+VALIDATION:
+- Result should NOT be a unit (e.g. % is NOT a result).
+- Unit should NOT be a result (e.g. 14.4 is NOT a unit).
+- If field_value is empty but a "*" exists, it counts as an extracted row.
 
-BEFORE RETURNING, COUNT YOUR EXTRACTED ROWS:
-- If you have < 10 rows, you FAILED. Go back and extract more.
-- Look at the table in the image: How many rows do you see? 20? 30? 40?
-- Your medical_data array MUST have that many entries.
-
-CRITICAL RULES
-1) Row independence: All values in one entry come from the SAME row. Never mix rows.
-2) Empty is better than wrong: If uncertain, use "".
-3) Language: Handle Arabic (RTL) and English (LTR). Use the clearer test name.
-4) Units must be medical abbreviations, not symbols (*, -, .).
-5) Normal ranges: Read EXACTLY what's in the image. Do NOT invent or guess ranges.
-6) EXTRACT EVERY ROW: Start at row 1, go to row 2, row 3... until you reach the LAST row at the bottom of the table.
-
-HOW TO READ TABLES
-- Typical headers Arabic: "الفحص", "النتيجة", "الوحدة", "المعدل الطبيعي".
-- Typical headers English: "Test", "Result", "Unit", "Normal Range".
-- Map by position: col1 test, col2 value, col3 unit, col4 range.
-
-ROW-BY-ROW PROTOCOL (for EACH row)
-CRITICAL: Use EXTREME caution with row boundaries. Trace horizontal lines precisely.
-
-1) Visual Row Boundary: Draw an imaginary horizontal line across THIS row ONLY. Do not look above or below.
-2) field_name: Read ONLY from the far left cell of THIS row's boundary.
-3) field_value: Trace straight RIGHT along THIS row's line to the NEXT column. STOP at the vertical boundary.
-   - Do NOT look at other rows' values.
-   - If there is NO value in this cell for THIS row, return "".
-4) field_unit: Continue RIGHT along THIS row's line to the UNIT column. STOP at vertical boundary.
-   - Extract the unit symbol from THIS row ONLY.
-   - If blank or symbol, return "".
-5) normal_range: Continue RIGHT along THIS row to the RANGE column. STOP at vertical boundary.
-   - Extract the numeric range from THIS row ONLY.
-   - If blank, return "" (never invent).
-6) is_normal: Calculate ONLY using THIS row's value and range.
-7) category: Section header for THIS row's section, else "".
-8) notes: Flags in THIS row ONLY, else "".
-
-RED FLAGS that indicate misalignment (REDO the row if found):
-- field_value looks like a unit (e.g., "%" or "K/uL")
-- field_unit looks like a range (e.g., "(4-11)")
-- normal_range looks like a value (e.g., "5.2" or "109")
-- The extracted value is physically in a different row than the test name in the image
-- Units don't match the test type (e.g., "%" for RBC which should be M/uL or cells/L)
-
-VALIDATION BEFORE RETURN
-- COUNT YOUR ROWS: How many items are in your medical_data array? Is it at least 15-20? If not, you missed data!
-- Every row has field_name (no empty field_names).
-- Every row has field_value (skip rows with empty/blank values).
-- Units are not symbols and not numbers.
-- CRITICAL NORMAL RANGES: Read the EXACT range from the image. Do NOT guess or invent ranges.
-  * Example: If image shows "(10-15)", your normal_range MUST be "(10-15)"
-  * CRITICAL: Do NOT include units in normal_range. "10-15 mg/dL" -> "10-15"
-  * Do NOT use ranges from your knowledge (like "(0-0.75)" for platelet width)
-  * If you cannot read the range clearly, use "" - NEVER invent a range
-- CRITICAL: Normal_range must NOT look like a value, and field_value must NOT look like a unit or range.
-- Duplicate ranges allowed when units differ or the source shows the same range; re-check only if same unit and the range clearly belongs to another row.
-- Common sense: WBC ~4-11 K/uL; RBC ~4-5.5 M/uL; Hgb ~12-16 g/dL. If wildly off, re-check.
-- SYMBOL ANCHORS (*, #): If a row has a "*" or "#" but no numeric value, DO NOT skip it. Capture the test name and the symbol in field_value or notes.
-- Do NOT return medical_data entries with empty field_name.
-- If field_value is empty but a "*" exists, capture the "*" as the value.
-- If ANY extracted row looks misaligned (e.g., value is a %, unit is a range, range is a value), RE-CHECK that row's alignment before including it.
-
-JSON OUTPUT (exactly this structure, no extra text):
+JSON OUTPUT ONLY:
 {{
   "medical_data": [
     {{

@@ -22,50 +22,34 @@ This report has {total_pages} pages total. You are extracting page {idx}.
 🔬 EXTRACT MEDICAL TABLE DATA - TWO-STEP SCAN
 Page {idx}/{total_pages}{page_context}
 
-CRITICAL: This is a high-precision extraction. Look at the image as a physical grid.
+CRITICAL: High-precision grid extraction.
 
 STEP 1: PRE-SCAN (ALL TEST NAMES)
-Scan the table from TOP TO BOTTOM. List every single test name you see in the "all_tests_found" array. 
-- If a name is Arabic, capture it. 
-- If a name is English, capture it literals.
-- **MULTI-LINE FIELDS**: Many labs (like Ramallah PHC) have test names that span 2 or 3 lines (e.g., "Red blood cell distribution\nwidth coefficient of\nvariation"). You MUST capture the ENTIRE name string.
-- DO NOT hallucinate common names; extract EXACT literal text.
+Scan the table from TOP TO BOTTOM. 
+- Multi-line names: Capture ENTIRE names like "Red blood cell distribution\nwidth coefficient of\nvariation".
+- DO NOT skip any row you see.
 
 STEP 2: DATA EXTRACTION (ROW-BY-ROW)
-For EACH name you listed in Step 1:
-1. **BACKGROUND COLOR**: Identify if the row has a **GRAY** or **WHITE** background.
-2. **PATTERN ADHERENCE**: Rows typically alternate (Gray, White, Gray, White).
-3. **HORIZONTAL BASELINE LOCK**: Move horizontally from the test name to find Value, Unit, and Range on the SAME color band.
-4. **UNIT PRECISION**: Extract units precisely (% , K/uL, M/uL, g/dL, fL, pg). Look specifically at the "Unit" column.
-5. **SYMBOL ANCHOR (*, #)**: If you see a "*" or flag next to a value area, this is a physical anchor proving a field row has focus or data. DO NOT skip these rows. Even if the numeric value is missing, capture the existence of the flag.
-6. **EMPTY VALUE POLICY**: ONLY skip a field if the result value AND the flag area are physically empty white space.
+For EACH name:
+1. **Vertical Alignment**: Value MUST be in the center-left column, Unit in the middle, Range on the right.
+2. **Horizontal Sentinel**: If a row has ONLY a "*" or "#", return `field_value`: "". DO NOT take values from the row below. 
+3. **STRUCTURALLY DISTINCT ROWS**: Ensure you do not merge adjacent rows that have separate test names or flags.
+4. **NO TRUNCATION**: Extract names exactly as written.
 
-VALIDATION RULES:
-✓ Value must share the EXACT SAME color band as the test name.
-✓ If you see "Red blood cell distribution width", ensure the value is from THAT row (e.g., 12.6%) and not the "Platelets Count" row (e.g., 257).
-✓ **NO TRUNCATION**: Capture names completely, even if they wrap to 3 lines.
-✓ Translate Arabic names to English but keep original in parentheses.
-
-RETURN JSON:
+JSON RETURN:
 {{
-    "patient_name": "Full patient name from header",
-    "patient_age": "DOB or Age",
-    "patient_gender": "Male/Female",
-    "report_date": "YYYY-MM-DD",
-    "all_tests_found_in_prescan": ["Test 1", "Test 2", ...],
+    "patient_name": "Full name from Top-Right Grid 'اسم المريض'",
+    "patient_age": "DOB or Age string",
+    "doctor_names": "Person name from Top-Left Grid 'الطبيب'",
     "medical_data": [
         {{
-            "field_name": "LITERAL name from image",
-            "field_value": "numeric result with symbols like < or >",
-            "field_unit": "from unit column",
-            "normal_range": "(X-Y) from range column",
-            "background_color": "gray or white",
-            "notes": "any flags or Arabic notes"
+            "field_name": "Literal test name",
+            "field_value": "Result (number or empty if only flag exists)",
+            "field_unit": "Unit",
+            "normal_range": "(X-Y)"
         }}
     ]
 }}
-
-EXTRACT NOW - First list ALL test names, then fill the data bands.
 """
 
 
