@@ -114,22 +114,24 @@ Extracted Data:
 - Reference Range: {normal_range}
 
 VERIFICATION TASK:
-1. Identify the **HORIZONTAL BASELINE** (laser line) passing through the vertical center of the FIRST word of "{field_name}".
-2. Stay strictly locked on that EXACT baseline.
-3. Move your eyes horizontally to the Result column.
-4. Verify:
-   a) Test Name: Does the text on this baseline say "{field_name}"?
-   b) Value: Is "{field_value}" ON THE EXACT SAME BASELINE? (If it's even slightly above or below, mark as INCORRECT).
-   c) If INCORRECT, what IS the number centered on this exact baseline?
+1. **BASELINE LOCK**: Identify the exact horizontal line passing through the center of "{field_name}".
+2. **COLOR ANCHORING**: Note the background color of "{field_name}" (Gray or White).
+3. **VALUE VERIFICATION**: 
+   - Move horizontally to the Result column.
+   - The value is CORRECT ONLY if it is on the same baseline AND has the same background color.
+4. **SHIFT DETECTION (1-Up/1-Down)**: 
+   - Check the row immediately ABOVE and BELOW. 
+   - If "{field_value}" is actually on a different baseline or color than "{field_name}", it is a SHIFT ERROR.
+5. **NORMAL RANGE LOCK**: Ensure "{normal_range}" is also on this exact same baseline.
 
 RESPOND WITH:
 FIELD_VERIFICATION:
 Test Name: CORRECT or INCORRECT
 Value: CORRECT or INCORRECT (if incorrect, say "Correct baseline value is [X]")
 Unit: CORRECT or INCORRECT
-Range: CORRECT or INCORRECT
+Range: CORRECT or INCORRECT (if shifted, specify correct range)
 OVERALL: VERIFIED or NEEDS_CORRECTION
-Explanation: one line explanation
+Explanation: one line explanation (e.g., "Shift error detected: borrowed value from row below")
 """
 
 

@@ -75,14 +75,14 @@ STEP 0 - HEADER INFO (Ramallah PHC Layout):
 - **PATIENT NAME**: Top-Right table. Label "اسم المريض". Value is to its LEFT.
 - **INSURANCE**: Top-Left table. Label "التأمين". Value "[ شؤون اجتماعية ] Social". (DO NOT use as name).
 
-STEP 1 - CONTINUOUS ROW SCAN:
+STEP 1 - ROW-BY-ROW INDEXING SCAN:
 Extract EVERY row from top to bottom. For each row:
-1. **VERTICAL CENTER LOCK (Y-Anchor)**: Identify the vertical center (Y-coordinate) of the FIRST word of the Test Name.
-2. **HORIZONTAL LASER-SCAN**: Mentally scan horizontally to the left on that EXACT baseline.
-   - ONLY report numbers that are hit by this horizontal laser.
-   - If a number is slightly higher or lower (the row above or below), IGNORE IT completely.
-3. **GRID AWARENESS**: Use the horizontal line dividers as hard physical barriers.
-4. **NO NEIGHBOR DEBT**: If a row has no result on its laser line, leave `field_value` empty. NEVER borrow from neighbors.
+1. **ROW INDEXING**: Mentally assign a number to the row (e.g., Row #1, Row #2). Do not skip any physical row.
+2. **GRAY-BAND ANCHORING**: Notice if the row has a **GRAY BACKGROUND** or **WHITE BACKGROUND**.
+   - A Result value is ONLY valid if it shares the EXACT SAME BACKGROUND COLOR as its Test Name.
+   - If "Monocytes" is in a gray band, its value (0.1) MUST be in the same gray band. Do not pick 7.1 from the white band below.
+3. **VERTICAL BASELINE LOCK**: The Result, Range, and Unit must be exactly centered on the horizontal axis of the FIRST line of the Test Name.
+4. **NO NEIGHBOR DEBT**: If a row has no result on its exact baseline, leave it empty. NEVER borrow from adjacent rows.
 
 EXAMPLE - RTL Table (Arabic report):
 ```
