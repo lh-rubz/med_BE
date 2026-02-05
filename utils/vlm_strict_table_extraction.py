@@ -71,11 +71,11 @@ Start from TOP row, go DOWN. For EACH row:
 8. If test name shows UNIT (e.g., "%"), clarify in field_name (e.g., "Lymphocyte %" vs "Lymphocyte Count").
 9. If a value is flagged with "*" or "#", extract the number to field_value and the symbol to notes.
 
-1-OFF ERROR & MULTI-LINE PREVENTION:
-- MULTI-LINE NAMES: Some test names span two or more lines (e.g., "Red blood cell distribution\nwidth coefficient of variation"). UNITE the full name into one field_name.
-- Verify that the result value you extract is physically aligned horizontally with the test name (usually with its last line or center).
-- If you find yourself taking a result that is actually one row above or below the test name, correct it.
-- In RTL tables, the Result is the FIRST number to the LEFT of the test name.
+1-OFF ERROR & STRUCTURAL ANCHORING:
+- **HORIZONTAL ALIGNMENT**: The Result Value MUST be on the exact same horizontal baseline as the Test Name (specifically the last line of a multi-line name). Use the table grid lines to anchor your scan.
+- **MULTI-LINE NAMES**: If a name like "Red blood cell distribution width coefficient of variation" wraps to 3 lines, the result "14.4" is physically aligned with the 3rd line. DO NOT take "0.23" from the row below.
+- **SEQUENTIAL MATCHING**: For every test name you identify, there must be exactly one result. If you find a name but skip its result, you will shift every subsequent row. NEVER skip a row without a clear reason.
+- **RTL SCANNING**: For Arabic tables, scan from RIGHT to LEFT. (Name on right, result to its left).
 
 EXAMPLE - RTL Table (Arabic report):
 ```

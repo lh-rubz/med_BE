@@ -875,15 +875,27 @@ class ChatResource(Resource):
             
             # Step 2a: If organized_data has good medical tests, use it as PRIMARY
             is_organized_reliable = False
-            if organized_data and organized_data.get('medical_data') and len(organized_data['medical_data']) >= 3:
-                # Run a sanity check: how many flagged as check_alignment?
+            
+            # STAGE 1 RELIABILITY CHECK
+            if organized_data and organized_data.get('medical_data'):
+                medical_list = organized_data['medical_data']
                 from utils.medical_data_postprocessor import MedicalDataPostProcessor
+                
+                # Check for suspicious alignment flags
                 temp_cleaned = MedicalDataPostProcessor.clean_extracted_data(organized_data)
                 suspicious_rows = [r for r in temp_cleaned.get('medical_data', []) if 'check_alignment' in r.get('notes', '')]
                 
-                if len(suspicious_rows) > len(temp_cleaned.get('medical_data', [])) * 0.3:
-                    print(f"⚠️  Organized OCR has {len(suspicious_rows)} suspicious rows (alignment issues). Using VLM primary instead.")
-                    is_organized_reliable = False
+                # CHECK 1: Suspicious alignment rows
+                # CHECK 2: Too many rows missing values (indicates organization split row/name)
+                # CHECK 3: Very short list (unreliable organization)
+                # CHECK 4: Complexity threshold (Hematology/CBC tables usually have > 10 rows)
+                
+                if len(suspicious_rows) > 0:
+                    print(f"⚠️  Organized OCR has {len(suspicious_rows)} suspicious rows. Forcing VLM primary.")
+                elif len(medical_list) < 3:
+                    print(f"⚠️  Too few rows in organized data ({len(medical_list)}).")
+                elif len(medical_list) > 8:
+                    print(f"🔬 Complex table detected ({len(medical_list)} rows). Forcing VLM primary for high precision.")
                 else:
                     is_organized_reliable = True
 
@@ -899,7 +911,7 @@ class ChatResource(Resource):
                 extraction_method = "organized_ocr_primary"
             else:
                 # Fallback: Use VLM for extraction
-                print(f"🤖 Step 2: VLM extraction (organized text unreliable or insufficient)...")
+                print(f"🤖 Step 2: VLM extraction (structural anchoring mode)...")
                 yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Reading table data carefully on page {idx}...'})}\n\n"
                 
                 extraction_method = "vlm_primary"
