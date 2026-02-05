@@ -19,32 +19,25 @@ This report has {total_pages} pages total. You are extracting page {idx}.
 """
     
     return f"""
-🔬 EXTRACT MEDICAL TABLE DATA - TWO-STEP SCAN
+🔬 EXTRACT MEDICAL TABLE DATA - NO-SKIP PROTOCOL
 Page {idx}/{total_pages}{page_context}
 
-CRITICAL: High-precision grid extraction.
-
-STEP 1: PRE-SCAN (ALL TEST NAMES)
-Scan the table from TOP TO BOTTOM. 
-- Multi-line names: Capture ENTIRE names like "Red blood cell distribution\nwidth coefficient of\nvariation".
-- DO NOT skip any row you see.
-
-STEP 2: DATA EXTRACTION (ROW-BY-ROW)
-For EACH name:
-1. **Vertical Alignment**: Value MUST be in the center-left column, Unit in the middle, Range on the right.
-2. **Horizontal Sentinel**: If a row has ONLY a "*" or "#", return `field_value`: "". DO NOT take values from the row below. 
-3. **STRUCTURALLY DISTINCT ROWS**: Ensure you do not merge adjacent rows that have separate test names or flags.
-4. **NO TRUNCATION**: Extract names exactly as written.
+🚨 NO-SKIP SENTINEL (CRITICAL) 🚨
+1. **Vertical Column Lock**: Results (left), Units (center), Ranges (right).
+2. **Horizontal Sentinel**: If a row has ONLY a flag (like "*" or "#") but NO number, you MUST return `field_value`: "N/A".
+   - DO NOT skip any horizontal line you see in the table. 
+   - Every line of text in the "Test" column MUST have a corresponding JSON entry.
+3. **Spatial Lock**: Trace a straight horizontal line from the test name. If you find no number, use "N/A". This prevents row-jumping.
 
 JSON RETURN:
 {{
-    "patient_name": "Full name from Top-Right Grid 'اسم المريض'",
-    "patient_age": "DOB or Age string",
-    "doctor_names": "Person name from Top-Left Grid 'الطبيب'",
+    "patient_name": "Value to the LEFT of 'اسم المريض'",
+    "patient_age": "Value to the LEFT of 'تاريخ الميلاد' (or DOB)",
+    "doctor_names": "Value to the LEFT of 'الطبيب'",
     "medical_data": [
         {{
             "field_name": "Literal test name",
-            "field_value": "Result (number or empty if only flag exists)",
+            "field_value": "Result or 'N/A' if row is empty/flagged",
             "field_unit": "Unit",
             "normal_range": "(X-Y)"
         }}

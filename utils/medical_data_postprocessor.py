@@ -165,6 +165,11 @@ class MedicalDataPostProcessor:
         if field_name.lower() in header_keywords and (not field_value or field_value.lower() in header_keywords):
             return None
             
+        # Sentinel Check: If VLM returned "N/A", the row exists but has no value.
+        # We discard it here in code to prevent row-shifting errors in the VLM.
+        if field_value.upper() == "N/A":
+            return None
+            
         # Drop only if everything is missing
         if not field_name and not field_value and not field_unit and not normal_range and not category and not notes:
             return None
@@ -195,6 +200,21 @@ class MedicalDataPostProcessor:
         # field_unit can be empty - that's OK
         # category and notes can be empty - that's OK
         
+        # Fix common OCR/VLM typos in field names
+        typo_fixes = {
+            "Platelel": "Platelet",
+            "Distrubtion": "Distribution",
+            "Coun": "Count",
+            "widt": "width",
+            "Lymphocyle": "Lymphocyte",
+            "Basohil8": "Basophils",
+            "disinbution": "distribution",
+            "widht": "width"
+        }
+        for typo, fix in typo_fixes.items():
+            if typo in field_name:
+                field_name = field_name.replace(typo, fix)
+
         cleaned_entry = {
             "field_name": field_name,
             "field_value": field_value,

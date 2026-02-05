@@ -6,28 +6,27 @@ def get_personal_info_prompt(idx, total_pages):
     return f"""You are an expert medical document digitizer.
 Task: Extract PATIENT & DOCTOR information from this report (page {idx}/{total_pages}).
 
-🚨 HEADER STRUCTURE (GRID BASED) 🚨
+🚨 HEADER ORIENTATION (CRITICAL) 🚨
 This report uses two side-by-side grids at the top.
+- **COLUMN PATTERN**: Each grid cell typically contains a **Label on the RIGHT** and a **Value on the LEFT**.
+- **READING DIRECTION**: Scan from Right-to-Left to find the Label, then look immediately to its LEFT for the Value.
+
 1. **RIGHT GRID (Patient Info)**:
-   - Rows are labeled on the right side of the cells.
    - Row 1: "رقم المريض" (Patient ID)
-   - Row 2: "اسم المريض" (Patient Name) -> Extract the string content of this row.
+   - Row 2: "اسم المريض" (Patient Name) -> The value is to the LEFT of this label.
    - Row 3: "رقم الهوية" (ID Number)
-   - Row 4: "الجنس" (Gender) -> Look for "أنثى" (Female) or "ذكر" (Male).
-   - Row 5: "تاريخ الميلاد" (DOB) -> Extract the date string if present.
-   - Row 6: "جهة الطلب" (Requesting Entity) -> SKIP this for patient name; it's a facility.
+   - Row 4: "الجنس" (Gender) -> Value to the LEFT. (أنثى -> Female, ذكر -> Male).
+   - Row 5: "تاريخ الميلاد" (DOB) -> Value to the LEFT.
+   - Row 6: "جهة الطلب" (Requesting Entity) -> SKIP this for patient name (it's a facility/insurance).
 
 2. **LEFT GRID (Order/Physician Info)**:
-   - Row 1: "تاريخ الطلب" (Order Date) -> Extract the date as YYYY-MM-DD.
-   - Row 6: "الطبيب" (Physician) -> Extract the person name in this row.
+   - Row 1: "تاريخ الطلب" (Order Date) -> Value to the LEFT.
+   - Row 6: "الطبيب" (Physician) -> Value to the LEFT. (Person name like جهاد العملة).
 
 CRITICAL RULES:
-1. **PATIENT NAME**: Must be from the "اسم المريض" row in the right grid. 
-   - DO NOT extract names from "جهة الطلب" or the bottom center box.
-2. **DOCTOR NAME**: Must be from the "الطبيب" row in the left grid.
-   - DO NOT extract the clinic name "عيادة الطب العام" as the doctor.
-3. **GENDER**: Convert "أنثى" to "Female" and "ذكر" to "Male".
-4. **REPORT DATE**: Extract "تاريخ الطلب" as YYYY-MM-DD. Remove any time/timestamp.
+1. **NO SKIP**: If a box is physically there but empty, return "".
+2. **NO HALLUCINATION**: Only extract text physically present to the left of the labels.
+3. **REPORT DATE**: Extract "تاريخ الطلب" as YYYY-MM-DD.
 
 JSON OUTPUT ONLY:
 {{
@@ -42,23 +41,22 @@ JSON OUTPUT ONLY:
 
 
 def get_main_vlm_prompt(idx, total_pages):
-    """Prompt to extract LAB TABLE data with strict row alignment and multi-word test support."""
+    """Prompt to extract LAB TABLE data with the NO-SKIP sentinel protocol."""
     return f"""You are a high-precision lab data digitizer.
 Task: Extract LAB DATA from this image (page {idx}/{total_pages}).
 
-🚨 ALIGNMENT PROTOCOL 🚨
-1. **Vertical Column Lock**: Identify the Result, Unit, and Range columns. 
-   - Note that results are often in the center-left, units in the middle, and ranges on the right.
-2. **Horizontal Row Scan**: Move horizontally from the test name.
-   - If a row has ONLY a flag symbol (like "*" or "#"), its `field_value` is "" (empty string). DO NOT jump to the next numeric value in a different row.
-   - Ensure you align the test name with the result value physically on the same horizontal band.
-3. **Multi-line Names**: Capture full names even if they wrap across multiple lines of text within the same row.
-4. **Missing Rows**: Capture EVERY row in the table. If names look like components of a group, extract ALL of them individually.
+🚨 NO-SKIP SENTINEL PROTOCOL (CRITICAL) 🚨
+1. **SCAN HORIZONTALLY**: Move line-by-line from top to bottom.
+2. **SENTINEL VALUE**: If a row has ONLY a flag symbol (like "*" or "#") but NO numeric result, you MUST return `field_value`: "N/A".
+   - **WHY?**: This prevents row-shifting. If you skip the row, the next result will be assigned to the wrong test!
+   - Example row: "Red blood cell distribution width" has only a "*". Value = "N/A".
+3. **EXACT ALIGNMENT**: The value in the center column must belong to the test name on the SAME horizontal line.
+4. **NO TRUNCATION**: Capture the ENTIRE test name (e.g. "Red blood cell distribution width coefficient of variation").
 
 VALIDATION:
-- Result should NOT be a unit (e.g. % is NOT a result).
-- Unit should NOT be a result (e.g. 14.4 is NOT a unit).
-- If field_value is empty but a "*" exists, it counts as an extracted row.
+- Count the rows. There should be approximately 23 rows.
+- If a result is a number (e.g. 14.4), it MUST stay on its line.
+- If a row is truly empty white space with no text or symbols, you may skip it.
 
 JSON OUTPUT ONLY:
 {{
