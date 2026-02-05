@@ -40,7 +40,7 @@ INITIAL_ALIASES = {
     't4': ['t4', 'thyroxine'],
     
     # Vitamins
-    'vitamin d': ['vitamin d', 'vit d', '25-oh'],
+    'vitamin d': ['vitamin d', 'vit d', '25-oh', '25-oh vitamin d', 'vitamin d (25-oh)', 'vit d3', '25-hydroxy vitamin d'],
     'vitamin b12': ['vitamin b12', 'vit b12', 'cobalamin'],
     
     # Electrolytes

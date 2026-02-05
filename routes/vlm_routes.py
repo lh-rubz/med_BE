@@ -1370,6 +1370,17 @@ Be aggressive but intelligent - group all variations of same test together."""
                 else:
                     db.session.add(rf)
                 
+            # Standardize field names before saving (for Trends/Timeline)
+            try:
+                synonyms = MedicalSynonym.query.all()
+                mapping = {s.synonym.lower().strip(): s.standard_name for s in synonyms}
+                final_data['medical_data'] = MedicalDataPostProcessor.standardize_field_names(
+                    final_data['medical_data'], 
+                    learned_synonyms=mapping
+                )
+            except Exception as std_err:
+                print(f"⚠️  Field standardization failed: {std_err}")
+
             # Save fields
             medical_entries = []
             for item in final_data['medical_data']:
