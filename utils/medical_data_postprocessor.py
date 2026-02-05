@@ -291,6 +291,14 @@ class MedicalDataPostProcessor:
                 # If value is an order of magnitude outside range, treat range as unreliable
                 if value_num < (min_val * 0.1) or value_num > (max_val * 10):
                     return "", MedicalDataPostProcessor._append_note(notes, "range_unreliable")
+                    
+                # 1-OFF ERROR DETECTION: 
+                # If value EXACTLY matches min or max, it's highly suspicious for a row-shift 
+                # (extracting the range as the value)
+                if abs(value_num - min_val) < 1e-9 or abs(value_num - max_val) < 1e-9:
+                     # Only flag if there's no flag already from VLM
+                     if "*" not in str(field_value) and "#" not in str(field_value):
+                        notes = MedicalDataPostProcessor._append_note(notes, "check_alignment")
             except ValueError:
                 return "", MedicalDataPostProcessor._append_note(notes, "range_invalid")
 

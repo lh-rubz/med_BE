@@ -71,6 +71,11 @@ Start from TOP row, go DOWN. For EACH row:
 8. If test name shows UNIT (e.g., "%"), clarify in field_name (e.g., "Lymphocyte %" vs "Lymphocyte Count").
 9. If a value is flagged with "*" or "#", extract the number to field_value and the symbol to notes.
 
+1-OFF ERROR PREVENTION:
+Verify that the result value you extract is physically aligned horizontally with the Test Name.
+If you find yourself taking a result that is actually one row above or below the test name, correct it.
+In RTL tables, the Result is the FIRST number to the LEFT of the test name.
+
 EXAMPLE - RTL Table (Arabic report):
 ```
 ملاحظات | الوحدة | النتيجة الطبيعية | النتيجة | الفحص

@@ -33,10 +33,16 @@ IMPORTANT RULES:
 CRITICAL FOR ARABIC TABLES:
 Arabic lab reports have columns in RIGHT-TO-LEFT order:
 - RIGHTMOST column = Test Name (الفحص)
-- Next column = Result/Value (النتيجة) - THIS IS THE NUMERIC RESULT
-- Next column = Normal Range (النتيجة الطبيعية) - contains dash like "74-110"
-- Next column = Unit (الوحدة) - like mg/dL, U/L, %
+- Next column to left = Result/Value (النتيجة) - THIS IS THE NUMERIC RESULT (e.g., 109, 0.56, 12.6)
+- Next column to left = Normal Range (النتيجة الطبيعية) - contains dash like "74-110", "(0.5-0.9)"
+- Next column to left = Unit (الوحدة) - like mg/dL, U/L, %
 - LEFTMOST column = Notes (ملاحظات)
+
+1-OFF ERROR PREVENTION:
+Sometimes OCR mixes up the order. ALWAYS verify:
+- The VALUE is a single number.
+- The RANGE has a dash or parentheses.
+- IF a value looks like a range (e.g., "74-110"), it is WRONG. The real value is likely to its RIGHT.
 
 When you see a table row like:
 "mg/dL (74-110) 109 Fasting Blood Sugar"

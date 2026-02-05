@@ -1051,7 +1051,7 @@ RULES:
                         Config.OLLAMA_MODEL,
                         page_num=idx,
                         total_pages=total_pages,
-                        run_detailed_check=False  # Disable detailed field-by-field checks
+                        run_detailed_check=True  # Enable detailed field-by-field checks
                     )
                     extracted_data['medical_data'] = verified_fields
                     print(f"✅ Verification status: {verification_report.get('verification_status', 'UNKNOWN')}")
