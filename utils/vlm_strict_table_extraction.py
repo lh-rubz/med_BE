@@ -59,83 +59,64 @@ For LTR tables (test names on left):
    Position 4: Reference range
    Position 5 (RIGHTMOST): Notes
 
-STEP 3 - EXTRACT ROW-BY-ROW (TOP TO BOTTOM, NO SKIPPING):
-Start from TOP row, go DOWN. For EACH row:
+STEP 3 - EXTRACTION STRATEGY:
 1. Find the test name (Fحص). Note: Names might be long and span MULTIPLE lines.
 2. The result value (النتيجة) is physically in the SAME HORIZONTAL ROW as the test name's FIRST line or center.
 3. Move HORIZONTALLY to find result, range, and unit.
 4. DO NOT jump to different rows. If a row has no result, skip it (it might be a header).
 5. DO NOT extract duplicate test names.
-6. Extract EVERY single row - even those that look like sub-headers or have special codes (e.g., "Hb A1c", "Lipid Profile").
+6. Extract EVERY single row - even those that look like sub-headers or have special codes.
 7. Extract SUB-SECTIONS (e.g., under "DIFFERENTIAL COUNT", extract "Neutrophils", "Lymphocytes", etc.).
-8. If test name shows UNIT (e.g., "%"), clarify in field_name (e.g., "Lymphocyte %" vs "Lymphocyte Count").
-9. If a value is flagged with "*" or "#", extract the number to field_value and the symbol to notes.
+8. **UNIT PRECISION**: Extract units precisely from the unit column. 
+   - Look for `%`, `K/uL`, `M/uL`, `g/dL`, `fL`, `pg`. 
+   - DO NOT assume a unit. If the unit column for "Red blood cell distribution width coefficient" says "%", extract "%".
+9. **LITERAL TEST NAMES**: Extract the EXACT text for the test name. If it says "Platelet Crit", DO NOT change it to "Platelet Count".
+10. **EMPTY VALUE POLICY**: ONLY skip a field if the result value is physically blank in the image. If there is a name, there is almost always a value. If a value is missing, return "" (empty string).
 
-STEP 0 - HEADER INFO (Ramallah PHC Layout):
-- **PATIENT NAME**: Top-Right table. Label "اسم المريض". Value is to its LEFT.
-- **INSURANCE**: Top-Left table. Label "التأمين". Value "[ شؤون اجتماعية ] Social". (DO NOT use as name).
-
-STEP 1 - ROW-BY-ROW INDEXING SCAN:
+STEP 4 - ROW-BY-ROW CHECKERBOARD SCAN:
 Extract EVERY row from top to bottom. For each row:
-1. **ROW INDEXING**: Mentally assign a number to the row (e.g., Row #1, Row #2). Do not skip any physical row.
-2. **GRAY-BAND ANCHORING**: Notice if the row has a **GRAY BACKGROUND** or **WHITE BACKGROUND**.
-   - A Result value is ONLY valid if it shares the EXACT SAME BACKGROUND COLOR as its Test Name.
-   - If "Monocytes" is in a gray band, its value (0.1) MUST be in the same gray band. Do not pick 7.1 from the white band below.
-3. **VERTICAL BASELINE LOCK**: The Result, Range, and Unit must be exactly centered on the horizontal axis of the FIRST line of the Test Name.
-4. **NO NEIGHBOR DEBT**: If a row has no result on its exact baseline, leave it empty. NEVER borrow from adjacent rows.
+1. **BACKGROUND COLOR**: Identify if the row has a **GRAY** or **WHITE** background.
+2. **PATTERN ADHERENCE**: Rows typically alternate (Gray, White, Gray, White). If you see two whites, you likely skipped a row.
+3. **HORIZONTAL BASELINE LOCK**: The Result, Range, and Unit must be exactly centered on the same color band as the Test Name.
+4. **VALUE ANCHORING**: Extract values ONLY from the same color band as the test name.
 
-EXAMPLE - RTL Table (Arabic report):
+EXAMPLE - Checkerboard RTL Table:
 ```
-ملاحظات | الوحدة | النتيجة الطبيعية | النتيجة | الفحص
-         | mg/dl  | (74-110)        | 109    | Fasting Blood Sugar (FBS)
-         | mg/dl  | (0.5-0.9)       | 0.56   | Creatinine,serum
-    *    | mg/dl  | (0-200)         | 230    | Cholesterol,Total
-         | U/L    | (0-33)          | 32     | Alanine transaminase ALT (GPT)
+Background | Unit  | Range     | Value | Fحص
+GRAY       | %     | (12-16)   | 14.4  | RDW-CV
+WHITE      | %     | (0.1-0.5) | 0.23  | Platelet Crit
+GRAY       | K/uL  | (0.1-0.8) | 0.1   | Monocytes
 ```
-Extract as:
-- Row 1: field_name="Fasting Blood Sugar", field_value="109", field_unit="mg/dl", normal_range="(74-110)"
-- Row 2: field_name="Creatinine serum", field_value="0.56", field_unit="mg/dl", normal_range="(0.5-0.9)"
-- Row 3: field_name="Total Cholesterol", field_value="230", field_unit="mg/dl", normal_range="(0-200)", notes="*"
-- Row 4: field_name="Alanine aminotransferase ALT", field_value="32", field_unit="U/L", normal_range="(0-33)"
 
 VALIDATION RULES:
-✓ Value must be in SAME horizontal row as test name
-✓ The Result is typically the FIRST numeric value after the test name
-✓ If you see a * or flag in notes column → add that to notes field exactly as shown
+✓ Value must be on the EXACT same color band as the test name
+✓ Extract EXACT literal text for test names
+✓ DO NOT skip a row unless it is physically blank
+✓ Include background color in your mental scan to prevent 1-row shifts
 ✓ Translate Arabic test names to English (with original in parentheses if helpful)
-✓ Translate Arabic units to standard medical units (e.g., "٧/L" becomes "U/L", "mg/dl" remains "mg/dl")
-✓ Include unit type in field_name if clarifies (e.g., "Lymphocyte %" vs "Lymphocyte Count")
-✓ Extract EVERY row in order top-to-bottom, including all sub-sections
-✓ If a test name spans two lines, the result is usually on the first or second line - stay aligned!
-✓ DO NOT extract the same test name twice (skip duplicate rows)
-✓ SKIP header rows (containing "Test Name", "Value", "Result", "Unit", etc.)
-✗ DO NOT take a value from row above or below
-✗ DO NOT jump over the Result column to the Range column
-✗ DO NOT confuse DOB (old date like 1975) with report date (recent date like 2025)
-✗ DO NOT put square brackets [ ] around names or values
 
 RETURN JSON:
 {{
     "patient_name": "actual patient name from header",
-    "patient_age": "FULL DATE if you see تاريخ الميلاد or older date like 1975 (format: DD/MM/YYYY or YYYY-MM-DD), otherwise just number",
+    "patient_age": "DD/MM/YYYY DOB",
     "patient_gender": "Male or Female",
-    "report_date": "YYYY-MM-DD from تاريخ الطلب or Report Date field ONLY (recent date like 2025, NOT old date like 1975)",
+    "report_date": "YYYY-MM-DD",
     "report_name": "test type from header",
     "report_type": "Clinical Chemistry / Hematology / etc",
     "doctor_names": "from header",
     "medical_data": [
         {{
-            "field_name": "English test name with clarification if needed (e.g., Lymphocyte % or Lymphocyte Count) - unique",
-            "field_value": "result from SAME row. INCLUDE symbols like < or > or >= if present in report (e.g., '< 6.0')",
-            "field_unit": "unit from SAME row",
-            "normal_range": "(X-Y) from SAME row",
-            "category": "section name",
-            "notes": "exact text from notes column or empty"
+            "field_name": "LITERAL test name from image",
+            "field_value": "result from same color band",
+            "field_unit": "unit from unit column",
+            "normal_range": "(X-Y) reference range",
+            "background_color": "gray or white",
+            "notes": "any flags like *"
         }}
     ]
 }}
 
-EXTRACT NOW - Distinguish DOB from report date, include unit clarification in field names, extract row-by-row.
+EXTRACT NOW - Use the checkerboard pattern (Gray/White) to anchor every value to its test name.
 """
 
 
@@ -144,7 +125,7 @@ def get_alignment_verification_prompt(extracted_data: dict, page_num: int) -> st
     Generate a verification prompt that rechecks table alignment.
     Used after initial extraction to catch misaligned rows.
     """
-    fields_text = "\n".join([
+    fields_text = "\\n".join([
         f"{idx+1}. {f.get('field_name', '???')} = {f.get('field_value', '')} {f.get('field_unit', '')}"
         for idx, f in enumerate(extracted_data.get('medical_data', [])[:30])
     ])

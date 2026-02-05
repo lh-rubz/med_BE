@@ -1370,6 +1370,9 @@ Be aggressive but intelligent - group all variations of same test together."""
                 else:
                     db.session.add(rf)
                 
+            # Deduplicate medical data before standardization and save
+            final_data['medical_data'] = deduplicate_medical_data(final_data['medical_data'])
+            
             # Standardize field names before saving (for Trends/Timeline)
             try:
                 synonyms = MedicalSynonym.query.all()
