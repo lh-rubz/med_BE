@@ -879,23 +879,23 @@ class ChatResource(Resource):
             # STAGE 1 RELIABILITY CHECK
             if organized_data and organized_data.get('medical_data'):
                 medical_list = organized_data['medical_data']
+                lab_name = (organized_data.get('lab_name', '') or '').lower()
                 from utils.medical_data_postprocessor import MedicalDataPostProcessor
                 
-                # Check for suspicious alignment flags
+                # Clean and check for alignment issues
                 temp_cleaned = MedicalDataPostProcessor.clean_extracted_data(organized_data)
                 suspicious_rows = [r for r in temp_cleaned.get('medical_data', []) if 'check_alignment' in r.get('notes', '')]
-                
-                # CHECK 1: Suspicious alignment rows
-                # CHECK 2: Too many rows missing values (indicates organization split row/name)
-                # CHECK 3: Very short list (unreliable organization)
-                # CHECK 4: Complexity threshold (Hematology/CBC tables usually have > 10 rows)
+
+                # PREFERENCE: For "Ramallah PHC" reports or complex tables, always use VLM Primary
+                is_complex_lab = "ramallah" in lab_name or "phc" in lab_name
                 
                 if len(suspicious_rows) > 0:
                     print(f"⚠️  Organized OCR has {len(suspicious_rows)} suspicious rows. Forcing VLM primary.")
                 elif len(medical_list) < 3:
                     print(f"⚠️  Too few rows in organized data ({len(medical_list)}).")
-                elif len(medical_list) > 8:
-                    print(f"🔬 Complex table detected ({len(medical_list)} rows). Forcing VLM primary for high precision.")
+                elif len(medical_list) > 5 or is_complex_lab:
+                    reason = "Complexity threshold" if len(medical_list) > 5 else "Known complex lab layout"
+                    print(f"🔬 {reason} detected. Forcing VLM primary for high precision.")
                 else:
                     is_organized_reliable = True
 

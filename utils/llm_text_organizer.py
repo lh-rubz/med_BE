@@ -56,7 +56,8 @@ Reading RIGHT-TO-LEFT:
 OUTPUT FORMAT (use this exact structure):
 
 ===PATIENT INFORMATION===
-Patient Name: full name - look for "اسم المريض", "Patient Name", "Name:", or name near top
+Patient Name: look for "اسم المريض" (Patient Name). In Ramallah PHC reports, the actual name (e.g., "رئيسة خضر طالب خطيب") is below or next to the label. 
+CRITICAL: DO NOT take "شؤون اجتماعية" (Social Case) or "Social" as the patient name. That is the Insurance type.
 Patient ID: ID number if found
 Gender: Male/Female - look for "الجنس", "Gender", "Sex", "ذكر"=Male, "أنثى"=Female
 Age: number only - look for "العمر", "Age", or number followed by "years"/"سنة"
