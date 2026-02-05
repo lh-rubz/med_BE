@@ -995,43 +995,32 @@ class ChatResource(Resource):
 
 LOOK FOR THESE FIELDS (check header area, top of page):
 
-1. PATIENT NAME (اسم المريض):
-   - Look at the RIGHT header table.
-   - Find the label "اسم المريض" and extract the text directly next to it.
-   - DO NOT confuse with "التأمين" (Insurance) or "جهة الطلب" (Clinic).
-   - Expected name: "رئيسة خضر طالب خطيب" or similar.
+### HEADER TABLES (There are TWO tables at the top):
+1. **RIGHT-HAND TABLE** (contains Patient ID, Name, Gender, etc.):
+   - PATIENT NAME (اسم المريض): The text directly to the LEFT of "اسم المريض". 
+     Example: "رئيسة خضر طالب خطيب"
+     CRITICAL: DO NOT take "شؤون اجتماعية" (that is Insurance). The Name is 3-4 Arabic words.
+   - GENDER (الجنس): Find "الجنس" and extract "ذكر" (Male) or "أنثى" (Female).
+   - DOB (تاريخ الميلاد): Find "تاريخ الميلاد" and extract the date (e.g., 01/05/1975).
 
-2. GENDER (الجنس):
-   - Look at the RIGHT header table.
-   - Find "الجنس" and extract "ذكر" (Male) or "أنثى" (Female).
-
-3. AGE / DOB (تاريخ الميلاد):
-   - Look at the RIGHT header table.
-   - Find "تاريخ الميلاد" and extract the date (e.g., 01/05/1975).
-   - If you see "تاريخ الطلب", that is the REPORT DATE, not birth date.
-
-4. REPORT DATE (تاريخ الطلب):
-   - Look at the LEFT header table.
-   - Find "تاريخ الطلب" and extract the date/time (e.g., 2025-12-31).
-
-5. DOCTOR NAME (الطبيب):
-   - Look at the LEFT header table.
-   - Find "الطبيب" and extract the name (e.g., "جهاد العملة").
-   - DO NOT confuse with "جهة الطلب" (Requesting Entity/Clinic).
+2. **LEFT-HAND TABLE** (contains Report Dates, Insurance, etc.):
+   - REPORT DATE (تاريخ الطلب): Find "تاريخ الطلب" and extract the date (e.g., 2025-12-31).
+   - INSURANCE (التأمين): This contains "Social" or "شؤون اجتماعية". DO NOT use this as patient name.
+   - DOCTOR (الطبيب): Find "الطبيب" and extract name (e.g., "جهاد العملة").
 
 Return JSON only:
 {
-    "patient_name": "exact name as shown",
-    "patient_age": "number only (e.g., 35)",
+    "patient_name": "exact name found in RIGHT table",
+    "patient_age": "calculated age or number found",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD format",
-    "doctor_names": "doctor name if found"
+    "doctor_names": "doctor name found in LEFT table"
 }
 
 RULES:
-- Return empty string "" if not found (don't guess)
-- Use exact spelling from image
-- Convert date to YYYY-MM-DD format"""
+- Convert date to YYYY-MM-DD.
+- Return empty string "" if not found.
+- Arabic names stay in Arabic."""
                     
                     content = [
                         {'type': 'text', 'text': patient_prompt},

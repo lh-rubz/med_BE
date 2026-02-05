@@ -114,22 +114,21 @@ Extracted Data:
 - Reference Range: {normal_range}
 
 VERIFICATION TASK:
-1. Look at the image for the row labeled "{field_name}"
-2. Column by column, verify:
-   a) Test Name Column: Does it say "{field_name}"? YES or NO?
-   b) Value Column: Is the value "{field_value}" shown in the image? YES or NO?
-   c) Unit Column: Is the unit "{field_unit}" shown? YES or NO?
-   d) Range Column: Is the range "{normal_range}" shown? YES or NO?
-3. If all are YES → Mark as VERIFIED
-4. If any is NO → Describe what you see in the image for that column
-5. If the test "{field_name}" is not visible in image → Mark as NOT_FOUND
+1. Look at the image for the EXACT horizontal row labeled "{field_name}".
+2. Draw a mental horizontal line through the center of that test name.
+3. Move your eyes horizontally along that line to find the Result Value.
+4. IMPORTANT: If there is no value on that EXACT line, the value is EMPTY. DO NOT pick a number from a line above or below.
+5. Verify:
+   a) Test Name: Does it say "{field_name}"?
+   b) Value: Is "{field_value}" ON THE SAME LINE as "{field_name}"?
+   c) If NO, what IS the number on that same line?
 
 RESPOND WITH:
 FIELD_VERIFICATION:
-Test Name: CORRECT or NOT_FOUND or INCORRECT (show what image says)
-Value: CORRECT or MISSING or INCORRECT (show what image says)
-Unit: CORRECT or MISSING or INCORRECT (show what image says)
-Range: CORRECT or MISSING or INCORRECT (show what image says)
+Test Name: CORRECT or INCORRECT
+Value: CORRECT or INCORRECT (if incorrect, say "Correct value on this line is [X]")
+Unit: CORRECT or INCORRECT
+Range: CORRECT or INCORRECT
 OVERALL: VERIFIED or NEEDS_CORRECTION
 Explanation: one line explanation
 """
@@ -409,21 +408,19 @@ def _apply_field_verification_corrections(field: Dict, verification_response: st
     response_lower = verification_response.lower()
     
     # Check for specific corrections in verification response
-    if 'value_mismatch' in response_lower or 'shows' in response_lower:
-        # Try to extract corrected value from response
-        # Pattern: "image shows X" or "correct value is X"
-        match = re.search(r'(?:shows|says|image displays|correct (?:value|number))[:\s]+([0-9.]+(?:%)?)', response_lower)
+    # Look for: "Correct value on this line is X" or "image shows X"
+    if 'incorrect' in response_lower:
+        # Extract numeric value (including decimals and symbols)
+        match = re.search(r'(?:shows|says|displays|line is|index \d+ shows|correct value)[:\s]+([\*#<>]? ?[0-9.]+(?:%)?)', response_lower)
         if match:
-            corrected_field['field_value'] = match.group(1)
-            corrected_field['verification_note'] = 'Corrected from verification'
+            corrected_field['field_value'] = match.group(1).strip()
+            corrected_field['verification_note'] = 'Corrected from row-shift verification'
     
-    if 'range_not_visible' in response_lower or 'range missing' in response_lower:
-        corrected_field['normal_range'] = ''
-        corrected_field['verification_note'] = 'Range not visible in image'
-    
-    if 'empty' in response_lower and 'value' in response_lower:
-        corrected_field['field_value'] = ''
-        corrected_field['verification_note'] = 'Value is empty in image'
+    if 'range: incorrect' in response_lower or 'range_not_visible' in response_lower:
+        # Try to extract the correct range if provided
+        range_match = re.search(r'range is[:\s]+(\(?[0-9.-]+\)?)', response_lower)
+        if range_match:
+            corrected_field['normal_range'] = range_match.group(1).strip()
     
     return corrected_field
 

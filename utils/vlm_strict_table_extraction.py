@@ -71,13 +71,12 @@ Start from TOP row, go DOWN. For EACH row:
 8. If test name shows UNIT (e.g., "%"), clarify in field_name (e.g., "Lymphocyte %" vs "Lymphocyte Count").
 9. If a value is flagged with "*" or "#", extract the number to field_value and the symbol to notes.
 
-1-OFF ERROR & STRUCTURAL ANCHORING:
-- **ONE RESULT PER ROW**: Each test name has exactly ONE numeric result. Once you find the number aligned with the name, STOP. Do not take the number from the row below, even if it is physically close.
-- **Y-COORDINATE BASELINE**: The Test Name and its Result Value MUST be on the exact same horizontal baseline (the same vertical Y-coordinate). 
-- **NO LOOK-AHEAD**: Never take a value from the row below. If a row appears empty, mark it as empty. DO NOT "borrow" the number from the next row.
-- **HORIZONTAL RULER**: Imagine a ruler placed horizontally under the test name. Moving from right to left (RTL) or left to right (LTR) along that ruler, the ONLY value you should extract is the one resting on that ruler.
-- **MULTI-LINE WRAPPING**: For names like "Red blood cell distribution width coefficient of variation", the result "14.4" is aligned with the BOTTOM-MOST line of that name.
-- **SEQUENTIAL INTEGRITY**: Count rows. If you see 6 names, you must find 6 results. If you results don't match names 1-to-1, the extraction is FAILED.
+1-OFF ERROR & STRUCTURAL GROUNDING:
+- **BOX-CENTRIC ALIGNMENT**: Each row is a physical box. The Test Name (right) and Result (left) share the EXACT same box. 
+- **IMMEDIATE LEFT**: In RTL tables, the Result is the VERY FIRST number you hit when moving LEFT from the Test Name text.
+- **Y-BASELINE LOCK**: Draw a mental horizontal line under the Test Name. Any number ABOVE or BELOW that line belongs to a DIFFERENT test. 
+- **NO NEIGHBOR DEBT**: If you find 14.4 for "Red blood cell...", do NOT look at the row below (Platelet Crit) until you finished the current one.
+- **RTL SEQUENCE**: Test(Right) -> Result -> Range -> Unit -> Notes(Left).
 
 EXAMPLE - RTL Table (Arabic report):
 ```
