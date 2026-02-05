@@ -34,6 +34,26 @@ from utils.llm_text_organizer import get_text_organizer_prompt, get_enhanced_ext
 # Create namespace
 vlm_ns = Namespace('vlm', description='VLM and Report operations')
 
+def split_image_vertically(image_data: bytes, overlap_pixels: int = 150) -> list[bytes]:
+    """
+    Split a laboratory report image into two overlapping vertical halves.
+    Doubles the effective resolution for VLM processing of long tables.
+    """
+    try:
+        img = Image.open(io.BytesIO(image_data))
+        width, height = img.size
+        # Overlap allows test names or values at the cut-point to be seen in both halves
+        top_half = img.crop((0, 0, width, height // 2 + overlap_pixels))
+        bottom_half = img.crop((0, height // 2 - overlap_pixels, width, height))
+        
+        top_io, bottom_io = io.BytesIO(), io.BytesIO()
+        top_half.save(top_io, format='PNG')
+        bottom_half.save(bottom_io, format='PNG')
+        return [top_io.getvalue(), bottom_io.getvalue()]
+    except Exception as e:
+        print(f"⚠️ Image splitting failed: {e}")
+        return [image_data]
+
 # Helper function to normalize gender values
 def normalize_gender(gender_value):
     """Convert any gender representation to English Male/Female."""
@@ -919,83 +939,81 @@ class ChatResource(Resource):
             # Only call VLM if we're using vlm_primary method
             if extraction_method == "vlm_primary":
                 try:
-                    image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
-                    image_format = image_info['format']
+                    # SEGMENTATION: Split Hematology/long tables for high-precision
+                    image_segments = [image_info['data']]
+                    is_long_report = any(term in str(image_info.get('source_filename', '')).lower() 
+                                      for term in ["hematology", "cbc", "bloodreport", "hebe", "heba", "blood"])
                     
-                    # Use strict table extraction prompt
-                    prompt_text = get_strict_table_extraction_prompt(
-                        idx=idx,
-                        total_pages=total_pages
-                    )
+                    if is_long_report:
+                        print(f"✂️  Segmenting Page {idx} (Long report detected) for high-precision extraction...")
+                        image_segments = split_image_vertically(image_info['data'])
                     
-                    content = []
-                    if ocr_text:
-                        enhanced_prompt = f"{prompt_text}\n\nOCR-EXTRACTED TEXT FOR REFERENCE:\n{ocr_text}"
-                        content.append({'type': 'text', 'text': enhanced_prompt})
-                    else:
-                        content.append({'type': 'text', 'text': prompt_text})
-                    
-                    content.append({
-                        'type': 'image_url',
-                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                    })
-                    
-                    completion = ollama_client.chat.completions.create(
-                        model=Config.OLLAMA_MODEL,
-                        messages=[{'role': 'user', 'content': content}],
-                        temperature=0.1
-                    )
-                    response_text = completion.choices[0].message.content.strip()
-                    print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:500]}...\n{'-'*40}")
-                    
-                    # Parse VLM response
-                    try:
-                        import re
-                        json_str = None
-                        brace_count = 0
-                        start_idx = -1
-                        for i, char in enumerate(response_text):
-                            if char == '{':
-                                if brace_count == 0:
-                                    start_idx = i
-                                brace_count += 1
-                            elif char == '}':
-                                brace_count -= 1
-                                if brace_count == 0 and start_idx != -1:
-                                    json_str = response_text[start_idx:i+1]
-                                    break
+                    page_results = []
+                    for seg_idx, segment_data in enumerate(image_segments, 1):
+                        seg_lbl = f" (Segment {seg_idx}/{len(image_segments)})" if len(image_segments) > 1 else ""
+                        yield f"data: {json.dumps({'percent': min(current_progress + 10 + (seg_idx*5), 70), 'message': f'Reading table data carefully on page {idx}{seg_lbl}...'})}\n\n"
                         
-                        if json_str:
-                            vlm_data = json.loads(json_str)
-                            
-                            # RESCUE PASS: If VLM returned 0 results, retry with a simpler, non-restrictive prompt
-                            if not vlm_data.get('medical_data'):
-                                print(f"⚠️  VLM First Pass returned 0 results for page {idx}. Attempting RESCUE Pass...")
-                                rescue_prompt = f"Identify and extract every single medical test and its result from this image. Return JSON only: {{'medical_data': [{{'field_name': '...', 'field_value': '...', 'field_unit': '...', 'normal_range': '...'}}]}}"
-                                base_content = [{'type': 'text', 'text': rescue_prompt}, {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}]
-                                rescue_completion = ollama_client.chat.completions.create(model=Config.OLLAMA_MODEL, messages=[{'role': 'user', 'content': base_content}], temperature=0.3)
-                                rescue_text = rescue_completion.choices[0].message.content.strip()
-                                # Simple parse for rescue text
-                                rescue_match = re.search(r'\{.*\}', rescue_text, re.DOTALL)
-                                if rescue_match:
-                                    try: 
-                                        vlm_data = json.loads(rescue_match.group(0))
-                                        print(f"✨ RESCUE Pass succeeded. Found {len(vlm_data.get('medical_data', []))} fields.")
-                                    except: pass
+                        image_base64 = base64.b64encode(segment_data).decode('utf-8')
+                        image_format = image_info['format']
+                        
+                        prompt_text = get_strict_table_extraction_prompt(idx=idx, total_pages=total_pages)
+                        content = []
+                        if ocr_text:
+                            content.append({'type': 'text', 'text': f"{prompt_text}\n\nOCR-EXTRACTED TEXT REFERENCE:\n{ocr_text}"})
+                        else:
+                            content.append({'type': 'text', 'text': prompt_text})
+                        content.append({'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}})
+                        
+                        completion = ollama_client.chat.completions.create(model=Config.OLLAMA_MODEL, messages=[{'role': 'user', 'content': content}], temperature=0.1)
+                        response_text = completion.choices[0].message.content.strip()
+                        print(f"🔍 RAW RESPONSE For Page {idx}{seg_lbl}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
+                        
+                        # Parse VLM response
+                        try:
+                            import re
+                            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                            if json_match:
+                                vlm_data = json.loads(json_match.group(0))
+                                page_results.append(vlm_data)
+                                
+                                # Capture patient info from first segment
+                                if seg_idx == 1:
+                                    for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
+                                        if vlm_data.get(key) and not extracted_data.get(key):
+                                            extracted_data[key] = vlm_data[key]
+                        except Exception as parse_err:
+                            print(f"⚠️  Parsing segment {seg_idx} failed: {parse_err}")
 
-                            # Merge VLM data back, but preserve OCR data if VLM failed completely
-                            for key in ['medical_data', 'lab_name', 'report_type']:
-                                if vlm_data.get(key):
-                                    extracted_data[key] = vlm_data[key]
-                            
-                            print(f"✅ VLM JSON integrated for Image {idx}")
-                            print(f"   Final medical data count: {len(extracted_data.get('medical_data', []))}")
-                    except json.JSONDecodeError as je:
-                        print(f"⚠️  VLM JSON parsing failed: {je}")
-                
+                    # Merge results from all segments
+                    merged_medical_data = []
+                    for res in page_results:
+                        if res.get('medical_data'):
+                            merged_medical_data.extend(res['medical_data'])
+                    
+                    if merged_medical_data:
+                        extracted_data['medical_data'] = merged_medical_data
+                        print(f"✅ Integrated {len(merged_medical_data)} fields from segments")
+                    
+                    # RESCUE PASS: If still empty, try whole image rescue
+                    if not extracted_data.get('medical_data'):
+                        print(f"⚠️  Combined segments returned 0 results. Attempting full-page RESCUE Pass...")
+                        image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
+                        image_format = image_info['format']
+                        rescue_prompt = f"Identify and extract every single medical test and its result from this image. Return JSON only: {{\'medical_data\': [{{\'field_name\': \'...\', \'field_value\': \'...\', \'field_unit\': \'...\', \'normal_range\': \'...\'}}]}}"
+                        base_content = [{'type': 'text', 'text': rescue_prompt}, {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}]
+                        rescue_completion = ollama_client.chat.completions.create(model=Config.OLLAMA_MODEL, messages=[{'role': 'user', 'content': base_content}], temperature=0.3)
+                        rescue_text = rescue_completion.choices[0].message.content.strip()
+                        rescue_match = re.search(r'\{.*\}', rescue_text, re.DOTALL)
+                        if rescue_match:
+                            try:
+                                rescue_data = json.loads(rescue_match.group(0))
+                                extracted_data['medical_data'] = rescue_data.get('medical_data', [])
+                                print(f"✨ RESCUE Pass succeeded. Found {len(extracted_data['medical_data'])} fields.")
+                            except: pass
+                    
+                    print(f"✅ VLM Phase Complete for Image {idx}. Fields: {len(extracted_data.get('medical_data', []))}")
                 except Exception as vlm_err:
                     print(f"⚠️  VLM extraction failed: {vlm_err}")
-            
             # Step 3: Always try VLM for patient info (it reads headers better than OCR)
             # Check what patient fields are missing
             missing_fields = []
@@ -1011,32 +1029,28 @@ class ChatResource(Resource):
                     
                     patient_prompt = """Extract patient and report information from this medical lab report image.
 
-LOOK FOR THESE FIELDS (check the header area with two distinct tables):
+LOOK FOR THESE FIELDS CAREFULLY:
 
-### 1. **RIGHT-HAND TOP TABLE** (The primary patient info table on the right):
-   - **PATIENT NAME (اسم المريض)**: Find "اسم المريض" on the far right. The value is the series of Arabic words to its LEFT (e.g., "رئيسة خضر طالب خطيب"). Capture ALL words.
-   - **GENDER (الجنس)**: Find "الجنس". If you see "**أنثى**" or "**انثى**", return "**Female**". If you see "**ذكر**", return "**Male**".
-   - **PATIENT ID (رقم المريض)**: Find "رقم المريض" and extract the number.
-   - **DOB (تاريخ الميلاد)**: Find "تاريخ الميلاد" and extract the date (e.g., 01/05/1975).
+### 1. **PATIENT NAME (اسم المريض)**: 
+   - Look for "اسم المريض" on the far right. 
+   - Capture **EVERY SINGLE WORD** to its LEFT. Arabic names are often 4-5 words (e.g., "هبة جمال ابوالرب"). 
+   - DO NOT truncate. Capture until you hit a different field or the end of the line.
 
-### 2. **LEFT-HAND TOP TABLE** (The report/administrative info table on the left):
-   - **REPORT DATE (تاريخ الطلب)**: Find "تاريخ الطلب" and extract the date (e.g., 2025-12-31).
-   - **INSURANCE (التأمين)**: Find "التأمين". It usually says "[ شؤون اجتماعية ] Social". 
-     CRITICAL: DO NOT extract this as the patient name. This is insurance.
-   - **DOCTOR (الطبيب)**: Find "الطبيب" and extract the name (e.g., "جهاد العملة").
+### 2. **GENDER (الجنس)**: 
+   - Find "الجنس". Return "Female" for انثى or أنثى, and "Male" for ذكر.
+
+### 3. **DATES**:
+   - DOB (تاريخ الميلاد): Return as DD/MM/YYYY.
+   - Report Date (تاريخ الطلب): YYYY-MM-DD.
 
 Return JSON only:
 {
-    "patient_name": "Arabic name from RIGHT table (e.g., رئيسة خضر طالب خطيب)",
-    "patient_age": "Calculated years or number found",
-    "patient_gender": "Female or Male",
+    "patient_name": "Full name captured literal (no truncation)",
+    "patient_age": "From DOB or age field",
+    "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
-    "doctor_names": "Doctor name from LEFT table"
-}
-
-RULES:
-- Return empty string "" if not found.
-- Leave names in Arabic."""
+    "doctor_names": "Doctor name"
+}"""
                     
                     content = [
                         {'type': 'text', 'text': patient_prompt},

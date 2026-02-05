@@ -19,104 +19,52 @@ This report has {total_pages} pages total. You are extracting page {idx}.
 """
     
     return f"""
-🔬 EXTRACT MEDICAL TABLE DATA - RTL & LTR AWARE
+🔬 EXTRACT MEDICAL TABLE DATA - TWO-STEP SCAN
 Page {idx}/{total_pages}{page_context}
 
-CRITICAL: This may be a RIGHT-TO-LEFT (RTL) or LEFT-TO-RIGHT (LTR) table.
+CRITICAL: This is a high-precision extraction. Look at the image as a physical grid.
 
-STEP 0 - EXTRACT HEADER INFORMATION CAREFULLY:
-Look at the TOP of the page for patient information table:
-- Patient Name (اسم المريض / Name)
-- Patient ID (رقم المريض)
-- Date of Birth (تاريخ الميلاد) - This is DOB, NOT report date!
-- Report Date (تاريخ الطلب / Report Date / Sample Date) - This is the actual report date!
-- Doctor Name (الطبيب)
-- Gender (الجنس / Sex)
+STEP 1: PRE-SCAN (ALL TEST NAMES)
+Scan the table from TOP TO BOTTOM. List every single test name you see in the "all_tests_found" array. 
+- If a name is Arabic, capture it. 
+- If a name is English, capture it literals.
+- DO NOT hallucinate common names; extract EXACT literal text (e.g., "Platelet Crit" exactly).
 
-IMPORTANT DATE EXTRACTION:
-- "تاريخ الميلاد" or older date (e.g., 1975) = Date of Birth (DOB) → Put in patient_age field
-- "تاريخ الطلب" or "Report Date" or recent date (e.g., 2025) = Actual report date → Put in report_date field
-- If you see TWO dates: The older one is likely DOB, the recent one is report date
-- DO NOT confuse DOB with report date!
-
-STEP 1 - IDENTIFY TABLE DIRECTION:
-Look at the table headers and structure:
-- If test names are on the RIGHT side → This is RTL (Arabic-style)
-- If test names are on the LEFT side → This is LTR (English-style)
-
-STEP 2 - IDENTIFY COLUMN POSITIONS:
-For RTL tables (test names on right):
-   Position 1 (RIGHTMOST): Test name (English or Arabic)
-   Position 2: Result value (number)
-   Position 3: Reference range (X-Y format)
-   Position 4: Unit (mg/dl, %, etc)
-   Position 5 (LEFTMOST): Notes (Arabic or empty)
-
-For LTR tables (test names on left):
-   Position 1 (LEFTMOST): Test name
-   Position 2: Result value
-   Position 3: Unit
-   Position 4: Reference range
-   Position 5 (RIGHTMOST): Notes
-
-STEP 3 - EXTRACTION STRATEGY:
-1. Find the test name (Fحص). Note: Names might be long and span MULTIPLE lines.
-2. The result value (النتيجة) is physically in the SAME HORIZONTAL ROW as the test name's FIRST line or center.
-3. Move HORIZONTALLY to find result, range, and unit.
-4. DO NOT jump to different rows. If a row has no result, skip it (it might be a header).
-5. DO NOT extract duplicate test names.
-6. Extract EVERY single row - even those that look like sub-headers or have special codes.
-7. Extract SUB-SECTIONS (e.g., under "DIFFERENTIAL COUNT", extract "Neutrophils", "Lymphocytes", etc.).
-8. **UNIT PRECISION**: Extract units precisely from the unit column. 
-   - Look for `%`, `K/uL`, `M/uL`, `g/dL`, `fL`, `pg`. 
-   - DO NOT assume a unit. If the unit column for "Red blood cell distribution width coefficient" says "%", extract "%".
-9. **LITERAL TEST NAMES**: Extract the EXACT text for the test name. If it says "Platelet Crit", DO NOT change it to "Platelet Count".
-10. **EMPTY VALUE POLICY**: ONLY skip a field if the result value is physically blank in the image. If there is a name, there is almost always a value. If a value is missing, return "" (empty string).
-
-STEP 4 - ROW-BY-ROW CHECKERBOARD SCAN:
-Extract EVERY row from top to bottom. For each row:
+STEP 2: DATA EXTRACTION (ROW-BY-ROW)
+For EACH name you listed in Step 1:
 1. **BACKGROUND COLOR**: Identify if the row has a **GRAY** or **WHITE** background.
-2. **PATTERN ADHERENCE**: Rows typically alternate (Gray, White, Gray, White). If you see two whites, you likely skipped a row.
-3. **HORIZONTAL BASELINE LOCK**: The Result, Range, and Unit must be exactly centered on the same color band as the Test Name.
-4. **VALUE ANCHORING**: Extract values ONLY from the same color band as the test name.
-
-EXAMPLE - Checkerboard RTL Table:
-```
-Background | Unit  | Range     | Value | Fحص
-GRAY       | %     | (12-16)   | 14.4  | RDW-CV
-WHITE      | %     | (0.1-0.5) | 0.23  | Platelet Crit
-GRAY       | K/uL  | (0.1-0.8) | 0.1   | Monocytes
-```
+2. **PATTERN ADHERENCE**: Rows typically alternate (Gray, White, Gray, White).
+3. **HORIZONTAL BASELINE LOCK**: Move horizontally from the test name to find Value, Unit, and Range on the SAME color band.
+4. **UNIT PRECISION**: Extract units precisely (% , K/uL, M/uL, g/dL, fL, pg). Look specifically at the "Unit" column.
+5. **SYMBOL ANCHOR (*)**: If you see a "*" or flag next to a value, this is a physical anchor proving a value exists. DO NOT skip these rows or return "N/A".
+6. **EMPTY VALUE POLICY**: ONLY skip a field if the result value is physically empty white space.
 
 VALIDATION RULES:
-✓ Value must be on the EXACT same color band as the test name
-✓ Extract EXACT literal text for test names
-✓ DO NOT skip a row unless it is physically blank
-✓ Include background color in your mental scan to prevent 1-row shifts
-✓ Translate Arabic test names to English (with original in parentheses if helpful)
+✓ Value must share the EXACT SAME color band as the test name.
+✓ If you see "Red blood cell distribution width", ensure the value is from THAT row (e.g., 12.6%) and not the "Platelets Count" row (e.g., 257).
+✓ Capture multi-line names completely.
+✓ Translate Arabic names to English but keep original in parentheses.
 
 RETURN JSON:
 {{
-    "patient_name": "actual patient name from header",
-    "patient_age": "DD/MM/YYYY DOB",
-    "patient_gender": "Male or Female",
+    "patient_name": "Full patient name from header",
+    "patient_age": "DOB or Age",
+    "patient_gender": "Male/Female",
     "report_date": "YYYY-MM-DD",
-    "report_name": "test type from header",
-    "report_type": "Clinical Chemistry / Hematology / etc",
-    "doctor_names": "from header",
+    "all_tests_found_in_prescan": ["Test 1", "Test 2", ...],
     "medical_data": [
         {{
-            "field_name": "LITERAL test name from image",
-            "field_value": "result from same color band",
-            "field_unit": "unit from unit column",
-            "normal_range": "(X-Y) reference range",
+            "field_name": "LITERAL name from image",
+            "field_value": "numeric result with symbols like < or >",
+            "field_unit": "from unit column",
+            "normal_range": "(X-Y) from range column",
             "background_color": "gray or white",
-            "notes": "any flags like *"
+            "notes": "any flags or Arabic notes"
         }}
     ]
 }}
 
-EXTRACT NOW - Use the checkerboard pattern (Gray/White) to anchor every value to its test name.
+EXTRACT NOW - First list ALL test names, then fill the data bands.
 """
 
 
