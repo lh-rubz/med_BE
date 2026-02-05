@@ -91,6 +91,7 @@ VALIDATION RULES:
 ✓ Include unit type in field_name if clarifies (e.g., "Lymphocyte %" vs "Lymphocyte Count")
 ✓ Extract EVERY row in order top-to-bottom, including all sub-sections
 ✓ DO NOT extract the same test name twice (skip duplicate rows)
+✓ SKIP header rows (containing "Test Name", "Value", "Result", "Unit", etc.)
 ✗ DO NOT take a value from row above or below
 ✗ DO NOT jump over the Result column to the Range column
 ✗ DO NOT confuse DOB (old date like 1975) with report date (recent date like 2025)

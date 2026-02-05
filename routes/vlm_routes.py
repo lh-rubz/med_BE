@@ -633,7 +633,7 @@ def calculate_is_normal(field_value, normal_range, field_type='measurement', pat
     Consolidated normality calculation.
     """
     from utils.medical_validator import MedicalValidator
-    return MedicalValidator.calculate_is_normal(field_value, normal_range)
+    return MedicalValidator.calculate_is_normal(field_value, normal_range, patient_gender=patient_gender)
 
 
 def _check_range_value(numeric_value, range_text):
@@ -997,8 +997,9 @@ LOOK FOR THESE FIELDS (check header area, top of page):
 
 1. PATIENT NAME - Look for:
    - "اسم المريض" (Arabic)
-   - "Patient Name", "Name:", "Patient:"
-   - Usually the largest name text at top
+   - "Patient Name", "Name:", "Patient:", "FULL NAME"
+   - Extract the FULL NAME as shown, even if very long. 
+   - Look for name text usually at the very top.
 
 2. GENDER - Look for:
    - "الجنس" (Arabic): "ذكر" = Male, "أنثى" = Female

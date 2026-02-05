@@ -64,45 +64,60 @@ class MedicalValidator:
     @staticmethod
     def parse_range(range_str: str) -> Optional[Tuple[float, float]]:
         """
-        Parse normal range string into min/max tuple
-        
-        Args:
-            range_str: Range string like "13.5-17.5" or "150000-410000"
-            
-        Returns:
-            Tuple of (min, max) or None if cannot parse
+        Parse normal range string into min/max tuple.
+        Handles: "13.5-17.5", "< 200", "> 50", "up to 40", "below 10", "above 100".
         """
         if not range_str or not isinstance(range_str, str):
             return None
         
-        # Clean the string
-        range_str = range_str.strip()
+        range_str = str(range_str).strip().lower()
         
-        # Pattern: number-number or number - number
-        match = re.match(r'([-+]?\d*\.?\d+)\s*-\s*([-+]?\d*\.?\d+)', range_str)
+        # Pattern: number-number or number to number
+        match = re.search(r'([-+]?\d*\.?\d+)\s*[-to]+\s*([-+]?\d*\.?\d+)', range_str)
         if match:
             try:
-                min_val = float(match.group(1))
-                max_val = float(match.group(2))
-                return (min_val, max_val)
+                return (float(match.group(1)), float(match.group(2)))
             except ValueError:
                 pass
         
-        # Pattern: < number (upper limit only)
-        match = re.match(r'<\s*([-+]?\d*\.?\d+)', range_str)
+        # Pattern: < number or up to or below or less than
+        match = re.search(r'(?:<|up\s+to|below|less\s+than)\s*([-+]?\d*\.?\d+)', range_str)
         if match:
             try:
-                max_val = float(match.group(1))
-                return (float('-inf'), max_val)
+                return (float('-inf'), float(match.group(1)))
             except ValueError:
                 pass
         
-        # Pattern: > number (lower limit only)
-        match = re.match(r'>\s*([-+]?\d*\.?\d+)', range_str)
+        # Pattern: > number or above or greater than
+        match = re.search(r'(?:>|above|greater\s+than)\s*([-+]?\d*\.?\d+)', range_str)
         if match:
             try:
-                min_val = float(match.group(1))
-                return (min_val, float('inf'))
+                return (float(match.group(1)), float('inf'))
+            except ValueError:
+                pass
+
+        # Pattern: <= number
+        match = re.search(r'<=\s*([-+]?\d*\.?\d+)', range_str)
+        if match:
+            try:
+                return (float('-inf'), float(match.group(1)))
+            except ValueError:
+                pass
+
+        # Pattern: >= number
+        match = re.search(r'>=\s*([-+]?\d*\.?\d+)', range_str)
+        if match:
+            try:
+                return (float(match.group(1)), float('inf'))
+            except ValueError:
+                pass
+
+        # Pattern: single number (interpreted as min threshold if not otherwise specified)
+        # e.g., "Normal: 187"
+        match = re.search(r'^([-+]?\d*\.?\d+)$', range_str)
+        if match:
+            try:
+                return (float(match.group(1)), float('inf'))
             except ValueError:
                 pass
         
@@ -110,51 +125,108 @@ class MedicalValidator:
     
     @staticmethod
     def calculate_is_normal(field_value: str, normal_range: str, 
-                           current_is_normal: Optional[bool] = None) -> bool:
+                           current_is_normal: Optional[bool] = None,
+                           patient_gender: Optional[str] = None) -> Optional[bool]:
         """
-        Deterministically calculate if a value is within normal range
-        
-        Args:
-            field_value: The measured value
-            normal_range: The normal range string
-            current_is_normal: VLM's guess (used as fallback)
-            
-        Returns:
-            True if normal, False if abnormal
+        Deterministically calculate if a value is within normal range.
+        Handles numeric, categorical, gender-specific, and qualitative ranges.
         """
-        # Handle qualitative results
-        value_lower = str(field_value).lower().strip()
-        
-        # Check if it's a qualitative normal result
-        if any(pattern in value_lower for pattern in MedicalValidator.NORMAL_QUALITATIVE):
+        # Handle qualitative results in field_value
+        value_raw = str(field_value).strip().lower()
+        if any(pattern in value_raw for pattern in MedicalValidator.NORMAL_QUALITATIVE):
             return True
-        
-        # Check if it's a qualitative abnormal result
-        if any(pattern in value_lower for pattern in MedicalValidator.ABNORMAL_QUALITATIVE):
+        if any(pattern in value_raw for pattern in MedicalValidator.ABNORMAL_QUALITATIVE):
             return False
         
-        # Try numeric comparison
-        if normal_range:
-            # Some ranges contain multiple sub-ranges like "Male: 13-17, Female: 12-16"
-            # Split on delimiters and evaluate against each numeric interval; if value
-            # fits ANY interval, treat as normal.
-            segments = re.split(r'[;,/]+', normal_range)
-            try:
-                numeric_match = re.search(r'[-+]?\d*\.?\d+', str(field_value))
-                value = float(numeric_match.group()) if numeric_match else None
-            except (ValueError, TypeError):
-                value = None
+        # Extract numeric value
+        value = None
+        operator = None
+        try:
+            numeric_match = re.search(r'([<>=]*)\s*([-+]?\d*\.?\d+)', value_raw)
+            if numeric_match:
+                operator = numeric_match.group(1)
+                value = float(numeric_match.group(2))
+        except (ValueError, TypeError):
+            pass
 
-            if value is not None:
-                for segment in segments:
-                    range_tuple = MedicalValidator.parse_range(segment)
-                    if range_tuple:
-                        min_val, max_val = range_tuple
-                        if min_val <= value <= max_val:
-                            return True
+        if not normal_range:
+            return current_is_normal
 
-        # Fallback to VLM's guess or default to None (unknown)
-        return current_is_normal if current_is_normal is not None else None
+        range_raw = str(normal_range).strip().lower()
+
+        # 1. Handle Gender-Specific Ranges
+        # Pattern: "Male: 13-17, Female: 12-16"
+        if patient_gender and (":" in range_raw or "," in range_raw):
+            gender = str(patient_gender).lower()
+            gender_patterns = []
+            if 'female' in gender or 'f' in gender or 'woman' in gender or 'أنثى' in gender or 'انثى' in gender:
+                gender_patterns = [r'female\s*[:]\s*([^,;]+)', r'women\s*[:]\s*([^,;]+)', r'نساء\s*[:]\s*([^,;]+)']
+            elif 'male' in gender or 'm' in gender or 'man' in gender or 'ذكر' in gender:
+                gender_patterns = [r'male\s*[:]\s*([^,;]+)', r'men\s*[:]\s*([^,;]+)', r'رجال\s*[:]\s*([^,;]+)']
+            
+            for pattern in gender_patterns:
+                match = re.search(pattern, range_raw)
+                if match:
+                    # Overwrite range_raw with the gender-specific part
+                    range_raw = match.group(1).strip()
+                    break
+
+        # 2. Handle Categorical Ranges
+        # Pattern: "Deficient: <10, Insufficient: 11-30, Sufficient: 31-100"
+        if ":" in range_raw and value is not None:
+            # Check all categories
+            category_pattern = r'([a-z\s]+?)\s*:\s*([^,;]+)'
+            for cat_match in re.finditer(category_pattern, range_raw):
+                cat_name = cat_match.group(1).strip()
+                cat_range = cat_match.group(2).strip()
+                
+                # Check if value fits this category's range
+                r_tuple = MedicalValidator.parse_range(cat_range)
+                if r_tuple:
+                    min_v, max_v = r_tuple
+                    if min_v <= value <= max_v:
+                        # Value is in this category. Is the category normal?
+                        abnormal_keywords = ['deficient', 'insufficient', 'high', 'low', 'abnormal', 'toxic', 'positive']
+                        return not any(kw in cat_name for kw in abnormal_keywords)
+
+        # 3. Handle Simple/Split Ranges
+        if value is not None:
+            segments = re.split(r'[;,/]+', range_raw)
+            for segment in segments:
+                range_tuple = MedicalValidator.parse_range(segment)
+                if range_tuple:
+                    min_val, max_val = range_tuple
+                    
+                    # If value has operator, check if it fits contextually
+                    # e.g., value is "< 5", range is "10-20" -> False
+                    if operator == '<':
+                        return value < max_val and value >= min_val
+                    elif operator == '<=':
+                        return value <= max_val and value >= min_val
+                    elif operator == '>':
+                        return value > min_val and value <= max_val
+                    elif operator == '>=':
+                        return value >= min_val and value <= max_val
+                    
+                    # If range segment itself is an inequality
+                    # e.g., range is "< 6", max_val is 6.0, min_val is -inf
+                    is_strict_max = '<' in segment and '<=' not in segment
+                    is_strict_min = '>' in segment and '>=' not in segment
+
+                    if is_strict_max and value >= max_val:
+                        return False
+                    if is_strict_min and value <= min_val:
+                        return False
+
+                    if min_val <= value <= max_val:
+                        return True
+            
+            # If we parsed ranges but none matched
+            if segments and any(MedicalValidator.parse_range(s) for s in segments):
+                return False
+
+        # Fallback to VLM's guess
+        return current_is_normal
     
     @staticmethod
     def extract_doctor_names(text: str) -> str:

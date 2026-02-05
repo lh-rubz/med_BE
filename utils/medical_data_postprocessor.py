@@ -54,12 +54,17 @@ class MedicalDataPostProcessor:
         for entry in raw_medical_data:
             cleaned_entry = MedicalDataPostProcessor._clean_medical_entry(
                 entry,
-
                 strict_validation=strict_validation
             )
             
             if cleaned_entry:  # Only add if it passes validation
                 cleaned["medical_data"].append(cleaned_entry)
+        
+        # Calculate is_normal for all entries (Gender-aware)
+        cleaned["medical_data"] = MedicalDataPostProcessor.add_is_normal_to_entries(
+            cleaned["medical_data"],
+            patient_gender=cleaned["patient_gender"]
+        )
         
         # Deduplicate entries (remove exact duplicates from multi-page extraction)
         cleaned["medical_data"] = MedicalDataPostProcessor._deduplicate_entries(
@@ -154,6 +159,11 @@ class MedicalDataPostProcessor:
         category = str(entry.get("category", "")).strip().strip('[]')
         notes = str(entry.get("notes", "")).strip().strip('[]')
         
+        # Skip table headers extracted as data
+        header_keywords = ["test name", "field name", "result", "value", "unit", "normal range", "reference"]
+        if field_name.lower() in header_keywords and (not field_value or field_value.lower() in header_keywords):
+            return None
+            
         # Drop only if everything is missing
         if not field_name and not field_value and not field_unit and not normal_range and not category and not notes:
             return None
@@ -307,18 +317,12 @@ class MedicalDataPostProcessor:
         
         name = str(name).strip()
         
-        # Check for corrupted text (symbols, parentheses mixed with words)
-        # Indicators of corruption: random symbols, medical terms, parentheses
-        corruption_indicators = [")", "(", "[", "]", "{", "}", "الطب", "مختبر", "مرفق", "مستشفى"]
+        # Indicators of corruption: random symbols, facility words
+        corruption_indicators = ["الطب", "مختبر", "مرفق", "مستشفى"]
         for indicator in corruption_indicators:
             if indicator in name:
-                # This might be corrupted, need more careful check
-                # Count how many normal word characters vs special chars
-                normal_chars = sum(1 for c in name if c.isalnum() or c in ' ـ')
-                special_chars = sum(1 for c in name if c in ')([]{}<>')
-                if special_chars > 0 or "الطب" in name:
-                    # Likely corrupted
-                    return ""
+                # Likely a facility not a person
+                return ""
         
         # Remove common titles
         titles = ["dr.", "dr", "prof.", "prof", "د.", "دكتور", "أ.د", "الدكتور", 
@@ -559,73 +563,25 @@ class MedicalDataPostProcessor:
     def calculate_is_normal(
         field_value: str,
         normal_range: str,
-        field_unit: str = ""
+        field_unit: str = "",
+        patient_gender: str = ""
     ) -> Optional[bool]:
         """
-        Calculate if a value is within normal range.
-        
-        Returns:
-            True if normal, False if abnormal, None if cannot determine
+        Calculate if a value is within normal range (delegates to MedicalValidator).
         """
-        
-        if not field_value or not normal_range:
-            return None
-        
-        try:
-            # Extract numeric value from field_value (handles operators like <, >, <=, >=)
-            value_str = field_value.strip()
-            
-            # Extract numeric part
-            import re
-            numeric_match = re.search(r'[<>=]*\s*([\d.]+)', value_str)
-            if not numeric_match:
-                return None
-            
-            value = float(numeric_match.group(1))
-            operator = re.search(r'([<>=]+)', value_str)
-            
-            # Parse normal range
-            # Patterns: "10-15", "(10-15)", "10 - 15", "10 to 15"
-            range_match = re.search(r'(\d+\.?\d*)\s*[-to]+\s*(\d+\.?\d*)', normal_range, re.IGNORECASE)
-            
-            if range_match:
-                min_val = float(range_match.group(1))
-                max_val = float(range_match.group(2))
-                
-                # If operator present (< > <= >=), check if the resulting value is within range
-                # For example, if value is "< 5" and range is "10-20", it is abnormal (False)
-                if operator:
-                    op = operator.group(1)
-                    if op == '<':
-                        # If result is "< 5", it's normal if 5 <= max_val (assuming it doesn't drop below min_val)
-                        # More accurately, if "< 5" is the result, it is normal ONLY IF the entire range < 5 is normal.
-                        # Usually, "< 5" is abnormal if min_val is 10.
-                        return value >= min_val and value <= max_val
-                    elif op == '<=':
-                        return value >= min_val and value <= max_val
-                    elif op == '>':
-                        return value >= min_val and value <= max_val
-                    elif op == '>=':
-                        return value >= min_val and value <= max_val
-                
-                # Otherwise check if in range
-                return min_val <= value <= max_val
-            
-            return None
-        
-        except Exception as e:
-            print(f"⚠️ Error calculating is_normal for value={field_value}, range={normal_range}: {e}")
-            return None
+        from utils.medical_validator import MedicalValidator
+        return MedicalValidator.calculate_is_normal(field_value, normal_range, patient_gender=patient_gender)
     
     @staticmethod
-    def add_is_normal_to_entries(medical_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def add_is_normal_to_entries(medical_data: List[Dict[str, Any]], patient_gender: str = "") -> List[Dict[str, Any]]:
         """Calculate is_normal for all entries."""
         
         for entry in medical_data:
             entry['is_normal'] = MedicalDataPostProcessor.calculate_is_normal(
                 entry.get('field_value', ''),
                 entry.get('normal_range', ''),
-                entry.get('field_unit', '')
+                entry.get('field_unit', ''),
+                patient_gender=patient_gender
             )
         
         return medical_data
