@@ -165,9 +165,9 @@ class MedicalDataPostProcessor:
         if field_name.lower() in header_keywords and (not field_value or field_value.lower() in header_keywords):
             return None
             
-        # Sentinel Check: If VLM returned "N/A", the row exists but has no value.
+        # Sentinel Check: If VLM returned "N/A" or JUST a symbol (* or #), the row is effectively empty.
         # We discard it here in code to prevent row-shifting errors in the VLM.
-        if field_value.upper() == "N/A":
+        if field_value.upper() == "N/A" or field_value in ["*", "#", "-", "."]:
             return None
             
         # Drop only if everything is missing
@@ -209,7 +209,15 @@ class MedicalDataPostProcessor:
             "Lymphocyle": "Lymphocyte",
             "Basohil8": "Basophils",
             "disinbution": "distribution",
-            "widht": "width"
+            "widht": "width",
+            "granulocs": "granulocytes",
+            "distribution widthh": "distribution width",
+            "(HGB": "(HGB)",
+            "(RBC": "(RBC)",
+            "(HC": "(HCT)",
+            "(MCV": "(MCV)",
+            "(MCH": "(MCH)",
+            "(MCHC": "(MCHC)"
         }
         for typo, fix in typo_fixes.items():
             if typo in field_name:

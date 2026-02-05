@@ -19,25 +19,24 @@ This report has {total_pages} pages total. You are extracting page {idx}.
 """
     
     return f"""
-🔬 EXTRACT MEDICAL TABLE DATA - NO-SKIP PROTOCOL
+🔬 EXTRACT MEDICAL TABLE DATA - SYMBOL CAPTURE LOCK
 Page {idx}/{total_pages}{page_context}
 
-🚨 NO-SKIP SENTINEL (CRITICAL) 🚨
+🚨 SYMBOL CAPTURE LOCK (CRITICAL) 🚨
 1. **Vertical Column Lock**: Results (left), Units (center), Ranges (right).
-2. **Horizontal Sentinel**: If a row has ONLY a flag (like "*" or "#") but NO number, you MUST return `field_value`: "N/A".
-   - DO NOT skip any horizontal line you see in the table. 
-   - Every line of text in the "Test" column MUST have a corresponding JSON entry.
-3. **Spatial Lock**: Trace a straight horizontal line from the test name. If you find no number, use "N/A". This prevents row-jumping.
+2. **Symbol as Value**: If a row has ONLY a flag (like "*" or "#") but NO number, you MUST return `field_value`: "*".
+   - NEVER skip a horizontal line that has a symbol. This is the only way to maintain vertical alignment.
+3. **Box Reading (Demographics)**: Each header box has the Label on the RIGHT and the Value on the LEFT. Extract the text from the LEFT side.
 
 JSON RETURN:
 {{
-    "patient_name": "Value to the LEFT of 'اسم المريض'",
-    "patient_age": "Value to the LEFT of 'تاريخ الميلاد' (or DOB)",
-    "doctor_names": "Value to the LEFT of 'الطبيب'",
+    "patient_name": "Arabic name from LEFT half of 'اسم المريض' box",
+    "patient_age": "Value from LEFT half of 'تاريخ الميلاد' box",
+    "doctor_names": "Person name from LEFT half of 'الطبيب' box",
     "medical_data": [
         {{
             "field_name": "Literal test name",
-            "field_value": "Result or 'N/A' if row is empty/flagged",
+            "field_value": "Result (number or '*' if only flag exists)",
             "field_unit": "Unit",
             "normal_range": "(X-Y)"
         }}

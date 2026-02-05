@@ -6,27 +6,29 @@ def get_personal_info_prompt(idx, total_pages):
     return f"""You are an expert medical document digitizer.
 Task: Extract PATIENT & DOCTOR information from this report (page {idx}/{total_pages}).
 
-🚨 HEADER ORIENTATION (CRITICAL) 🚨
+🚨 HEADER BOX ORIENTATION (CRITICAL) 🚨
 This report uses two side-by-side grids at the top.
-- **COLUMN PATTERN**: Each grid cell typically contains a **Label on the RIGHT** and a **Value on the LEFT**.
-- **READING DIRECTION**: Scan from Right-to-Left to find the Label, then look immediately to its LEFT for the Value.
+- **INSIDE EACH BOX**: Each box is horizontally split.
+- **RIGHT HALF**: Contains the Arabic Label (e.g., "اسم المريض").
+- **LEFT HALF**: Contains the specific Patient Value (e.g., the Arabic name).
+- **YOUR TASK**: Extract the text found in the **LEFT HALF** of each box.
 
 1. **RIGHT GRID (Patient Info)**:
-   - Row 1: "رقم المريض" (Patient ID)
-   - Row 2: "اسم المريض" (Patient Name) -> The value is to the LEFT of this label.
-   - Row 3: "رقم الهوية" (ID Number)
-   - Row 4: "الجنس" (Gender) -> Value to the LEFT. (أنثى -> Female, ذكر -> Male).
-   - Row 5: "تاريخ الميلاد" (DOB) -> Value to the LEFT.
-   - Row 6: "جهة الطلب" (Requesting Entity) -> SKIP this for patient name (it's a facility/insurance).
+   - Box 1: "رقم المريض" (Patient ID)
+   - Box 2: "اسم المريض" (Patient Name) -> Extract text from the LEFT half of this box.
+   - Box 3: "رقم الهوية" (ID Number)
+   - Box 4: "الجنس" (Gender) -> LEFT half. Convert 'أنثى' to 'Female', 'ذكر' to 'Male'.
+   - Box 5: "تاريخ الميلاد" (DOB) -> LEFT half.
+   - Box 6: "جهة الطلب" (Requesting Entity) -> SKIP this for patient name (it's a facility).
 
 2. **LEFT GRID (Order/Physician Info)**:
-   - Row 1: "تاريخ الطلب" (Order Date) -> Value to the LEFT.
-   - Row 6: "الطبيب" (Physician) -> Value to the LEFT. (Person name like جهاد العملة).
+   - Box 1: "تاريخ الطلب" (Order Date) -> LEFT half. Extract as YYYY-MM-DD.
+   - Box 6: "الطبيب" (Physician) -> LEFT half. Extract the person's name.
 
 CRITICAL RULES:
-1. **NO SKIP**: If a box is physically there but empty, return "".
-2. **NO HALLUCINATION**: Only extract text physically present to the left of the labels.
-3. **REPORT DATE**: Extract "تاريخ الطلب" as YYYY-MM-DD.
+1. **NO SKIP**: If a box has text in the left half, you MUST extract it. 
+2. **NO HALLUCINATION**: If the left half is empty white space, return "".
+3. **REPORT DATE**: Extract "تاريخ الطلب" only.
 
 JSON OUTPUT ONLY:
 {{
@@ -41,22 +43,19 @@ JSON OUTPUT ONLY:
 
 
 def get_main_vlm_prompt(idx, total_pages):
-    """Prompt to extract LAB TABLE data with the NO-SKIP sentinel protocol."""
+    """Prompt to extract LAB TABLE data with Symbol Capture Lock."""
     return f"""You are a high-precision lab data digitizer.
 Task: Extract LAB DATA from this image (page {idx}/{total_pages}).
 
-🚨 NO-SKIP SENTINEL PROTOCOL (CRITICAL) 🚨
-1. **SCAN HORIZONTALLY**: Move line-by-line from top to bottom.
-2. **SENTINEL VALUE**: If a row has ONLY a flag symbol (like "*" or "#") but NO numeric result, you MUST return `field_value`: "N/A".
-   - **WHY?**: This prevents row-shifting. If you skip the row, the next result will be assigned to the wrong test!
-   - Example row: "Red blood cell distribution width" has only a "*". Value = "N/A".
-3. **EXACT ALIGNMENT**: The value in the center column must belong to the test name on the SAME horizontal line.
-4. **NO TRUNCATION**: Capture the ENTIRE test name (e.g. "Red blood cell distribution width coefficient of variation").
+🚨 SYMBOL CAPTURE LOCK (CRITICAL) 🚨
+1. **SYMBOLS AS VALUES**: If a row has a flag symbol (like "*" or "#") but NO number, you MUST extract the symbol (e.g. "*") as the `field_value`. 
+   - **NEVER skip a row** that contains a symbol. Each horizontal line in the "Test" column MUST have a corresponding JSON entry.
+2. **STRICT SPATIAL ALIGNMENT**: Trace a straight horizontal line from the test name. The value you extract must be physically on that same line.
+3. **NO TRUNCATION**: Capture names exactly as written (e.g. "Red blood cell distribution width").
 
 VALIDATION:
-- Count the rows. There should be approximately 23 rows.
-- If a result is a number (e.g. 14.4), it MUST stay on its line.
-- If a row is truly empty white space with no text or symbols, you may skip it.
+- Count the rows. There are many tests in this report. Ensure you capture ALL of them sequentially.
+- If you find no number and no symbol on a line, you may use "N/A" as a placeholder, but do NOT skip.
 
 JSON OUTPUT ONLY:
 {{
