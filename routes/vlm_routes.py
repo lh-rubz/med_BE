@@ -942,7 +942,7 @@ class ChatResource(Resource):
                     # SEGMENTATION: Split Hematology/long tables for high-precision
                     image_segments = [image_info['data']]
                     is_long_report = any(term in str(image_info.get('source_filename', '')).lower() 
-                                      for term in ["hematology", "cbc", "bloodreport", "hebe", "heba", "blood"])
+                                      for term in ["hematology", "cbc", "bloodreport", "hebe", "heba", "blood", "ramallah", "phc", "جامع"])
                     
                     if is_long_report:
                         print(f"✂️  Segmenting Page {idx} (Long report detected) for high-precision extraction...")
@@ -979,8 +979,12 @@ class ChatResource(Resource):
                                 # Capture patient info from first segment
                                 if seg_idx == 1:
                                     for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
-                                        if vlm_data.get(key) and not extracted_data.get(key):
-                                            extracted_data[key] = vlm_data[key]
+                                        val = vlm_data.get(key)
+                                        current_val = str(extracted_data.get(key, '')).lower()
+                                        is_filler = not current_val or any(f in current_val for f in ["unknown", "n/a", "patient", "none"])
+                                        
+                                        if val and (is_filler or len(str(val)) > len(str(extracted_data.get(key, '')))):
+                                            extracted_data[key] = val
                         except Exception as parse_err:
                             print(f"⚠️  Parsing segment {seg_idx} failed: {parse_err}")
 

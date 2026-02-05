@@ -28,7 +28,8 @@ STEP 1: PRE-SCAN (ALL TEST NAMES)
 Scan the table from TOP TO BOTTOM. List every single test name you see in the "all_tests_found" array. 
 - If a name is Arabic, capture it. 
 - If a name is English, capture it literals.
-- DO NOT hallucinate common names; extract EXACT literal text (e.g., "Platelet Crit" exactly).
+- **MULTI-LINE FIELDS**: Many labs (like Ramallah PHC) have test names that span 2 or 3 lines (e.g., "Red blood cell distribution\nwidth coefficient of\nvariation"). You MUST capture the ENTIRE name string.
+- DO NOT hallucinate common names; extract EXACT literal text.
 
 STEP 2: DATA EXTRACTION (ROW-BY-ROW)
 For EACH name you listed in Step 1:
@@ -42,7 +43,7 @@ For EACH name you listed in Step 1:
 VALIDATION RULES:
 ✓ Value must share the EXACT SAME color band as the test name.
 ✓ If you see "Red blood cell distribution width", ensure the value is from THAT row (e.g., 12.6%) and not the "Platelets Count" row (e.g., 257).
-✓ Capture multi-line names completely.
+✓ **NO TRUNCATION**: Capture names completely, even if they wrap to 3 lines.
 ✓ Translate Arabic names to English but keep original in parentheses.
 
 RETURN JSON:
