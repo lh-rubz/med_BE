@@ -874,7 +874,20 @@ class ChatResource(Resource):
             }
             
             # Step 2a: If organized_data has good medical tests, use it as PRIMARY
+            is_organized_reliable = False
             if organized_data and organized_data.get('medical_data') and len(organized_data['medical_data']) >= 3:
+                # Run a sanity check: how many flagged as check_alignment?
+                from utils.medical_data_postprocessor import MedicalDataPostProcessor
+                temp_cleaned = MedicalDataPostProcessor.clean_extracted_data(organized_data)
+                suspicious_rows = [r for r in temp_cleaned.get('medical_data', []) if 'check_alignment' in r.get('notes', '')]
+                
+                if len(suspicious_rows) > len(temp_cleaned.get('medical_data', [])) * 0.3:
+                    print(f"⚠️  Organized OCR has {len(suspicious_rows)} suspicious rows (alignment issues). Using VLM primary instead.")
+                    is_organized_reliable = False
+                else:
+                    is_organized_reliable = True
+
+            if is_organized_reliable:
                 print(f"✅ Using organized OCR data as PRIMARY source ({len(organized_data['medical_data'])} fields)")
                 extracted_data['medical_data'] = organized_data['medical_data']
                 
@@ -886,7 +899,7 @@ class ChatResource(Resource):
                 extraction_method = "organized_ocr_primary"
             else:
                 # Fallback: Use VLM for extraction
-                print(f"🤖 Step 2: VLM extraction (organized text had < 3 fields)...")
+                print(f"🤖 Step 2: VLM extraction (organized text unreliable or insufficient)...")
                 yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Reading table data carefully on page {idx}...'})}\n\n"
                 
                 extraction_method = "vlm_primary"

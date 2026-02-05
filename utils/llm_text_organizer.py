@@ -38,11 +38,12 @@ Arabic lab reports have columns in RIGHT-TO-LEFT order:
 - Next column to left = Unit (الوحدة) - like mg/dL, U/L, %
 - LEFTMOST column = Notes (ملاحظات)
 
-1-OFF ERROR PREVENTION:
-Sometimes OCR mixes up the order. ALWAYS verify:
-- The VALUE is a single number.
-- The RANGE has a dash or parentheses.
-- IF a value looks like a range (e.g., "74-110"), it is WRONG. The real value is likely to its RIGHT.
+1-OFF ERROR & MULTI-LINE PREVENTION:
+- MULTI-LINE NAMES: Some test names are long and wrap to the next line (e.g., "Red blood cell distribution\nwidth coefficient of variation"). UNITE them into one name.
+- Labels like "of variation", "(CBC)", or "Granuloc" on a line by themselves should be MERGED with the test name above them.
+- The VALUE is typically aligned with the LAST line of a multi-line name.
+- IF a line has text but NO numeric result, it's likely part of a name or a header.
+- The VALUE is a single number. The RANGE has a dash or parentheses.
 
 When you see a table row like:
 "mg/dL (74-110) 109 Fasting Blood Sugar"
@@ -247,22 +248,44 @@ def parse_organized_text(organized_text):
     if tests_section:
         section_text = tests_section.group(1)
         
+        buffered_name = ""
         # Parse pipe-separated rows
         for line in section_text.strip().split('\n'):
             line = line.strip()
-            if not line or '|' not in line:
+            if not line:
+                continue
+            
+            # Handle lines without pipes as part of a multi-line name
+            if '|' not in line:
+                if len(line) > 2:
+                    buffered_name = (buffered_name + " " + line).strip()
                 continue
             
             parts = [p.strip() for p in line.split('|')]
             if len(parts) >= 2:
+                current_name = parts[0] if parts[0] and 'NOT FOUND' not in parts[0].upper() else ''
+                current_value = parts[1] if len(parts) > 1 and 'NOT FOUND' not in parts[1].upper() else ''
+                
+                # If we have a buffered name, prepend it to current name
+                if buffered_name:
+                    full_name = (buffered_name + " " + current_name).strip()
+                    buffered_name = ""
+                else:
+                    full_name = current_name
+                
                 field = {
-                    'field_name': parts[0] if parts[0] and 'NOT FOUND' not in parts[0].upper() else '',
-                    'field_value': parts[1] if len(parts) > 1 and 'NOT FOUND' not in parts[1].upper() else '',
+                    'field_name': full_name,
+                    'field_value': current_value,
                     'field_unit': parts[2] if len(parts) > 2 and 'NOT FOUND' not in parts[2].upper() else '',
                     'normal_range': parts[3] if len(parts) > 3 and 'NOT FOUND' not in parts[3].upper() else ''
                 }
                 
-                # Only add if we have at least name and value
+                # If name exists but no value, buffer the name and continue
+                if field['field_name'] and not field['field_value']:
+                    buffered_name = field['field_name']
+                    continue
+                
+                # Only add if we have both name and value
                 if field['field_name'] and field['field_value']:
                     result['medical_data'].append(field)
     
