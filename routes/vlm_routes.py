@@ -1014,254 +1014,202 @@ class ChatResource(Resource):
                         print(f"   📊 Parsed {len(organized_data['medical_data'])} test results from organized text")
                     if organized_data.get('patient_name'):
                         print(f"   👤 Found patient: {organized_data['patient_name']}")
+                    if organized_data.get('medical_data'):
+                        print(f"   📊 Parsed {len(organized_data['medical_data'])} medical tests from organized text")
                 except Exception as org_err:
                     print(f"⚠️  Text organization failed: {org_err}, continuing with raw OCR")
             
-            # Step 2: VLM Extraction with Strict Table Reading
-            print(f"🤖 Step 2: Extracting medical data with strict row-by-row alignment...")
-            yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Reading table data carefully on page {idx}...'})}\n\n"
+            # STRATEGY: Use organized OCR data as PRIMARY source (better row alignment)
+            # VLM is used for patient info and verification only
             
-            # Flag to track extraction method used
-            extraction_method = "strict"
+            # Initialize extracted_data
+            extracted_data = {
+                "patient_name": "",
+                "patient_age": "",
+                "patient_gender": "",
+                "report_date": "",
+                "report_name": "",
+                "report_type": "",
+                "doctor_names": "",
+                "medical_data": []
+            }
             
-            # Choose prompt based on whether we have organized text
-            if organized_text:
-                # Use enhanced extraction with organized text (Stage 2)
-                prompt_text = get_enhanced_extraction_prompt(organized_text, idx, total_pages)
-                extraction_method = "two_stage"
-                print(f"   📊 Using two-stage extraction with organized text")
+            # Step 2a: If organized_data has good medical tests, use it as PRIMARY
+            if organized_data and organized_data.get('medical_data') and len(organized_data['medical_data']) >= 3:
+                print(f"✅ Using organized OCR data as PRIMARY source ({len(organized_data['medical_data'])} fields)")
+                extracted_data['medical_data'] = organized_data['medical_data']
+                
+                # Also use patient info from organized data
+                for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
+                    if organized_data.get(key):
+                        extracted_data[key] = organized_data[key]
+                
+                extraction_method = "organized_ocr_primary"
             else:
-                # Fallback to strict table extraction prompt
-                prompt_text = get_strict_table_extraction_prompt(
-                    idx=idx,
-                    total_pages=total_pages
-                )
-                print(f"   📊 Using strict table extraction (no organized text)")
+                # Fallback: Use VLM for extraction
+                print(f"🤖 Step 2: VLM extraction (organized text had < 3 fields)...")
+                yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Reading table data carefully on page {idx}...'})}\n\n"
+                
+                extraction_method = "vlm_primary"
             
-            try:
-                image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
-                image_format = image_info['format']
-                
-                content = []
-                # If using two-stage, organized text is already in prompt
-                # Otherwise, append raw OCR text
-                if extraction_method == "two_stage":
-                    content.append({'type': 'text', 'text': prompt_text})
-                elif ocr_text:
-                    enhanced_prompt = f"{prompt_text}\n\nOCR-EXTRACTED TEXT FOR REFERENCE:\n{ocr_text}"
-                    content.append({'type': 'text', 'text': enhanced_prompt})
-                else:
-                    content.append({'type': 'text', 'text': prompt_text})
-                
-                content.append({
-                    'type': 'image_url',
-                    'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                })
-                
-                completion = ollama_client.chat.completions.create(
-                    model=Config.OLLAMA_MODEL,
-                    messages=[{'role': 'user', 'content': content}],
-                    temperature=0.1
-                )
-                response_text = completion.choices[0].message.content.strip()
-                print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:500]}...\n{'-'*40}")
-                
-                # Parsing logic - More robust JSON extraction
-                extracted_data = {
-                    "patient_name": "",
-                    "patient_age": "",
-                    "patient_gender": "",
-                    "report_date": "",
-                    "report_name": "",
-                    "report_type": "",
-                    "doctor_names": "",
-                    "medical_data": []
-                }
+            # Only call VLM if we're using vlm_primary method
+            if extraction_method == "vlm_primary":
                 try:
-                    import re
-                    # Try multiple strategies to extract JSON
-                    # Strategy 1: Find the outermost braces
-                    json_str = None
-                    brace_count = 0
-                    start_idx = -1
-                    for i, char in enumerate(response_text):
-                        if char == '{':
-                            if brace_count == 0:
-                                start_idx = i
-                            brace_count += 1
-                        elif char == '}':
-                            brace_count -= 1
-                            if brace_count == 0 and start_idx != -1:
-                                json_str = response_text[start_idx:i+1]
-                                break
+                    image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
+                    image_format = image_info['format']
                     
-                    if json_str:
-                        extracted_data_parsed = json.loads(json_str)
-                        # Merge with defaults
-                        for key in extracted_data:
-                            if key in extracted_data_parsed:
-                                extracted_data[key] = extracted_data_parsed[key]
-                        print(f"✅ JSON extracted for Image {idx} - {len(json_str)} chars")
-                        print(f"   Medical data entries: {len(extracted_data.get('medical_data', []))}")
+                    # Use strict table extraction prompt
+                    prompt_text = get_strict_table_extraction_prompt(
+                        idx=idx,
+                        total_pages=total_pages
+                    )
+                    
+                    content = []
+                    if ocr_text:
+                        enhanced_prompt = f"{prompt_text}\n\nOCR-EXTRACTED TEXT FOR REFERENCE:\n{ocr_text}"
+                        content.append({'type': 'text', 'text': enhanced_prompt})
                     else:
-                        # Fallback: use regex
-                        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                        if json_match:
-                            extracted_data_parsed = json.loads(json_match.group())
-                            # Merge with defaults
-                            for key in extracted_data:
-                                if key in extracted_data_parsed:
-                                    extracted_data[key] = extracted_data_parsed[key]
-                            print(f"✅ JSON extracted via regex for Image {idx}")
-                            print(f"   Medical data entries: {len(extracted_data.get('medical_data', []))}")
-                except Exception as parse_err:
-                    print(f"⚠️  JSON Parse Error on page {idx}: {parse_err}")
-                    print(f"   Response text: {response_text[:300]}")
-                
-                if extracted_data.get('medical_data'):
-                    print(f"✅ Initial extraction: {len(extracted_data['medical_data'])} field(s) using {extraction_method} prompt")
+                        content.append({'type': 'text', 'text': prompt_text})
                     
-                    # If strict extraction returned 0 fields, fallback to simplified extraction
-                    if extraction_method == "strict" and len(extracted_data.get('medical_data', [])) == 0:
-                        print(f"   ⚠️  Strict extraction returned no fields, falling back to simplified extraction...")
-                        extraction_method = "simplified"
-                        prompt_text = get_simplified_extraction_prompt(
-                            idx=idx,
-                            total_pages=total_pages,
-                            report_types=REPORT_TYPES
-                        )
+                    content.append({
+                        'type': 'image_url',
+                        'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
+                    })
+                    
+                    completion = ollama_client.chat.completions.create(
+                        model=Config.OLLAMA_MODEL,
+                        messages=[{'role': 'user', 'content': content}],
+                        temperature=0.1
+                    )
+                    response_text = completion.choices[0].message.content.strip()
+                    print(f"🔍 RAW RESPONSE for Image {idx}:\n{'-'*40}\n{response_text[:500]}...\n{'-'*40}")
+                    
+                    # Parse VLM response
+                    try:
+                        import re
+                        json_str = None
+                        brace_count = 0
+                        start_idx = -1
+                        for i, char in enumerate(response_text):
+                            if char == '{':
+                                if brace_count == 0:
+                                    start_idx = i
+                                brace_count += 1
+                            elif char == '}':
+                                brace_count -= 1
+                                if brace_count == 0 and start_idx != -1:
+                                    json_str = response_text[start_idx:i+1]
+                                    break
                         
-                        content = []
-                        if ocr_text:
-                            enhanced_prompt = f"{prompt_text}\n\nOCR-EXTRACTED TEXT FOR REFERENCE:\n{ocr_text}"
-                            content.append({'type': 'text', 'text': enhanced_prompt})
-                        else:
-                            content.append({'type': 'text', 'text': prompt_text})
+                        if json_str:
+                            vlm_data = json.loads(json_str)
+                            for key in extracted_data:
+                                if key in vlm_data:
+                                    extracted_data[key] = vlm_data[key]
+                            print(f"✅ VLM JSON extracted for Image {idx}")
+                            print(f"   Medical data entries: {len(extracted_data.get('medical_data', []))}")
+                    except json.JSONDecodeError as je:
+                        print(f"⚠️  VLM JSON parsing failed: {je}")
+                
+                except Exception as vlm_err:
+                    print(f"⚠️  VLM extraction failed: {vlm_err}")
+            
+            # Step 3: Enrich organized_ocr_primary with VLM for patient info if needed
+            if extraction_method == "organized_ocr_primary":
+                # Check if we need VLM for patient info
+                needs_patient_info = not extracted_data.get('patient_name')
+                
+                if needs_patient_info:
+                    print(f"   🔍 Using VLM to extract patient info...")
+                    try:
+                        image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
+                        image_format = image_info['format']
                         
-                        content.append({
-                            'type': 'image_url',
-                            'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}
-                        })
+                        patient_prompt = """Extract ONLY patient information from this medical report image.
+Return JSON format:
+{
+    "patient_name": "full name or empty",
+    "patient_age": "age if found or empty",
+    "patient_gender": "Male/Female/empty",
+    "report_date": "date if found or empty",
+    "doctor_names": "doctor names if found or empty"
+}
+IMPORTANT: Return ONLY the JSON, no other text."""
+                        
+                        content = [
+                            {'type': 'text', 'text': patient_prompt},
+                            {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
+                        ]
                         
                         completion = ollama_client.chat.completions.create(
                             model=Config.OLLAMA_MODEL,
                             messages=[{'role': 'user', 'content': content}],
                             temperature=0.1
                         )
-                        response_text = completion.choices[0].message.content.strip()
+                        patient_response = completion.choices[0].message.content.strip()
                         
-                        try:
-                            json_str = None
-                            brace_count = 0
-                            start_idx = -1
-                            for i, char in enumerate(response_text):
-                                if char == '{':
-                                    if brace_count == 0:
-                                        start_idx = i
-                                    brace_count += 1
-                                elif char == '}':
-                                    brace_count -= 1
-                                    if brace_count == 0 and start_idx != -1:
-                                        json_str = response_text[start_idx:i+1]
-                                        break
-                            
-                            if json_str:
-                                extracted_data_parsed = json.loads(json_str)
-                                for key in extracted_data:
-                                    if key in extracted_data_parsed:
-                                        extracted_data[key] = extracted_data_parsed[key]
-                                print(f"   ✅ Fallback extraction succeeded: {len(extracted_data.get('medical_data', []))} field(s)")
-                            else:
-                                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                                if json_match:
-                                    extracted_data_parsed = json.loads(json_match.group())
-                                    for key in extracted_data:
-                                        if key in extracted_data_parsed:
-                                            extracted_data[key] = extracted_data_parsed[key]
-                                    print(f"   ✅ Fallback extraction via regex: {len(extracted_data.get('medical_data', []))} field(s)")
-                        except Exception as fallback_err:
-                            print(f"   ❌ Fallback extraction also failed: {fallback_err}")
+                        # Parse patient info
+                        import re
+                        json_match = re.search(r'\{.*\}', patient_response, re.DOTALL)
+                        if json_match:
+                            patient_data = json.loads(json_match.group())
+                            for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
+                                if patient_data.get(key) and not extracted_data.get(key):
+                                    extracted_data[key] = patient_data[key]
+                            print(f"   👤 Patient info enriched from VLM")
+                    except Exception as pe:
+                        print(f"   ⚠️  Patient info extraction failed: {pe}")
+            
+            # Continue with validation and processing
+            print(f"📊 Final extraction method: {extraction_method}")
+            print(f"   Fields extracted: {len(extracted_data.get('medical_data', []))}")
+            
+            # Run verification on extracted data
+            if extracted_data.get('medical_data') and len(extracted_data['medical_data']) > 0:
+                try:
+                    image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
+                    image_format = image_info['format']
                     
-                    if extracted_data.get('medical_data') and len(extracted_data['medical_data']) > 0:
-                        print(f"✅ Extraction succeeded: {len(extracted_data['medical_data'])} field(s)")
-                        
-                        # Disabled: Alignment verification (not helping, just adds overhead)
-                        # if extraction_method == "strict":
-                        #     print(f"🔍 Verifying table alignment...")
-                        
-                        # Step 2c: Run line-by-line verification (only for critical misalignments)
-                        print(f"🔎 Running verification for page {idx}...")
-                        verified_fields, verification_report = verify_extracted_fields_against_image_openai(
-                            extracted_data['medical_data'],
-                            image_base64,
-                            image_format,
-                            ollama_client,
-                            Config.OLLAMA_MODEL,
-                            page_num=idx,
-                            total_pages=total_pages,
-                            run_detailed_check=False  # Disable detailed field-by-field checks
-                        )
-                        extracted_data['medical_data'] = verified_fields
-                        print(
-                            f"✅ Verification status: {verification_report.get('verification_status', 'UNKNOWN')}"
-                        )
-
-                        field_count = len(extracted_data['medical_data'])
-                        all_extracted_data.extend(extracted_data['medical_data'])
-                        print(f"✅ Extracted {field_count} field(s) from page {idx}")
-                    else:
-                        print(f"⚠️  No valid medical_data after extraction and fallback for page {idx}")
-                        
-                        # FALLBACK: Use organized_data from Stage 1 if available
-                        if organized_data and organized_data.get('medical_data'):
-                            print(f"   🔄 Using organized text data as fallback ({len(organized_data['medical_data'])} fields)")
-                            extracted_data['medical_data'] = organized_data['medical_data']
-                            all_extracted_data.extend(organized_data['medical_data'])
-                            
-                            # Also use patient info from organized data if available
-                            for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
-                                if organized_data.get(key) and not extracted_data.get(key):
-                                    extracted_data[key] = organized_data[key]
-                else:
-                    print(f"⚠️  No medical_data found in extracted_data for page {idx}")
-                    
-                    # FALLBACK: Use organized_data from Stage 1 if available
-                    if organized_data and organized_data.get('medical_data'):
-                        print(f"   🔄 Using organized text data as fallback ({len(organized_data['medical_data'])} fields)")
-                        extracted_data['medical_data'] = organized_data['medical_data']
-                        all_extracted_data.extend(organized_data['medical_data'])
-                        
-                        # Also use patient info from organized data if available
-                        for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
-                            if organized_data.get(key) and not extracted_data.get(key):
-                                extracted_data[key] = organized_data[key]
-
+                    print(f"🔎 Running verification for page {idx}...")
+                    verified_fields, verification_report = verify_extracted_fields_against_image_openai(
+                        extracted_data['medical_data'],
+                        image_base64,
+                        image_format,
+                        ollama_client,
+                        Config.OLLAMA_MODEL,
+                        page_num=idx,
+                        total_pages=total_pages,
+                        run_detailed_check=False  # Disable detailed field-by-field checks
+                    )
+                    extracted_data['medical_data'] = verified_fields
+                    print(f"✅ Verification status: {verification_report.get('verification_status', 'UNKNOWN')}")
+                except Exception as ver_err:
+                    print(f"⚠️  Verification failed: {ver_err}")
                 
-                # Capture patient info from first good page (before verification)
-                if not patient_info or not patient_info.get('patient_name'):
-                    if extracted_data.get('patient_name'):
-                        patient_info = extracted_data
-                    elif organized_data and organized_data.get('patient_name'):
-                        # Use organized data for patient info
-                        print(f"   👤 Using patient info from organized text: {organized_data.get('patient_name')}")
-                        patient_info = organized_data
-                    elif extracted_data.get('medical_data'):
-                        # Even if no explicit patient_name, capture what we have
-                        patient_info = extracted_data
-                
-                # Enrich patient_info with organized_data if available
-                if organized_data:
-                    for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
-                        if organized_data.get(key) and not patient_info.get(key):
-                            patient_info[key] = organized_data[key]
-                            print(f"   ✨ Enriched {key} from organized text: {organized_data[key]}")
-
-                print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")
-                     
-            except Exception as e:
-                print(f"❌ VLM Error on page {idx}: {e}")
-                import traceback
-                traceback.print_exc()
+                field_count = len(extracted_data['medical_data'])
+                all_extracted_data.extend(extracted_data['medical_data'])
+                print(f"✅ Extracted {field_count} field(s) from page {idx}")
+            else:
+                print(f"⚠️  No medical_data found for page {idx}")
+            
+            # Capture patient info from first good page
+            if not patient_info or not patient_info.get('patient_name'):
+                if extracted_data.get('patient_name'):
+                    patient_info = extracted_data
+                elif organized_data and organized_data.get('patient_name'):
+                    print(f"   👤 Using patient info from organized text: {organized_data.get('patient_name')}")
+                    patient_info = organized_data
+                elif extracted_data.get('medical_data'):
+                    patient_info = extracted_data
+            
+            # Enrich patient_info with organized_data if available
+            if organized_data:
+                for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
+                    if organized_data.get(key) and not patient_info.get(key):
+                        patient_info[key] = organized_data[key]
+                        print(f"   ✨ Enriched {key} from organized text: {organized_data[key]}")
+            
+            print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")
 
         # Step 4: Post-Processing & Validation
         yield f"data: {json.dumps({'percent': 75, 'message': 'Cleaning and validating results...'})}\n\n"
