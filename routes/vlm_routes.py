@@ -1114,51 +1114,85 @@ class ChatResource(Resource):
                 except Exception as vlm_err:
                     print(f"⚠️  VLM extraction failed: {vlm_err}")
             
-            # Step 3: Enrich organized_ocr_primary with VLM for patient info if needed
-            if extraction_method == "organized_ocr_primary":
-                # Check if we need VLM for patient info
-                needs_patient_info = not extracted_data.get('patient_name')
-                
-                if needs_patient_info:
-                    print(f"   🔍 Using VLM to extract patient info...")
-                    try:
-                        image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
-                        image_format = image_info['format']
-                        
-                        patient_prompt = """Extract ONLY patient information from this medical report image.
-Return JSON format:
+            # Step 3: Always try VLM for patient info (it reads headers better than OCR)
+            # Check what patient fields are missing
+            missing_fields = []
+            for field in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
+                if not extracted_data.get(field):
+                    missing_fields.append(field)
+            
+            if missing_fields:
+                print(f"   🔍 Using VLM to extract patient info (missing: {', '.join(missing_fields)})...")
+                try:
+                    image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
+                    image_format = image_info['format']
+                    
+                    patient_prompt = """Extract patient and report information from this medical lab report image.
+
+LOOK FOR THESE FIELDS (check header area, top of page):
+
+1. PATIENT NAME - Look for:
+   - "اسم المريض" (Arabic)
+   - "Patient Name", "Name:", "Patient:"
+   - Usually the largest name text at top
+
+2. GENDER - Look for:
+   - "الجنس" (Arabic): "ذكر" = Male, "أنثى" = Female
+   - "Gender:", "Sex:"
+   - M/F indicators
+
+3. AGE - Look for:
+   - "العمر" (Arabic)
+   - "Age:", number + "years"/"سنة"
+   - Calculate from DOB if age not shown
+
+4. REPORT DATE - Look for:
+   - "تاريخ" (Arabic for date)
+   - "Date:", "Report Date:", "Collection Date:"
+   - Usually format: DD/MM/YYYY or YYYY-MM-DD
+
+5. DOCTOR NAME - Look for:
+   - "الطبيب" (Arabic)
+   - "Doctor:", "Physician:", "Dr."
+   - "Referred by:", "Requesting Doctor:"
+
+Return JSON only:
 {
-    "patient_name": "full name or empty",
-    "patient_age": "age if found or empty",
-    "patient_gender": "Male/Female/empty",
-    "report_date": "date if found or empty",
-    "doctor_names": "doctor names if found or empty"
+    "patient_name": "exact name as shown",
+    "patient_age": "number only (e.g., 35)",
+    "patient_gender": "Male or Female",
+    "report_date": "YYYY-MM-DD format",
+    "doctor_names": "doctor name if found"
 }
-IMPORTANT: Return ONLY the JSON, no other text."""
-                        
-                        content = [
-                            {'type': 'text', 'text': patient_prompt},
-                            {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
-                        ]
-                        
-                        completion = ollama_client.chat.completions.create(
-                            model=Config.OLLAMA_MODEL,
-                            messages=[{'role': 'user', 'content': content}],
-                            temperature=0.1
-                        )
-                        patient_response = completion.choices[0].message.content.strip()
-                        
-                        # Parse patient info
-                        import re
-                        json_match = re.search(r'\{.*\}', patient_response, re.DOTALL)
-                        if json_match:
-                            patient_data = json.loads(json_match.group())
-                            for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
-                                if patient_data.get(key) and not extracted_data.get(key):
-                                    extracted_data[key] = patient_data[key]
-                            print(f"   👤 Patient info enriched from VLM")
-                    except Exception as pe:
-                        print(f"   ⚠️  Patient info extraction failed: {pe}")
+
+RULES:
+- Return empty string "" if not found (don't guess)
+- Use exact spelling from image
+- Convert date to YYYY-MM-DD format"""
+                    
+                    content = [
+                        {'type': 'text', 'text': patient_prompt},
+                        {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
+                    ]
+                    
+                    completion = ollama_client.chat.completions.create(
+                        model=Config.OLLAMA_MODEL,
+                        messages=[{'role': 'user', 'content': content}],
+                        temperature=0.1
+                    )
+                    patient_response = completion.choices[0].message.content.strip()
+                    
+                    # Parse patient info
+                    import re
+                    json_match = re.search(r'\{.*\}', patient_response, re.DOTALL)
+                    if json_match:
+                        patient_data = json.loads(json_match.group())
+                        for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
+                            if patient_data.get(key) and not extracted_data.get(key):
+                                extracted_data[key] = patient_data[key]
+                        print(f"   👤 Patient info enriched from VLM")
+                except Exception as pe:
+                    print(f"   ⚠️  Patient info extraction failed: {pe}")
             
             # Continue with validation and processing
             print(f"📊 Final extraction method: {extraction_method}")

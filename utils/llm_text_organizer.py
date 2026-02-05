@@ -49,12 +49,14 @@ Reading RIGHT-TO-LEFT:
 OUTPUT FORMAT (use this exact structure):
 
 ===PATIENT INFORMATION===
-Patient Name: [extracted name or "NOT FOUND"]
-Gender: [Male/Female/NOT FOUND]
-Age: [number or "NOT FOUND"]
-Date of Birth: [YYYY-MM-DD or "NOT FOUND"]
-Report Date: [YYYY-MM-DD or "NOT FOUND"]
-Doctor Name: [extracted name or "NOT FOUND"]
+Patient Name: [full name - look for "اسم المريض", "Patient Name", "Name:", or name near top]
+Patient ID: [ID number if found]
+Gender: [Male/Female - look for "الجنس", "Gender", "Sex", "ذكر"=Male, "أنثى"=Female]
+Age: [number only - look for "العمر", "Age", or number followed by "years"/"سنة"]
+Date of Birth: [YYYY-MM-DD or DD/MM/YYYY - look for "تاريخ الميلاد", "DOB", "Date of Birth"]
+Report Date: [YYYY-MM-DD or DD/MM/YYYY - look for "تاريخ التقرير", "Date", "Report Date", date near top]
+Doctor Name: [doctor name - look for "الطبيب", "Doctor", "Dr.", "Physician"]
+Lab Name: [laboratory name if found]
 
 ===MEDICAL TESTS===
 [Test Name] | [Value] | [Unit] | [Normal Range]
@@ -135,7 +137,7 @@ OUTPUT (JSON only, no markdown):
 def parse_organized_text(organized_text):
     """
     Parse the LLM-organized text into a structured dictionary.
-    Useful for fallback if VLM fails.
+    Enhanced to handle multiple date formats and Arabic text.
     """
     import re
     
@@ -146,52 +148,92 @@ def parse_organized_text(organized_text):
         'patient_dob': '',
         'report_date': '',
         'doctor_names': '',
+        'patient_id': '',
+        'lab_name': '',
         'medical_data': []
     }
     
     if not organized_text:
         return result
     
+    def clean_value(val):
+        """Clean extracted value - remove NOT FOUND and trim"""
+        if not val:
+            return ''
+        val = val.strip()
+        if 'NOT FOUND' in val.upper() or 'N/A' in val.upper() or val == '-':
+            return ''
+        return val
+    
+    def normalize_date(date_str):
+        """Convert various date formats to YYYY-MM-DD"""
+        if not date_str:
+            return ''
+        date_str = date_str.strip()
+        # Try DD/MM/YYYY
+        match = re.match(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', date_str)
+        if match:
+            d, m, y = match.groups()
+            return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+        # Try YYYY-MM-DD or YYYY/MM/DD
+        match = re.match(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', date_str)
+        if match:
+            y, m, d = match.groups()
+            return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+        return date_str
+    
     # Extract patient information section
     patient_section = re.search(r'===PATIENT INFORMATION===(.*?)(?:===|$)', organized_text, re.DOTALL)
     if patient_section:
         section_text = patient_section.group(1)
         
-        # Patient Name
+        # Patient Name - multiple patterns
         name_match = re.search(r'Patient Name:\s*(.+?)(?:\n|$)', section_text)
-        if name_match and 'NOT FOUND' not in name_match.group(1).upper():
-            result['patient_name'] = name_match.group(1).strip()
+        if name_match:
+            result['patient_name'] = clean_value(name_match.group(1))
         
-        # Gender
+        # Patient ID
+        id_match = re.search(r'Patient ID:\s*(.+?)(?:\n|$)', section_text)
+        if id_match:
+            result['patient_id'] = clean_value(id_match.group(1))
+        
+        # Gender - handle Arabic
         gender_match = re.search(r'Gender:\s*(.+?)(?:\n|$)', section_text)
         if gender_match:
-            gender = gender_match.group(1).strip()
-            if 'NOT FOUND' not in gender.upper():
-                # Normalize gender
-                if gender.lower() in ['male', 'm', 'ذكر']:
+            gender = clean_value(gender_match.group(1))
+            if gender:
+                gender_lower = gender.lower()
+                if gender_lower in ['male', 'm', 'ذكر', 'male/ذكر']:
                     result['patient_gender'] = 'Male'
-                elif gender.lower() in ['female', 'f', 'أنثى', 'انثى']:
+                elif gender_lower in ['female', 'f', 'أنثى', 'انثى', 'female/أنثى']:
                     result['patient_gender'] = 'Female'
+                else:
+                    result['patient_gender'] = gender
         
-        # Age
+        # Age - extract number only
         age_match = re.search(r'Age:\s*(\d+)', section_text)
         if age_match:
             result['patient_age'] = age_match.group(1)
         
-        # DOB
-        dob_match = re.search(r'Date of Birth:\s*(\d{4}-\d{2}-\d{2})', section_text)
+        # DOB - multiple date formats
+        dob_match = re.search(r'Date of Birth:\s*([\d/\-]+)', section_text)
         if dob_match:
-            result['patient_dob'] = dob_match.group(1)
+            result['patient_dob'] = normalize_date(clean_value(dob_match.group(1)))
         
-        # Report Date
-        date_match = re.search(r'Report Date:\s*(\d{4}-\d{2}-\d{2})', section_text)
+        # Report Date - multiple date formats
+        date_match = re.search(r'Report Date:\s*([\d/\-]+)', section_text)
         if date_match:
-            result['report_date'] = date_match.group(1)
+            result['report_date'] = normalize_date(clean_value(date_match.group(1)))
         
-        # Doctor
+        # Doctor Name
         doctor_match = re.search(r'Doctor Name:\s*(.+?)(?:\n|$)', section_text)
-        if doctor_match and 'NOT FOUND' not in doctor_match.group(1).upper():
-            result['doctor_names'] = doctor_match.group(1).strip()
+        if doctor_match:
+            result['doctor_names'] = clean_value(doctor_match.group(1))
+        
+        # Lab Name
+        lab_match = re.search(r'Lab Name:\s*(.+?)(?:\n|$)', section_text)
+        if lab_match:
+            result['lab_name'] = clean_value(lab_match.group(1))
     
     # Extract medical tests section
     tests_section = re.search(r'===MEDICAL TESTS===(.*?)(?:===|$)', organized_text, re.DOTALL)
