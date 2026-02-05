@@ -100,6 +100,7 @@ class ReportField(db.Model):
     report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     field_name = db.Column(db.String(255), nullable=False)
+    standard_name = db.Column(db.String(255)) # Canonical name from MedicalSynonym
     field_value = db.Column(db.Text, nullable=False)
     field_unit = db.Column(db.String(100))
     normal_range = db.Column(db.String(255))

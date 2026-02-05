@@ -306,7 +306,7 @@ class Timeline(Resource):
                 'summary': {
                     'total_tests': total_fields_count,
                     'abnormal_count': len(abnormal_fields),
-                    'abnormal_fields': [f.field_name for f in abnormal_fields]
+                    'abnormal_fields': [f.standard_name or f.field_name for f in abnormal_fields]
                 }
             })
             
@@ -357,8 +357,13 @@ class HealthTrends(Resource):
             # Expand search terms using aliases
             search_terms = get_search_terms(name)
             
-            # Build query with OR condition for all aliases
-            filters = [ReportField.field_name.ilike(f"%{term}%") for term in search_terms]
+            # Build query with OR condition for all aliases across field_name AND standard_name
+            filters = [
+                or_(
+                    ReportField.field_name.ilike(f"%{term}%"),
+                    ReportField.standard_name.ilike(f"%{term}%")
+                ) for term in search_terms
+            ]
             
             if profile_id and owner_id != current_user_id:
                 query = db.session.query(ReportField, Report.report_date).join(Report).filter(

@@ -1367,6 +1367,7 @@ Be aggressive but intelligent - group all variations of same test together."""
                         report_id=new_report.id,
                         user_id=current_user_id,
                         field_name=item.get('field_name', 'Unknown'),
+                        standard_name=item.get('standard_name'),
                         field_value=str(field_value),
                         field_unit=str(item.get('field_unit', '')),
                         normal_range=str(normal_range),

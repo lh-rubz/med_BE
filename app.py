@@ -150,6 +150,14 @@ def init_db():
                         connection.execute(text('ALTER TABLE "user" ADD COLUMN biometric_allowed BOOLEAN DEFAULT TRUE'))
                         connection.commit()
                         print('Added biometric_allowed column to "user" table')
+                
+                # Check for standard_name in report_field
+                columns_report_field = [c["name"] for c in inspector.get_columns("report_field")]
+                if "standard_name" not in columns_report_field:
+                    with engine.connect() as connection:
+                        connection.execute(text('ALTER TABLE "report_field" ADD COLUMN standard_name VARCHAR(255)'))
+                        connection.commit()
+                        print('Added standard_name column to "report_field" table')
             except Exception as migrate_err:
                 print(f"Database migration warning (biometric_allowed): {migrate_err}")
             print("Database tables created successfully!")

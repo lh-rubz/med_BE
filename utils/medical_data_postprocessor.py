@@ -137,8 +137,9 @@ class MedicalDataPostProcessor:
                 # Look up standard name (case-insensitive)
                 standard_name = learned_synonyms.get(original_name.lower(), original_name)
                 
-                # Update with standard name
-                entry["field_name"] = standard_name
+                # Set standard_name but PRESERVE the original name in field_name
+                entry["standard_name"] = standard_name
+                # We DO NOT overwrite entry["field_name"] anymore to keep original report text as written in report
         
         return medical_data
     
