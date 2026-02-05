@@ -967,11 +967,29 @@ class ChatResource(Resource):
                         
                         if json_str:
                             vlm_data = json.loads(json_str)
-                            for key in extracted_data:
-                                if key in vlm_data:
+                            
+                            # RESCUE PASS: If VLM returned 0 results, retry with a simpler, non-restrictive prompt
+                            if not vlm_data.get('medical_data'):
+                                print(f"⚠️  VLM First Pass returned 0 results for page {idx}. Attempting RESCUE Pass...")
+                                rescue_prompt = f"Identify and extract every single medical test and its result from this image. Return JSON only: {{'medical_data': [{{'field_name': '...', 'field_value': '...', 'field_unit': '...', 'normal_range': '...'}}]}}"
+                                base_content = [{'type': 'text', 'text': rescue_prompt}, {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}]
+                                rescue_completion = ollama_client.chat.completions.create(model=Config.OLLAMA_MODEL, messages=[{'role': 'user', 'content': base_content}], temperature=0.3)
+                                rescue_text = rescue_completion.choices[0].message.content.strip()
+                                # Simple parse for rescue text
+                                rescue_match = re.search(r'\{.*\}', rescue_text, re.DOTALL)
+                                if rescue_match:
+                                    try: 
+                                        vlm_data = json.loads(rescue_match.group(0))
+                                        print(f"✨ RESCUE Pass succeeded. Found {len(vlm_data.get('medical_data', []))} fields.")
+                                    except: pass
+
+                            # Merge VLM data back, but preserve OCR data if VLM failed completely
+                            for key in ['medical_data', 'lab_name', 'report_type']:
+                                if vlm_data.get(key):
                                     extracted_data[key] = vlm_data[key]
-                            print(f"✅ VLM JSON extracted for Image {idx}")
-                            print(f"   Medical data entries: {len(extracted_data.get('medical_data', []))}")
+                            
+                            print(f"✅ VLM JSON integrated for Image {idx}")
+                            print(f"   Final medical data count: {len(extracted_data.get('medical_data', []))}")
                     except json.JSONDecodeError as je:
                         print(f"⚠️  VLM JSON parsing failed: {je}")
                 
@@ -996,10 +1014,10 @@ class ChatResource(Resource):
 LOOK FOR THESE FIELDS (check the header area with two distinct tables):
 
 ### 1. **RIGHT-HAND TOP TABLE** (The primary patient info table on the right):
-   - **PATIENT NAME (اسم المريض)**: Find the label "اسم المريض" on the far right. The value is text directly to its LEFT (e.g., "رئيسة خضر طالب خطيب").
-   - **GENDER (الجنس)**: Find "الجنس" and extract "ذكر" (Male) or "أنثى" (Female).
+   - **PATIENT NAME (اسم المريض)**: Find "اسم المريض" on the far right. The value is the series of Arabic words to its LEFT (e.g., "رئيسة خضر طالب خطيب"). Capture ALL words.
+   - **GENDER (الجنس)**: Find "الجنس". If you see "**أنثى**" or "**انثى**", return "**Female**". If you see "**ذكر**", return "**Male**".
    - **PATIENT ID (رقم المريض)**: Find "رقم المريض" and extract the number.
-   - **DOB (تاريخ الميلاد)**: Find "تاريخ الميلاد" and extract the date.
+   - **DOB (تاريخ الميلاد)**: Find "تاريخ الميلاد" and extract the date (e.g., 01/05/1975).
 
 ### 2. **LEFT-HAND TOP TABLE** (The report/administrative info table on the left):
    - **REPORT DATE (تاريخ الطلب)**: Find "تاريخ الطلب" and extract the date (e.g., 2025-12-31).
@@ -1009,9 +1027,9 @@ LOOK FOR THESE FIELDS (check the header area with two distinct tables):
 
 Return JSON only:
 {
-    "patient_name": "Arabic name from RIGHT table",
+    "patient_name": "Arabic name from RIGHT table (e.g., رئيسة خضر طالب خطيب)",
     "patient_age": "Calculated years or number found",
-    "patient_gender": "Male or Female",
+    "patient_gender": "Female or Male",
     "report_date": "YYYY-MM-DD",
     "doctor_names": "Doctor name from LEFT table"
 }

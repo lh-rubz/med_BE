@@ -71,17 +71,16 @@ Start from TOP row, go DOWN. For EACH row:
 8. If test name shows UNIT (e.g., "%"), clarify in field_name (e.g., "Lymphocyte %" vs "Lymphocyte Count").
 9. If a value is flagged with "*" or "#", extract the number to field_value and the symbol to notes.
 
-1-OFF ERROR & STRUCTURAL GROUNDING:
-- **GRID-LOCK STRATEGY**: Notice the physical horizontal lines (gray or black dividers) separating rows. 
-  - A Result value is ONLY valid for a Test Name if it resides between the SAME PAIR of horizontal lines. 
-  - If you move horizontally from a Test Name and hit a blank space before the Result column, that test has NO result. DO NOT borrow the value from the row below.
-- **ROW IDENTIFICATION**: Mentally tag each row (Row #1, Row #2, etc.). Scan them one by one. If Row #3 (Monocytes) has 0.1, do not report 7.1 (which is on Row #4).
-- **BOX-CENTRIC ALIGNMENT**: Each row is a physical box. The Test Name (right) and Result (left) share the EXACT same box. 
-- **RTL SEQUENCE**: Test Name (Rightmost) -> Result -> Range -> Unit -> Notes (Leftmost).
+STEP 0 - HEADER INFO (Ramallah PHC Layout):
+- **PATIENT NAME**: Top-Right table. Label "اسم المريض". Value is to its LEFT.
+- **INSURANCE**: Top-Left table. Label "التأمين". Value "[ شؤون اجتماعية ] Social". (DO NOT use as name).
 
-RAMALLAH PHC HEADER RULES:
-- **PATIENT NAME**: Top-Right Table, 1st Row. Label is "اسم المريض". Value is to its LEFT.
-- **INSURANCE**: Top-Left Table, 2nd Row. Label is "التأمين". Value is "[ شؤون اجتماعية ] Social". DO NOT use this as the patient name.
+STEP 1 - CONTINUOUS ROW SCAN:
+Extract EVERY row from top to bottom. For each row:
+1. **HORIZONTAL LOCK**: Every value (Result, Range, Unit) MUST be on the exact same horizontal baseline as the Test Name.
+2. **GRID AWARENESS**: Use the horizontal lines as absolute row dividers. 
+3. **NO LOOK-AHEAD**: If a row has no result, leave it empty. NEVER pull a value from the rows below.
+4. **LASER FOCUS**: Scan Name (Right) -> Result -> Range -> Unit -> Notes (Left).
 
 EXAMPLE - RTL Table (Arabic report):
 ```
