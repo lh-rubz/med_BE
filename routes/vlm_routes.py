@@ -116,89 +116,54 @@ def deduplicate_medical_data(medical_data):
         key = name.lower()
         
         if key not in unique_map:
-            unique_map[key] = item
+            unique_map[key] = item.copy()
         else:
-            # Conflict resolution: prefer the one with values/ranges
+            # Merge information
             existing = unique_map[key]
             
-            # Helper to check completeness
-            def get_score(itm):
-                score = 0
-                if itm.get('field_value') and str(itm.get('field_value')).strip() not in ["", "N/A", "n/a"]: score += 2
-                if itm.get('normal_range') and str(itm.get('normal_range')).strip() not in ["", "-", "N/A"]: score += 1
-                return score
+            # If current has value and existing doesn't, take it
+            if not existing.get('field_value') or existing.get('field_value') in ["", "N/A", "n/a"]:
+                if item.get('field_value') and item.get('field_value') not in ["", "N/A", "n/a"]:
+                    existing['field_value'] = item.get('field_value')
             
-            # If new item has better score, replace. If equal, keep existing (usually first one found).
-            if get_score(item) > get_score(existing):
-                unique_map[key] = item
+            # If current has range and existing doesn't, take it
+            if not existing.get('normal_range') or existing.get('normal_range') in ["", "-", "N/A"]:
+                if item.get('normal_range') and item.get('normal_range') not in ["", "-", "N/A"]:
+                    existing['normal_range'] = item.get('normal_range')
+            
+            # Same for unit
+            if not existing.get('field_unit') or len(str(existing.get('field_unit'))) < 2:
+                if item.get('field_unit') and len(str(item.get('field_unit'))) >= 2:
+                    existing['field_unit'] = item.get('field_unit')
+
+            # Append notes if different
+            note = item.get('notes', '').strip()
+            if note and note not in existing.get('notes', ''):
+                existing['notes'] = (existing.get('notes', '') + "; " + note).strip("; ")
             
     return list(unique_map.values())
 
 
-def recalculate_normality(medical_data):
+def recalculate_normality(medical_data, patient_gender=None):
     """
-    Programmatically recalculate is_normal based on value and range.
-    Handles complex ranges and missing values.
+    Programmatically recalculate is_normal based on value and range using MedicalValidator.
     """
     if not medical_data:
         return medical_data
 
+    from utils.medical_validator import MedicalValidator
+    
     for item in medical_data:
-        try:
-            val_str = str(item.get('field_value', '')).strip()
-            range_str = str(item.get('normal_range', '')).strip()
-
-            # Skip empty
-            if not val_str or not range_str or val_str.lower() in ['n/a', 'nan', ''] or range_str in ['-', '']:
-                item['is_normal'] = None
-                continue
-
-            # Parse Value
-            val_clean = re.sub(r'[^\\d\.\-]', '', val_str)
-            if not val_clean:
-                continue
-
-            val = float(val_clean)
-
-            # Parse Range
-            min_val = float('-inf')
-            max_val = float('inf')
-            use_strict_less_than = False
-            use_strict_greater_than = False
-
-            range_match = re.search(r'(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)', range_str)
-            if range_match:
-                # Standard range like "10-20"
-                min_val = float(range_match.group(1))
-                max_val = float(range_match.group(2))
-            elif '<' in range_str:
-                # Less than operator (e.g., "<6" or "< 6")
-                num_match = re.search(r'(\d+(?:\.\d+)?)', range_str)
-                if num_match:
-                    max_val = float(num_match.group(1))
-                    use_strict_less_than = True  # Use strict < instead of <=
-            elif '>' in range_str:
-                # Greater than operator (e.g., ">10" or "> 10")
-                num_match = re.search(r'(\d+(?:\.\d+)?)', range_str)
-                if num_match:
-                    min_val = float(num_match.group(1))
-                    use_strict_greater_than = True  # Use strict > instead of >=
-
-            # Check Normality with proper strict/non-strict comparison
-            if min_val != float('-inf') or max_val != float('inf'):
-                if use_strict_less_than:
-                    # For "<6", value must be strictly less than 6
-                    is_norm = (val < max_val)
-                elif use_strict_greater_than:
-                    # For ">10", value must be strictly greater than 10
-                    is_norm = (val > min_val)
-                else:
-                    # For ranges like "10-20", use inclusive comparison
-                    is_norm = (min_val <= val <= max_val)
-                item['is_normal'] = is_norm
-
-        except Exception as e:
-            item['is_normal'] = None
+        val_str = str(item.get('field_value', '')).strip()
+        range_str = str(item.get('normal_range', '')).strip()
+        current_is_normal = item.get('is_normal')
+        
+        item['is_normal'] = MedicalValidator.calculate_is_normal(
+            val_str, 
+            range_str, 
+            current_is_normal=current_is_normal,
+            patient_gender=patient_gender
+        )
 
     return medical_data
 
@@ -526,13 +491,23 @@ def verify_and_correct_with_llm(extracted_data, raw_text):
        - REMOVE hallucinated fields (not in text).
        - ADD missing fields (visible in text but missing in JSON).
     3. RE-EVALUATE "is_normal":
-       - true: Value is strictly within Range.
-       - false: Value is outside Range.
-       - null: No range.
-       - The model itself must calculate and set the "is_normal" field based on the value and range.
+       - Keep existing value or set to null. Our system will recalculate it mathematically.
+    
+    4. HEADER FIELDS:
+       - Ensure "patient_name" is the ACTUAL person name (e.g., "رئيسة خضر طالب خطيب").
+       - DO NOT use "شؤون اجتماعية" (Insurance) or Clinic names as patient name.
+       - Ensure "patient_gender" is "Male" or "Female".
 
     OUTPUT:
-    - Return ONLY the corrected JSON list of objects.
+    - Return a FULL JSON OBJECT matching the input structure:
+    {{
+        "patient_name": "...",
+        "patient_age": "...",
+        "patient_gender": "...",
+        "report_date": "...",
+        "doctor_names": "...",
+        "medical_data": [ ... objects with field_name, field_value, field_unit, normal_range, notes ... ]
+    }}
     """
     
     try:
@@ -995,31 +970,29 @@ class ChatResource(Resource):
 
 LOOK FOR THESE FIELDS (check header area, top of page):
 
-1. PATIENT NAME - Look for:
-   - "اسم المريض" (Arabic)
-   - "Patient Name", "Name:", "Patient:", "FULL NAME"
-   - Extract the FULL NAME as shown, even if very long. 
-   - Look for name text usually at the very top.
+1. PATIENT NAME (اسم المريض):
+   - Look at the RIGHT header table.
+   - Find the label "اسم المريض" and extract the text directly next to it.
+   - DO NOT confuse with "التأمين" (Insurance) or "جهة الطلب" (Clinic).
+   - Expected name: "رئيسة خضر طالب خطيب" or similar.
 
-2. GENDER - Look for:
-   - "الجنس" (Arabic): "ذكر" = Male, "أنثى" = Female
-   - "Gender:", "Sex:"
-   - M/F indicators
+2. GENDER (الجنس):
+   - Look at the RIGHT header table.
+   - Find "الجنس" and extract "ذكر" (Male) or "أنثى" (Female).
 
-3. AGE - Look for:
-   - "العمر" (Arabic)
-   - "Age:", number + "years"/"سنة"
-   - Calculate from DOB if age not shown
+3. AGE / DOB (تاريخ الميلاد):
+   - Look at the RIGHT header table.
+   - Find "تاريخ الميلاد" and extract the date (e.g., 01/05/1975).
+   - If you see "تاريخ الطلب", that is the REPORT DATE, not birth date.
 
-4. REPORT DATE - Look for:
-   - "تاريخ" (Arabic for date)
-   - "Date:", "Report Date:", "Collection Date:"
-   - Usually format: DD/MM/YYYY or YYYY-MM-DD
+4. REPORT DATE (تاريخ الطلب):
+   - Look at the LEFT header table.
+   - Find "تاريخ الطلب" and extract the date/time (e.g., 2025-12-31).
 
-5. DOCTOR NAME - Look for:
-   - "الطبيب" (Arabic)
-   - "Doctor:", "Physician:", "Dr."
-   - "Referred by:", "Requesting Doctor:"
+5. DOCTOR NAME (الطبيب):
+   - Look at the LEFT header table.
+   - Find "الطبيب" and extract the name (e.g., "جهاد العملة").
+   - DO NOT confuse with "جهة الطلب" (Requesting Entity/Clinic).
 
 Return JSON only:
 {

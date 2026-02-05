@@ -211,10 +211,37 @@ class MedicalValidator:
                     # If value has operator, check if it fits contextually
                     # e.g., result is "< 6", range is "< 6" -> True
                     if operator == '<' or operator == '<=':
-                        return value <= max_val
-                    elif operator == '>' or operator == '>=':
-                        return value >= min_val
+                         # Definitively normal if it matches a less-than range
+                         if max_val < float('inf') and min_val == float('-inf'):
+                             if value <= max_val:
+                                 return True
+                             else:
+                                 # Result < 10 for a range < 6. Could be 5 (Normal) or 9 (Abnormal).
+                                 return None 
+                         # For min-max ranges (e.g., 70-110)
+                         elif min_val > float('-inf'):
+                             if value < min_val:
+                                 return False # Result < 60 for range 70-110 is definitely LOW
+                             else:
+                                 # Result < 100 for range 70-110. Could be 60 (Low) or 80 (Normal).
+                                 return None
                     
+                    elif operator == '>' or operator == '>=':
+                         # Definitively normal if it matches a greater-than range
+                         if min_val > float('-inf') and max_val == float('inf'):
+                             if value >= min_val:
+                                 return True
+                             else:
+                                 # Result > 5 for range > 10. Could be 6 (Abnormal) or 11 (Normal).
+                                 return None
+                         # For min-max ranges
+                         elif max_val < float('inf'):
+                             if value > max_val:
+                                 return False # Result > 200 for range 70-110 is definitely HIGH
+                             else:
+                                 # Result > 80 for range 70-110. Could be 90 (Normal) or 120 (High).
+                                 return None
+
                     # If range segment itself is an inequality
                     # e.g., range is "< 6", max_val is 6.0, min_val is -inf
                     is_strict_max = '<' in segment and '<=' not in segment

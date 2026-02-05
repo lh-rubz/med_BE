@@ -61,14 +61,15 @@ For LTR tables (test names on left):
 
 STEP 3 - EXTRACT ROW-BY-ROW (TOP TO BOTTOM, NO SKIPPING):
 Start from TOP row, go DOWN. For EACH row:
-1. Find test name position (might be followed by a colon ":" or spaces)
-2. Move HORIZONTALLY in SAME ROW to find result value (usually the FIRST number after the name)
-3. Stay in SAME ROW to find unit and range
-4. DO NOT jump to different rows
-5. DO NOT extract duplicate test names
-6. Extract EVERY single row - even those that look like sub-headers or have special codes (e.g., "Hb A1c", "Lipid Profile")
-7. Extract SUB-SECTIONS (e.g., under "DIFFERENTIAL COUNT", extract "Neutrophils", "Lymphocytes", etc.)
-8. If test name shows UNIT (e.g., "%"), clarify in field_name (e.g., "Lymphocyte %" vs "Lymphocyte Count")
+1. Find the test name (Fحص). Note: Names might be long and span MULTIPLE lines.
+2. The result value (النتيجة) is physically in the SAME HORIZONTAL ROW as the test name's FIRST line or center.
+3. Move HORIZONTALLY to find result, range, and unit.
+4. DO NOT jump to different rows. If a row has no result, skip it (it might be a header).
+5. DO NOT extract duplicate test names.
+6. Extract EVERY single row - even those that look like sub-headers or have special codes (e.g., "Hb A1c", "Lipid Profile").
+7. Extract SUB-SECTIONS (e.g., under "DIFFERENTIAL COUNT", extract "Neutrophils", "Lymphocytes", etc.).
+8. If test name shows UNIT (e.g., "%"), clarify in field_name (e.g., "Lymphocyte %" vs "Lymphocyte Count").
+9. If a value is flagged with "*" or "#", extract the number to field_value and the symbol to notes.
 
 EXAMPLE - RTL Table (Arabic report):
 ```
@@ -92,6 +93,7 @@ VALIDATION RULES:
 ✓ Translate Arabic units to standard medical units (e.g., "٧/L" becomes "U/L", "mg/dl" remains "mg/dl")
 ✓ Include unit type in field_name if clarifies (e.g., "Lymphocyte %" vs "Lymphocyte Count")
 ✓ Extract EVERY row in order top-to-bottom, including all sub-sections
+✓ If a test name spans two lines, the result is usually on the first or second line - stay aligned!
 ✓ DO NOT extract the same test name twice (skip duplicate rows)
 ✓ SKIP header rows (containing "Test Name", "Value", "Result", "Unit", etc.)
 ✗ DO NOT take a value from row above or below

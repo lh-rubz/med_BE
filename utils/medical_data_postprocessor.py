@@ -317,17 +317,16 @@ class MedicalDataPostProcessor:
         
         name = str(name).strip()
         
-        # Indicators of corruption: random symbols, facility words
-        corruption_indicators = ["الطب", "مختبر", "مرفق", "مستشفى"]
+        # Indicators of corruption: random symbols, facility words, insurance terms
+        corruption_indicators = ["الطب", "مختبر", "مرفق", "مستشفى", "شؤون", "تأمين", "عيادة", "وزارة", "مديرية"]
         for indicator in corruption_indicators:
             if indicator in name:
-                # Likely a facility not a person
+                # Likely a facility/insurance not a person
                 return ""
         
         # Remove common titles
         titles = ["dr.", "dr", "prof.", "prof", "د.", "دكتور", "أ.د", "الدكتور", 
-                 "أستاذ", "البروفيسور", "mr.", "mr", "mrs.", "mrs", "ms.", "ms",
-                 "رئيسة", "رئيس", "مدير", "مسؤول", "مساعد", "معاون"]
+                 "أستاذ", "البروفيسور", "mr.", "mr", "mrs.", "mrs", "ms.", "ms"]
         
         name_lower = name.lower()
         for title in titles:
