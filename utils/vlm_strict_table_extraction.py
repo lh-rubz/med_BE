@@ -19,26 +19,26 @@ This report has {total_pages} pages total. You are extracting page {idx}.
 """
     
     return f"""
-🔬 EXTRACT MEDICAL TABLE DATA - PHANTOM SENTINEL LOCK
+🔬 EXTRACT MEDICAL TABLE DATA - HORIZONTAL BAND LOCK
 Page {idx}/{total_pages}{page_context}
 
-🚨 PHANTOM SENTINEL (CRITICAL) 🚨
-1. **Vertical Column Lock**: Results (left), Units (center), Ranges (right).
-2. **"PHANTOM" Value**: If a row has ONLY a flag (like "*" or "#") but NO numeric result, you MUST return `field_value`: "PHANTOM".
-   - NEVER skip a horizontal line. This is the only way to maintain vertical alignment.
-3. **Box Adjacency (Demographics)**: Find the label box (e.g. 'اسم المريض'). Extract the text found physically closest to that label within the same box/cell.
+🚨 HORIZONTAL BAND LOCK (CRITICAL) 🚨
+1. **Vertical Column Focus**: Scan for Test Name -> Result -> Normal Range -> Unit -> Notes.
+2. **Band Integrity**: Identify the horizontal boundaries of the Test Name. ONLY extract Result/Range text found within those same vertical pixels.
+3. **Empty Sentinel**: If a Result column has a symbol (like "*") but no number in the current band, return `field_value`: "EMPTY_SPECIFIED".
+4. **Inside-Box Mapping**: For patient/doctor grids, the text must be located PHYSICALLY INSIDE the same rectangular border as the label.
 
 JSON RETURN:
 {{
-    "patient_name": "Text next to 'اسم المريض' label",
-    "patient_age": "Value next to DOB label",
-    "doctor_names": "Person name next to 'الطبيب' label",
+    "patient_name": "Text INSIDE 'اسم المريض' box",
+    "patient_age": "Text INSIDE 'تاريخ الميلاد' box",
+    "doctor_names": "Text INSIDE 'الطبيب' box",
     "medical_data": [
         {{
             "field_name": "Literal test name",
-            "field_value": "Result (number or 'PHANTOM' if only symbol exists)",
+            "field_value": "Result or 'EMPTY_SPECIFIED'",
             "field_unit": "Unit",
-            "normal_range": "(X-Y)"
+            "normal_range": "Literal Range (x-y)"
         }}
     ]
 }}

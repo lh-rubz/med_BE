@@ -165,9 +165,8 @@ class MedicalDataPostProcessor:
         if field_name.lower() in header_keywords and (not field_value or field_value.lower() in header_keywords):
             return None
             
-        # Sentinel Check: If VLM returned "PHANTOM" or JUST a symbol, the row is effectively empty.
-        # We discard it here in code to prevent row-shifting errors in the VLM.
-        sentinels = ["PHANTOM", "N/A", "*", "#", "-", "."]
+        # Sentinel Check: Discard placeholders used to maintain alignment
+        sentinels = ["PHANTOM", "EMPTY_SPECIFIED", "N/A", "*", "#", "-", ".", "EMPTY"]
         if field_value.upper() in sentinels or field_value in sentinels:
             return None
             
@@ -223,14 +222,18 @@ class MedicalDataPostProcessor:
             "Monocyle": "Monocytes",
             "Monocyles": "Monocytes",
             "White blood cellsI": "White blood cells",
-            "Lymphocytes9": "Lymphocytes"
+            "Lymphocytes9": "Lymphocytes",
+            "Monocytess": "Monocytes",
+            "Neutrophils granuloc%": "Neutrophils granulocytes",
+            "Mean cell haemoglobin concentration (MCH)C": "Mean cell haemoglobin concentration (MCHC)"
         }
         for typo, fix in typo_fixes.items():
             if typo in field_name:
                 field_name = field_name.replace(typo, fix)
         
-        # Strip trailing punctuation/garbage characters often seen in OCR
-        field_name = re.sub(r"[I19]$", "", field_name).strip()
+        # Strip trailing punctuation/garbage numbers (common OCR artifacts)
+        # e.g. "Lymphocytes9" or "ResultI"
+        field_name = re.sub(r"[I19%]$", "", field_name).strip()
 
         cleaned_entry = {
             "field_name": field_name,

@@ -2,22 +2,23 @@
 
 
 def get_personal_info_prompt(idx, total_pages):
-    """Prompt to extract ONLY patient personal info from demographic grid boxes."""
+    """Prompt to extract ONLY patient personal info using Inside-Box Adjacency."""
     return f"""You are an expert medical document digitizer.
 Task: Extract PATIENT & DOCTOR information (page {idx}/{total_pages}).
 
-🚨 DEMOGRAPHIC ADJACENCY RULE (CRITICAL) 🚨
-Find the following labels in the top grids. For each label, extract the text found physically CLOSEST to it WITHIN THE SAME BOX.
-- Labels are on the RIGHT. Values are on the LEFT.
+🚨 INSIDE-BOX ADJACENCY RULE (CRITICAL) 🚨
+Find the following labels in the top grids. For each label, you MUST ONLY extract the text found **physically inside the same rectangular box**.
+- **RULE**: If a box contains a label (e.g. 'اسم المريض') and nothing else, return 'Unknown'.
+- **RULE**: DO NOT look at other boxes. DO NOT 'jump' to text in different parts of the grid.
 
 REQUIRED FIELDS:
-1. **Patient Name**: Find the label "اسم المريض". Extract the name found inside the same box.
-2. **ID Number**: Find the label "رقم الهوية".
-3. **Gender**: Find the label "الجنس". Convert 'أنثى' to 'Female', 'ذكر' to 'Male'.
-4. **DOB**: Find the label "تاريخ الميلاد".
-5. **Order Date**: Find the label "تاريخ الطلب" (usually in the Left Grid). Extract as YYYY-MM-DD.
-6. **Doctor Name**: Find the label "الطبيب" (usually in the Left Grid). Extract the person's name physically next to it.
-   - ⚠️ DO NOT extract "جهة الطلب" as a name.
+1. **Patient Name**: Text physically INSIDE the same box as "اسم المريض".
+2. **ID Number**: Text INSIDE the same box as "رقم الهوية".
+3. **Gender**: Text INSIDE the box for "الجنس". (أنثى -> Female, ذكر -> Male).
+4. **DOB**: Text INSIDE the box for "تاريخ الميلاد".
+5. **Order Date**: Text INSIDE the box for "تاريخ الطلب". Extract as YYYY-MM-DD.
+6. **Doctor Name**: Text INSIDE the box for "الطبيب".
+   - ⚠️ ALERT: "عيادة الطب العام" is a clinic, NOT a doctor. "جهة الطلب" is a facility. Extract ONLY the person's name (e.g., جهاد العملة).
 
 JSON OUTPUT ONLY:
 {{
@@ -32,19 +33,19 @@ JSON OUTPUT ONLY:
 
 
 def get_main_vlm_prompt(idx, total_pages):
-    """Prompt to extract LAB TABLE data with PHANTOM SENTINEL protocol."""
+    """Prompt to extract LAB TABLE data with Horizontal Band Lock."""
     return f"""You are a high-precision lab data digitizer.
 Task: Extract LAB DATA (page {idx}/{total_pages}).
 
-🚨 PHANTOM SENTINEL PROTOCOL (CRITICAL) 🚨
-1. **PHYSICAL LINE COUNT**: First, count every horizontal line of text/graphics in the table. 
-2. **THE WORD "PHANTOM"**: If a horizontal line has a flag symbol (like "*" or "#") but NO numeric result, you MUST return `field_value`: "PHANTOM".
-   - This word acts as a visual anchor to prevent row-shifting. NEVER skip a line.
-3. **HORIZONTAL LOCK**: Trace lines from the Test Name to the Result. Only extract the value on that EXACT line.
+🚨 HORIZONTAL BAND LOCK (CRITICAL) 🚨
+1. **IDENTIFY COLUMNS**: From Right to Left, the columns are: [Test Name | Result | Normal Range | Unit | Notes].
+2. **ONE BAND AT A TIME**: For each Test Name, stay strictly within its horizontal band.
+3. **"EMPTY_SPECIFIED"**: If the Result column is empty or only contains a symbol (`*`) within the horizontal band of a test, you MUST return `field_value`: "EMPTY_SPECIFIED".
+   - **NEVER** pull a value from a different horizontal line. This is why Take 5 failed!
+4. **LITERAL RANGE**: Capture the "Normal Range" column exactly as written, including brackets and hyphens.
 
 VALIDATION:
-- Count the rows. Ensure you produce an entry for every line of text in the "Test" column.
-- One line = One JSON object.
+- Produced JSON must contain one entry for every physical row in the table.
 
 JSON OUTPUT ONLY:
 {{
