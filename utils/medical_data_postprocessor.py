@@ -165,9 +165,10 @@ class MedicalDataPostProcessor:
         if field_name.lower() in header_keywords and (not field_value or field_value.lower() in header_keywords):
             return None
             
-        # Sentinel Check: If VLM returned "N/A" or JUST a symbol (* or #), the row is effectively empty.
+        # Sentinel Check: If VLM returned "PHANTOM" or JUST a symbol, the row is effectively empty.
         # We discard it here in code to prevent row-shifting errors in the VLM.
-        if field_value.upper() == "N/A" or field_value in ["*", "#", "-", "."]:
+        sentinels = ["PHANTOM", "N/A", "*", "#", "-", "."]
+        if field_value.upper() in sentinels or field_value in sentinels:
             return None
             
         # Drop only if everything is missing
@@ -217,11 +218,19 @@ class MedicalDataPostProcessor:
             "(HC": "(HCT)",
             "(MCV": "(MCV)",
             "(MCH": "(MCH)",
-            "(MCHC": "(MCHC)"
+            "(MCHC": "(MCHC)",
+            "Platelat": "Platelet",
+            "Monocyle": "Monocytes",
+            "Monocyles": "Monocytes",
+            "White blood cellsI": "White blood cells",
+            "Lymphocytes9": "Lymphocytes"
         }
         for typo, fix in typo_fixes.items():
             if typo in field_name:
                 field_name = field_name.replace(typo, fix)
+        
+        # Strip trailing punctuation/garbage characters often seen in OCR
+        field_name = re.sub(r"[I19]$", "", field_name).strip()
 
         cleaned_entry = {
             "field_name": field_name,

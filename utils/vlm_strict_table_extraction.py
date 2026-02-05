@@ -19,24 +19,24 @@ This report has {total_pages} pages total. You are extracting page {idx}.
 """
     
     return f"""
-🔬 EXTRACT MEDICAL TABLE DATA - SYMBOL CAPTURE LOCK
+🔬 EXTRACT MEDICAL TABLE DATA - PHANTOM SENTINEL LOCK
 Page {idx}/{total_pages}{page_context}
 
-🚨 SYMBOL CAPTURE LOCK (CRITICAL) 🚨
+🚨 PHANTOM SENTINEL (CRITICAL) 🚨
 1. **Vertical Column Lock**: Results (left), Units (center), Ranges (right).
-2. **Symbol as Value**: If a row has ONLY a flag (like "*" or "#") but NO number, you MUST return `field_value`: "*".
-   - NEVER skip a horizontal line that has a symbol. This is the only way to maintain vertical alignment.
-3. **Box Reading (Demographics)**: Each header box has the Label on the RIGHT and the Value on the LEFT. Extract the text from the LEFT side.
+2. **"PHANTOM" Value**: If a row has ONLY a flag (like "*" or "#") but NO numeric result, you MUST return `field_value`: "PHANTOM".
+   - NEVER skip a horizontal line. This is the only way to maintain vertical alignment.
+3. **Box Adjacency (Demographics)**: Find the label box (e.g. 'اسم المريض'). Extract the text found physically closest to that label within the same box/cell.
 
 JSON RETURN:
 {{
-    "patient_name": "Arabic name from LEFT half of 'اسم المريض' box",
-    "patient_age": "Value from LEFT half of 'تاريخ الميلاد' box",
-    "doctor_names": "Person name from LEFT half of 'الطبيب' box",
+    "patient_name": "Text next to 'اسم المريض' label",
+    "patient_age": "Value next to DOB label",
+    "doctor_names": "Person name next to 'الطبيب' label",
     "medical_data": [
         {{
             "field_name": "Literal test name",
-            "field_value": "Result (number or '*' if only flag exists)",
+            "field_value": "Result (number or 'PHANTOM' if only symbol exists)",
             "field_unit": "Unit",
             "normal_range": "(X-Y)"
         }}

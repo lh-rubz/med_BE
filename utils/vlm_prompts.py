@@ -2,33 +2,22 @@
 
 
 def get_personal_info_prompt(idx, total_pages):
-    """Prompt to extract ONLY patient personal info from specific Arabic/English grid headers."""
+    """Prompt to extract ONLY patient personal info from demographic grid boxes."""
     return f"""You are an expert medical document digitizer.
-Task: Extract PATIENT & DOCTOR information from this report (page {idx}/{total_pages}).
+Task: Extract PATIENT & DOCTOR information (page {idx}/{total_pages}).
 
-🚨 HEADER BOX ORIENTATION (CRITICAL) 🚨
-This report uses two side-by-side grids at the top.
-- **INSIDE EACH BOX**: Each box is horizontally split.
-- **RIGHT HALF**: Contains the Arabic Label (e.g., "اسم المريض").
-- **LEFT HALF**: Contains the specific Patient Value (e.g., the Arabic name).
-- **YOUR TASK**: Extract the text found in the **LEFT HALF** of each box.
+🚨 DEMOGRAPHIC ADJACENCY RULE (CRITICAL) 🚨
+Find the following labels in the top grids. For each label, extract the text found physically CLOSEST to it WITHIN THE SAME BOX.
+- Labels are on the RIGHT. Values are on the LEFT.
 
-1. **RIGHT GRID (Patient Info)**:
-   - Box 1: "رقم المريض" (Patient ID)
-   - Box 2: "اسم المريض" (Patient Name) -> Extract text from the LEFT half of this box.
-   - Box 3: "رقم الهوية" (ID Number)
-   - Box 4: "الجنس" (Gender) -> LEFT half. Convert 'أنثى' to 'Female', 'ذكر' to 'Male'.
-   - Box 5: "تاريخ الميلاد" (DOB) -> LEFT half.
-   - Box 6: "جهة الطلب" (Requesting Entity) -> SKIP this for patient name (it's a facility).
-
-2. **LEFT GRID (Order/Physician Info)**:
-   - Box 1: "تاريخ الطلب" (Order Date) -> LEFT half. Extract as YYYY-MM-DD.
-   - Box 6: "الطبيب" (Physician) -> LEFT half. Extract the person's name.
-
-CRITICAL RULES:
-1. **NO SKIP**: If a box has text in the left half, you MUST extract it. 
-2. **NO HALLUCINATION**: If the left half is empty white space, return "".
-3. **REPORT DATE**: Extract "تاريخ الطلب" only.
+REQUIRED FIELDS:
+1. **Patient Name**: Find the label "اسم المريض". Extract the name found inside the same box.
+2. **ID Number**: Find the label "رقم الهوية".
+3. **Gender**: Find the label "الجنس". Convert 'أنثى' to 'Female', 'ذكر' to 'Male'.
+4. **DOB**: Find the label "تاريخ الميلاد".
+5. **Order Date**: Find the label "تاريخ الطلب" (usually in the Left Grid). Extract as YYYY-MM-DD.
+6. **Doctor Name**: Find the label "الطبيب" (usually in the Left Grid). Extract the person's name physically next to it.
+   - ⚠️ DO NOT extract "جهة الطلب" as a name.
 
 JSON OUTPUT ONLY:
 {{
@@ -43,19 +32,19 @@ JSON OUTPUT ONLY:
 
 
 def get_main_vlm_prompt(idx, total_pages):
-    """Prompt to extract LAB TABLE data with Symbol Capture Lock."""
+    """Prompt to extract LAB TABLE data with PHANTOM SENTINEL protocol."""
     return f"""You are a high-precision lab data digitizer.
-Task: Extract LAB DATA from this image (page {idx}/{total_pages}).
+Task: Extract LAB DATA (page {idx}/{total_pages}).
 
-🚨 SYMBOL CAPTURE LOCK (CRITICAL) 🚨
-1. **SYMBOLS AS VALUES**: If a row has a flag symbol (like "*" or "#") but NO number, you MUST extract the symbol (e.g. "*") as the `field_value`. 
-   - **NEVER skip a row** that contains a symbol. Each horizontal line in the "Test" column MUST have a corresponding JSON entry.
-2. **STRICT SPATIAL ALIGNMENT**: Trace a straight horizontal line from the test name. The value you extract must be physically on that same line.
-3. **NO TRUNCATION**: Capture names exactly as written (e.g. "Red blood cell distribution width").
+🚨 PHANTOM SENTINEL PROTOCOL (CRITICAL) 🚨
+1. **PHYSICAL LINE COUNT**: First, count every horizontal line of text/graphics in the table. 
+2. **THE WORD "PHANTOM"**: If a horizontal line has a flag symbol (like "*" or "#") but NO numeric result, you MUST return `field_value`: "PHANTOM".
+   - This word acts as a visual anchor to prevent row-shifting. NEVER skip a line.
+3. **HORIZONTAL LOCK**: Trace lines from the Test Name to the Result. Only extract the value on that EXACT line.
 
 VALIDATION:
-- Count the rows. There are many tests in this report. Ensure you capture ALL of them sequentially.
-- If you find no number and no symbol on a line, you may use "N/A" as a placeholder, but do NOT skip.
+- Count the rows. Ensure you produce an entry for every line of text in the "Test" column.
+- One line = One JSON object.
 
 JSON OUTPUT ONLY:
 {{
