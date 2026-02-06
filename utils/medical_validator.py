@@ -289,7 +289,12 @@ class MedicalValidator:
                               ['signature', 'template', 'lab', 'clinic', 'hospital']):
                         doctors.add(doctor_name)
         
-        return ", ".join(sorted(doctors))
+        # Normalize results
+        final_names = ", ".join(sorted(doctors))
+        from utils.medical_data_postprocessor import MedicalDataPostProcessor
+        # Normalize Arabic text: remove tatweel, fix disjointed characters
+        final_names = MedicalDataPostProcessor._normalize_arabic_text(final_names)
+        return final_names
     
     @staticmethod
     def deduplicate_fields(medical_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

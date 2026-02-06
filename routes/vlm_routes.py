@@ -1092,11 +1092,11 @@ This report uses a 2-column grid layout for demographics. Labels are on the RIGH
 
 Return JSON only:
 {
-    "patient_name": "Literal full name ONLY. 🚫 NO AUTOCOMPLETE: If baseline says 'هبة جمال ابو', but image says 'هبة جمال ابو الرب', you MUST use 'الرب'. DO NOT use 'الريش'.",
+    "patient_name": "Literal full name ONLY. 🚫 NO AUTOCOMPLETE: If baseline says 'هبة جمال ابو', but image says 'هبة جمال ابو الرب', you MUST use 'الرب'. Capture at least 4 words.",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
-    "doctor_names": "Literal personal name of the doctor"
+    "doctor_names": "Literal personal name of the doctor. 🚫 Fix disjointed letters (e.g. 'أحمد نعی رات' -> 'أحمد نعيرات')."
 }"""
                     
                     content = [

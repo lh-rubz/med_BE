@@ -26,6 +26,8 @@ Page {idx}/{total_pages}
 
 3. **Strict Empty/Spacer Skipping**: 
    - If a row contains a test name but the "Result" column is empty, has a dot ".", or a star "*", you MUST SKIP this row. 
+   - IF the result is `< 6.0`, you MUST capture `< 6.0`. 🚫 DO NOT strip the `<`.
+   - IF the result is `*`, capture `field_value`: "EMPTY_SPECIFIED". 🚫 DO NOT borrow from the next line.
    - 🚫 DO NOT extract it. 🚫 DO NOT pull data from adjacent lines to fill it.
    - Only extract rows that have BOTH a clear Test Name and a clear Result on the same line.
 
@@ -70,7 +72,7 @@ Page {idx}/{total_pages}
 For every row in the OCR Reference:
 1. **Trace Handwriting**: If a result is handwritten (slanted, ink-based), look at the shape carefully. 
    - `1.1` has two vertical strokes. `1.4` has a cross-stroke. MIRROR ONLY THE INK.
-2. **Handle Symbols**: 
+   - IF the result is `< 6.0`, you MUST capture `< 6.0`. 🚫 DO NOT strip the `<` or `>`.
    - If a cell contains a diagonal line (`/`), a cross (`X`), or a star (`*`), return "EMPTY_SPECIFIED".
    - 🚫 **NO BORROWING**: If Row X is empty, JSON Row X MUST be "EMPTY_SPECIFIED". Do not use data from Row X+1.
 3. **Exact Ranges**: If a range is `(0.7-4.8)`, you MUST NOT return `(1.5-4)`. Mirrored pixels only.
@@ -82,10 +84,11 @@ For every row in the OCR Reference:
 
 JSON RETURN ONLY:
 {{
-    "patient_name": "Exact name from image",
-    "doctor_names": "Exact ink/stamp next to 'الطبيب'",
-    "patient_age": "Literal age/DOB",
-    "patient_gender": "Male/Female",
+    "patient_name": "Literal full name ONLY. 🚫 NO AUTOCOMPLETE: If baseline says 'هبة جمال ابو', but image says 'هبة جمال ابو الرب', you MUST use 'الرب'. Capture at least 4 words.",
+    "patient_age": "Literal age or DOB",
+    "patient_gender": "Male or Female",
+    "report_date": "YYYY-MM-DD",
+    "doctor_names": "Literal personal name of the doctor. 🚫 Fix disjointed letters (e.g. 'أحمد نعی رات' -> 'أحمد نعيرات').",
     "medical_data": [
         {{
             "field_name": "Name from OCR",

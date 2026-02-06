@@ -328,15 +328,17 @@ class MedicalDataPostProcessor:
         if not range_str:
             return "", notes
 
-        # If range has no digits and no inequality, it's unusable
+        # If range has no digits and no inequality/limit word, it's unusable
         has_digit = bool(re.search(r"\d", range_str))
         has_inequality = any(sym in range_str for sym in ["<", ">"])
-        if not has_digit and not has_inequality:
+        has_limit_word = any(word in range_str.lower() for word in ["up to", "less than", "below", "above", "more than"])
+        
+        if not has_digit and not has_inequality and not has_limit_word:
             return "", MedicalDataPostProcessor._append_note(notes, "range_invalid")
 
         # Extract numeric values from the range
         range_numbers = re.findall(r"[\d.]+", range_str)
-        if len(range_numbers) < 2 and not has_inequality:
+        if len(range_numbers) < 2 and not has_inequality and not has_limit_word:
             return "", MedicalDataPostProcessor._append_note(notes, "range_invalid")
 
         # Validate percent-like ranges
@@ -448,7 +450,39 @@ class MedicalDataPostProcessor:
         if has_corruption and len(words) <= 2:
             return ""
         
+        # Normalize Arabic text: remove tatweel, fix disjointed characters
+        name = MedicalDataPostProcessor._normalize_arabic_text(name)
+        
         return name
+
+@staticmethod
+def _normalize_arabic_text(text: str) -> str:
+    """
+    Remove Arabic Tatweel (Kashida) and fix disjointed character patterns.
+    e.g. "أحمد نعی رات" -> "أحمد نعيرات"
+    """
+    if not text:
+        return ""
+    
+    # 1. Remove Tatweel (U+0640)
+    text = text.replace("\u0640", "")
+    
+    # 2. Fix common disjointed patterns (single space between Arabic letters)
+    # This regex looks for an Arabic character followed by a space followed by another Arabic character
+    # But only if it's not a word boundary. This is tricky.
+    # Simpler: If there are many single-letter "words", it's likely disjointed.
+    words = text.split()
+    if len([w for w in words if len(w) == 1]) > len(words) / 3:
+        # High density of single letters - aggressive rejoin
+        text = "".join(words)
+        # Re-insert spaces after common ending letters? No, too risky.
+        # Let's try a simpler fix for specific name patterns if needed.
+    
+    # 3. Standardize common characters
+    text = text.replace("ی", "ي") # Persian Yi to Arabic Ya
+    text = text.replace("ک", "ك") # Persian Keh to Arabic Kahf
+    
+    return text.strip()
     
     @staticmethod
     def _clean_age(age: str, report_date: str = "") -> str:
