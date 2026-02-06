@@ -56,7 +56,8 @@ Reading RIGHT-TO-LEFT:
 OUTPUT FORMAT (use this exact structure):
 
 ===PATIENT INFORMATION===
-Patient Name: look for "اسم المريض" (Patient Name). In Ramallah PHC reports, the actual name (e.g., "رئيسة خضر طالب خطيب") is below or next to the label. 
+Patient Name: look for "اسم المريض" (Patient Name). In Arabic reports, names are often 4+ words (e.g., "هبة جمال ابو الرب"). 
+🚨 CRITICAL: DO NOT truncate names. If you see "ابو" (Abu), you MUST include the word that follows it. Capture at least 4 words if visible.
 CRITICAL: DO NOT take "شؤون اجتماعية" (Social Case) or "Social" as the patient name. That is the Insurance type.
 Patient ID: ID number if found
 Gender: Male/Female - look for "الجنس", "Gender", "Sex", "ذكر"=Male, "أنثى"=Female

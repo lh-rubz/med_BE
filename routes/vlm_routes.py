@@ -1092,7 +1092,7 @@ This report uses a 2-column grid layout for demographics. Labels are on the RIGH
 
 Return JSON only:
 {
-    "patient_name": "Literal full name ONLY. 🚫 DO NOT return 'Social Affairs' or 'شؤون اجتماعية'. If you see that category, look at the line ABOVE it for the name.",
+    "patient_name": "Literal full name ONLY. 🚫 NO AUTOCOMPLETE: If baseline says 'هبة جمال ابو', but image says 'هبة جمال ابو الرب', you MUST use 'الرب'. DO NOT use 'الريش'.",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
