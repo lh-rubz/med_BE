@@ -35,54 +35,34 @@ def get_line_by_line_verification_prompt(extracted_fields: List[Dict], page_num:
     return f"""🔍 LINE-BY-LINE VERIFICATION PASS
 Page {page_num}/{total_pages}
 
-TASK: Verify the following extracted fields against the ORIGINAL IMAGE.
-For EACH field, compare the extracted value with what is ACTUALLY SHOWN in the image.
+TASK: Verify the following extracted fields against the ORIGINAL IMAGE using a STRICT HORIZONTAL LOCK.
 
 EXTRACTED FIELDS TO VERIFY:
 {fields_text}
 
 VERIFICATION INSTRUCTIONS:
-1. **Column-by-Column Verification**:
-   - Column 1 (Test Name): Is the extracted test name EXACTLY as shown in image?
-   - Column 2 (Value): Is the number/percentage EXACTLY as shown in image?
-   - Column 3 (Unit): Is the unit symbol EXACTLY as shown in image?
-   - Column 4 (Range): Is the reference range EXACTLY as shown in image?
+1. **Baseline Lock**: For each test name, trace a perfectly horizontal line across the page.
+2. **Borrowed Value Check**: Does the "Value" or "Range" on that horizontal line actually belong to the test name?
+   - ⚠️ ALERT: If you see a value from the row ABOVE or BELOW being paired with a test, mark as "SHIFT_ERROR".
+3. **Empty Alignment**: If a row is empty in the image but has data in the extraction, mark as "HALLUCINATION".
+4. **Column Integrity**:
+   - Value column must contain ONLY the numeric/qualitative result.
+   - Unit column must contain ONLY the unit (e.g. mg/dl).
+   - Range column must contain ONLY the reference range.
 
-2. **For Each Field, Report**:
-   - ✓ CORRECT: The extracted value matches the image exactly
-   - ✗ INCORRECT: The extracted value differs from image
-   - ? UNCLEAR: The image is not clear enough to verify
-
-3. **Identify Issues**:
-   - Missing values marked with * or - → Mark as "EMPTY_IN_IMAGE"
-   - Value copied from adjacent row → Mark as "COPIED_FROM_NEIGHBOR"
-   - Range not visible in image → Mark as "RANGE_NOT_VISIBLE"
-   - Unit symbol wrong → Mark as "UNIT_MISMATCH"
-   - Value doesn't match image → Mark as "VALUE_MISMATCH"
-
-4. **Column Separation**:
-   CRITICAL: Do NOT merge columns. Each column has SPECIFIC meaning:
-   - Test Name column: Only the test/parameter name
-   - Value column: Only the numerical/text result
-   - Unit column: Only the measurement unit symbol
-   - Range/Reference column: Only the normal/reference range
-
-5. **For Each Field**, respond with EXACTLY this format:
-   [FIELD#] STATUS | Issue: ISSUE_TYPE or CORRECT | Reason: short_explanation
+5. **For Each Field**, respond with:
+   [FIELD#] STATUS | Issue: [CORRECT | SHIFT_ERROR | VALUE_MISMATCH | HALLUCINATION] | Reason: [Actual value/range on image baseline]
 
 RETURN VERIFICATION REPORT IN THIS FORMAT:
 VERIFICATION_RESULTS:
-[1] ... | Issue: CORRECT | Reason: matches image exactly
-[2] ... | Issue: VALUE_MISMATCH | Reason: image shows 12.5 not 12.3
+[1] ... | Issue: CORRECT | Reason: matches image baseline
+[2] ... | Issue: SHIFT_ERROR | Reason: image baseline shows value 128 (LDL), but 74 was extracted (HDL).
 ...
 
 SUMMARY:
-- Total Verified: X
-- Correct: X
-- Issues Found: X
-- Critical Issues: X (values not in image, copied from neighbors)
-
-Then list critical issues separately for correction.
+- Total Fields: X
+- Aligned/Correct: X
+- Shifted/Misaligned: X
 """
 
 

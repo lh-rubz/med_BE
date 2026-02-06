@@ -12,33 +12,36 @@ def get_strict_table_extraction_prompt(idx: int, total_pages: int) -> str:
         page_context = f"""\n
 ⚠️  MULTI-PAGE REPORT:
 This report has {total_pages} pages total. You are extracting page {idx}.
-- Each page may contain DIFFERENT TEST SECTIONS (page 1 = Chemistry, page 2 = CBC/Hematology)
+- Each page may contain DIFFERENT TEST SECTIONS (page 1 = Biochemistry, page 2 = Hematology)
 - Extract ALL tests from THIS page - do NOT skip them
 - Do NOT skip data that appeared on a different page
-- Complementary tests on different pages are normal and should all be extracted
 """
     
     return f"""
-🔬 EXTRACT MEDICAL TABLE DATA - HORIZONTAL BAND LOCK
+🔬 EXTRACT MEDICAL TABLE DATA - STRICT BASELINE LOCK
 Page {idx}/{total_pages}{page_context}
 
-🚨 HORIZONTAL BAND LOCK (CRITICAL) 🚨
-1. **Vertical Column Focus**: Scan for Test Name -> Result -> Normal Range -> Unit -> Notes.
-2. **Band Integrity**: Identify the horizontal boundaries of the Test Name. ONLY extract Result/Range text found within those same vertical pixels.
-3. **Empty Sentinel**: If a Result column has a symbol (like "*") but no number in the current band, return `field_value`: "EMPTY_SPECIFIED".
-4. **Inside-Box Mapping**: For patient/doctor grids, the text must be located PHYSICALLY INSIDE the same rectangular border as the label.
+🚨 HORIZONTAL BASELINE LOCK (CRITICAL) 🚨
+1. **Vertical Column Discovery (Arabic RTL)**: This report is primarily Arabic. Columns are arranged RIGHT to LEFT:
+   - [ الفحص (Test Title) | النتيجة (Result) | النتيجة الطبيعية (Normal Range) | الوحدة (Unit) | ملاحظات (Notes) ]
+2. **Horizontal Row Anchor**: For every row, identify the vertical center (baseline) of the Test Name. 
+3. **Strict Column Extraction**: ONLY extract values/ranges that are physically located on that SAME vertical baseline. 
+   - If a value is slightly above or below the baseline of the test name, it belongs to a DIFFERENT test. 
+4. **No Merging**: Do not merge the value and unit. Keep them separate.
+5. **Literal Capture**: Capture the Test Name exactly as written (Arabic or English). 
+6. **Full Name Capture**: For patient demographics, find "اسم المريض" on the right. Capture EVERY WORD to its left until the border of the box. Do not truncate names.
 
 JSON RETURN:
 {{
-    "patient_name": "Text INSIDE 'اسم المريض' box",
-    "patient_age": "Text INSIDE 'تاريخ الميلاد' box",
-    "doctor_names": "Text INSIDE 'الطبيب' box",
+    "patient_name": "Full patient name (all words)",
+    "patient_age": "Literal age/DOB",
+    "doctor_names": "Literal doctor name",
     "medical_data": [
         {{
             "field_name": "Literal test name",
-            "field_value": "Result or 'EMPTY_SPECIFIED'",
-            "field_unit": "Unit",
-            "normal_range": "Literal Range (x-y)"
+            "field_value": "Literal result value",
+            "field_unit": "Literal unit",
+            "normal_range": "Literal Range (e.g. 0-200 or < 5.0)"
         }}
     ]
 }}

@@ -1033,27 +1033,31 @@ class ChatResource(Resource):
                     
                     patient_prompt = """Extract patient and report information from this medical lab report image.
 
-LOOK FOR THESE FIELDS CAREFULLY:
+🚨 CRITICAL RULES FOR ARAIBIC RTL GRIDS 🚨
+1. **PATIENT NAME (اسم المريض)**:
+   - Identify the label "اسم المريض" in the grid.
+   - The actual name value is in the box IMMEDIATELY TO THE LEFT of this label.
+   - Capture the FULL NAME (e.g. 4-5 words). Do NOT stop at the first word. Capture everything in that box.
+   
+2. **DOCTOR NAME (الطبيب)**:
+   - Identify "الطبيب" on the right of the bottom demographic row.
+   - Capture the value in the box to its LEFT.
+   - EXCLUSION: If the box contains "عيادة..." (Clinic) or "جهة...", that is a facility. Look specifically for a person's name (e.g. جهاد العملة).
 
-### 1. **PATIENT NAME (اسم المريض)**: 
-   - Look for "اسم المريض" on the far right. 
-   - Capture **EVERY SINGLE WORD** to its LEFT. Arabic names are often 4-5 words (e.g., "هبة جمال ابوالرب"). 
-   - DO NOT truncate. Capture until you hit a different field or the end of the line.
+3. **GENDER (الجنس)**:
+   - Find "الجنس". The value is to its LEFT (أنثى -> Female, ذكر -> Male).
 
-### 2. **GENDER (الجنس)**: 
-   - Find "الجنس". Return "Female" for انثى or أنثى, and "Male" for ذكر.
-
-### 3. **DATES**:
-   - DOB (تاريخ الميلاد): Return as DD/MM/YYYY.
-   - Report Date (تاريخ الطلب): YYYY-MM-DD.
+4. **DATES**:
+   - DOB (تاريخ الميلاد): Return as DD/MM/YYYY from the box to the LEFT of the label.
+   - Report Date: Find "تاريخ الطلب" or the date next to the lab logo.
 
 Return JSON only:
 {
-    "patient_name": "Full name captured literal (no truncation)",
-    "patient_age": "From DOB or age field",
+    "patient_name": "Literal full name captured from the box to the LEFT of 'اسم المريض'",
+    "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
-    "doctor_names": "Doctor name"
+    "doctor_names": "Literal personal name of the doctor"
 }"""
                     
                     content = [

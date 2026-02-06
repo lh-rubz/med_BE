@@ -186,6 +186,9 @@ class MedicalDataPostProcessor:
         # Flag clearly malformed rows but keep them
         if MedicalDataPostProcessor._is_value_malformed(field_value, field_unit, normal_range):
             notes = MedicalDataPostProcessor._append_note(notes, "value_malformed")
+            # If the value looks like a range, it's likely a column swap
+            if "(" in field_value and ")" in field_value and "-" in field_value:
+                notes = MedicalDataPostProcessor._append_note(notes, "check_alignment")
         
         # Sanitize normal range if it looks malformed or wildly mismatched
         normal_range, notes = MedicalDataPostProcessor._sanitize_normal_range(
@@ -275,13 +278,17 @@ class MedicalDataPostProcessor:
                 return True
         
         # Check if value looks like a range
-        if "(" in field_value and ")" in field_value:  # (x-y) pattern
+        if "(" in field_value and ")" in field_value and "-" in field_value:  # (x-y) pattern
             return True
-        if "[" in field_value and "]" in field_value:  # [x-y] pattern
+        if "[" in field_value and "]" in field_value and "-" in field_value:  # [x-y] pattern
             return True
-        if " - " in field_value and not any(c.isalpha() for c in field_value):  # x - y pattern (numbers only)
+        if re.match(r"^\d+ - \d+$", field_value):  # x - y pattern
             return True
         
+        # Check for unit leakage (e.g. value is "mg/dl")
+        if re.match(r"^[a-zA-Z/]+$", field_value) and len(field_value) > 1:
+            return True
+
         return False
 
     @staticmethod
