@@ -56,7 +56,7 @@ VERIFICATION INSTRUCTIONS:
 RETURN VERIFICATION REPORT IN THIS FORMAT:
 VERIFICATION_RESULTS:
 [1] ... | Issue: CORRECT | Reason: matches image baseline
-[2] ... | Issue: SHIFT_ERROR | Reason: image baseline shows value 128 (LDL), but 74 was extracted (HDL).
+[2] ... | Issue: SHIFT_ERROR | Reason: image baseline shows value Y (Test B), but X was extracted (Test A).
 ...
 
 SUMMARY:

@@ -933,9 +933,16 @@ class ChatResource(Resource):
                 # Fallback: Use VLM for extraction
                 print(f"🤖 Step 2: VLM extraction (structural anchoring mode)...")
                 yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Reading table data carefully on page {idx}...'})}\n\n"
-                
                 extraction_method = "vlm_primary"
-            
+
+            # PRE-LOAD Demographics from organized OCR (often more reliable for name text than VLM)
+            if organized_data:
+                for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
+                    if organized_data.get(key) and not any(s in str(organized_data[key]) for s in ["شؤون", "اجتماعية"]):
+                        # Use OCR data as baseline if it's non-empty and doesn't contain insurance labels
+                        extracted_data[key] = organized_data[key]
+                print(f"   👤 Patient demographics pre-loaded from OCR baseline")
+
             # Only call VLM if we're using vlm_primary method
             if extraction_method == "vlm_primary":
                 try:
@@ -1037,23 +1044,23 @@ This report uses a 2-column grid layout for demographics. Labels are on the RIGH
 1. **PATIENT NAME (اسم المريض)**:
    - Location: Find the word "اسم المريض" in the RIGHT column of the top grid.
    - Value: The name is in the box IMMEDIATELY to its LEFT.
-   - ⚠️ CRITICAL: Capture the FULL name. Do NOT stop at one word. If the box contains "رئيسة خضر طالب خطيب", return the whole string.
-   - 🚫 DO NOT return "شؤون اجتماعية" or "Social Affairs" - that is the Insurance (تأمين) field below the name.
+   - ⚠️ CRITICAL: Capture the FULL name. Do NOT stop at one word. If the box contains a long name, return the whole string.
+   - 🚫 DO NOT return insurance or facility categories.
 
 2. **DOCTOR NAME (الطبيب)**:
    - Location: Bottom right of the demographic section. 
    - Value: Personal name in the box to the LEFT of "الطبيب".
-   - 🚫 IGNORE clinic names like "عيادة...". Look for a person's name (e.g., لمى العملة).
+   - 🚫 IGNORE clinic names like "عيادة...". Look for a person's name (e.g., THE DOCTOR NAME).
 
 3. **GENDER (الجنس)**:
    - Find "الجنس" on the right. Value is to the LEFT. (أنثى/انثى -> Female, ذكر -> Male).
 
 4. **REPORT DATE**:
-   - Extract the date from the header (e.g. 2025-12-1).
+   - Extract the date from the header (e.g. 2024-01-01).
 
 Return JSON only:
 {
-    "patient_name": "Literal full name captured from the box to the left of 'اسم المريض'",
+    "patient_name": "Literal full name ONLY. 🚫 DO NOT return 'Social Affairs' or 'شؤون اجتماعية'. If you see that category, look at the line ABOVE it for the name.",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
@@ -1079,9 +1086,15 @@ Return JSON only:
                         patient_data = json.loads(json_match.group())
                         # Prioritize dedicated demographic extraction over table-step fallbacks
                         for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
-                            if patient_data.get(key):
-                                # Always update if the new data is non-empty
-                                extracted_data[key] = patient_data[key]
+                            val = patient_data.get(key)
+                            if val:
+                                # Reject labels misidentified as names
+                                is_insurance_label = key == 'patient_name' and any(s in str(val) for s in ["شؤون", "اجتماعية"])
+                                current_is_valid = extracted_data.get(key) and not any(s in str(extracted_data.get(key)) for s in ["شؤون", "اجتماعية"])
+                                
+                                # Always update if current is empty or if VLM provides a non-hallucinated name
+                                if not current_is_valid or (not is_insurance_label):
+                                    extracted_data[key] = val
                         print(f"   👤 Patient info enriched from high-precision VLM")
                 except Exception as pe:
                     print(f"   ⚠️  Patient info extraction failed: {pe}")

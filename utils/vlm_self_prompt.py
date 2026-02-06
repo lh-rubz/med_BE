@@ -34,10 +34,10 @@ For EACH row in the medical table, identify:
 - Row has NORMAL RANGE? (Yes/No) - if Yes, write it, if No write "NO RANGE"
 
 Example:
-Row 1: "Glucose" | Value: "109" | Unit: "mg/dl" | Range: "(74-110)" ✓ COMPLETE
-Row 2: "Hemoglobin" | Value: "12.6" | Unit: "g/dL" | Range: "(12-16)" ✓ COMPLETE
+Row 1: "TEST NAME A" | Value: "12.3" | Unit: "mg/dl" | Range: "(10-15)" ✓ COMPLETE
+Row 2: "TEST NAME B" | Value: "4.5" | Unit: "g/dL" | Range: "(4-6)" ✓ COMPLETE
 Row 3: "Some Test" | Value: "EMPTY" | Unit: "mg/dL" | Range: "NO RANGE" ✗ SKIP (empty value)
-Row 4: "WBC" | Value: "7.1" | Unit: "cells/L" | Range: "(4.6-11)" ✓ COMPLETE
+Row 4: "TEST NAME C" | Value: "1.2" | Unit: "cells/L" | Range: "(1.0-2.0)" ✓ COMPLETE
 
 Count how many rows are COMPLETE (have all 4 parts) vs INCOMPLETE (missing value or range)
 1. Language: Is it Arabic, English, or bilingual?
@@ -79,7 +79,7 @@ First 5:
   }},
   "patient_info": {{
     "name_location": "Top-right area after 'اسم المريض:'",
-    "patient_name_text": "Exact text you see: e.g., 'رئيسي خضر طالب خطيب'",
+    "patient_name_text": "Exact name text from image (Generic Name)",
     "gender_location": "Header section after 'الجنس:'",
     "gender_value": "ذكر or أنثى (will convert to Male/Female)"
   }},
