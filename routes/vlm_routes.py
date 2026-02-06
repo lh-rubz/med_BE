@@ -25,7 +25,11 @@ from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_p
 from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt, generate_prompt_enhancement_request
 from utils.vlm_self_extraction_prompt import get_self_prompting_analysis_prompt, get_self_directed_extraction_prompt, get_simplified_extraction_prompt
 from utils.vlm_line_by_line_verifier import verify_extracted_fields_against_image_openai
-from utils.vlm_strict_table_extraction import get_strict_table_extraction_prompt, get_alignment_verification_prompt
+from utils.vlm_strict_table_extraction import (
+    get_strict_table_extraction_prompt, 
+    get_alignment_verification_prompt,
+    get_ocr_refinement_prompt
+)
 from utils.medical_data_postprocessor import MedicalDataPostProcessor
 from ollama import Client
 from utils.extract_personal_info import extract_personal_info, extract_medical_data
@@ -958,22 +962,32 @@ class ChatResource(Resource):
                     page_results = []
                     for seg_idx, segment_data in enumerate(image_segments, 1):
                         seg_lbl = f" (Segment {seg_idx}/{len(image_segments)})" if len(image_segments) > 1 else ""
-                        yield f"data: {json.dumps({'percent': min(current_progress + 10 + (seg_idx*5), 70), 'message': f'Reading table data carefully on page {idx}{seg_lbl}...'})}\n\n"
+                        yield f"data: {json.dumps({'percent': min(current_progress + 10 + (seg_idx*5), 70), 'message': f'Refining data with high-precision vision {seg_lbl}...'})}\n\n"
                         
                         image_base64 = base64.b64encode(segment_data).decode('utf-8')
                         image_format = image_info['format']
                         
-                        prompt_text = get_strict_table_extraction_prompt(idx=idx, total_pages=total_pages)
-                        content = []
-                        if ocr_text:
-                            content.append({'type': 'text', 'text': f"{prompt_text}\n\nOCR-EXTRACTED TEXT REFERENCE:\n{ocr_text}"})
+                        # USE REFINEMENT PROMPT (User Request: Feed organized text back into model with image)
+                        if organized_data:
+                            # Convert a representative sample of organized data to a readable string for the model
+                            ref_text = json.dumps({
+                                "patient_name": organized_data.get("patient_name"),
+                                "doctor_names": organized_data.get("doctor_names"),
+                                "medical_data": organized_data.get("medical_data", [])
+                            }, ensure_ascii=False, indent=2)
+                            prompt_text = get_ocr_refinement_prompt(idx=idx, total_pages=total_pages, organized_text=ref_text)
                         else:
-                            content.append({'type': 'text', 'text': prompt_text})
-                        content.append({'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}})
+                            # Fallback if no organized data exists
+                            prompt_text = get_strict_table_extraction_prompt(idx=idx, total_pages=total_pages)
+
+                        content = [
+                            {'type': 'text', 'text': prompt_text},
+                            {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
+                        ]
                         
                         completion = ollama_client.chat.completions.create(model=Config.OLLAMA_MODEL, messages=[{'role': 'user', 'content': content}], temperature=0.1)
                         response_text = completion.choices[0].message.content.strip()
-                        print(f"🔍 RAW RESPONSE For Page {idx}{seg_lbl}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
+                        print(f"🔍 REFINEMENT RESPONSE For Page {idx}{seg_lbl}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
                         
                         # Parse VLM response
                         try:
@@ -986,12 +1000,22 @@ class ChatResource(Resource):
                                 # Capture patient info from first segment
                                 if seg_idx == 1:
                                     for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
-                                        val = vlm_data.get(key)
-                                        current_val = str(extracted_data.get(key, '')).lower()
-                                        is_filler = not current_val or any(f in current_val for f in ["unknown", "n/a", "patient", "none"])
-                                        
-                                        if val and (is_filler or len(str(val)) > len(str(extracted_data.get(key, '')))):
-                                            extracted_data[key] = val
+                                        val = str(vlm_data.get(key, "")).strip()
+                                        if val and val.lower() not in ["unknown", "n/a", "none"]:
+                                            # Reject labels misidentified as names (Social Affairs, Insurance, etc. + common typos)
+                                            # Target: شؤون, اجتماعية, شذون, تأمين
+                                            rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "social", "affairs", "insurance"]
+                                            is_hallucination = key == 'patient_name' and any(s in val for s in rejection_terms)
+                                            
+                                            current_val = str(extracted_data.get(key, "")).strip()
+                                            current_is_valid = current_val and not any(s in current_val for s in rejection_terms)
+                                            
+                                            # Update only if not already filled with valid data or if this is a better match
+                                            if not current_is_valid:
+                                                if not is_hallucination:
+                                                    extracted_data[key] = val
+                                            elif not is_hallucination and len(val) > len(current_val):
+                                                extracted_data[key] = val
                         except Exception as parse_err:
                             print(f"⚠️  Parsing segment {seg_idx} failed: {parse_err}")
 
@@ -1086,16 +1110,26 @@ Return JSON only:
                         patient_data = json.loads(json_match.group())
                         # Prioritize dedicated demographic extraction over table-step fallbacks
                         for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
-                            val = patient_data.get(key)
-                            if val:
-                                # Reject labels misidentified as names
-                                is_insurance_label = key == 'patient_name' and any(s in str(val) for s in ["شؤون", "اجتماعية"])
-                                current_is_valid = extracted_data.get(key) and not any(s in str(extracted_data.get(key)) for s in ["شؤون", "اجتماعية"])
+                            val = str(patient_data.get(key, "")).strip()
+                            if val and val.lower() not in ["unknown", "n/a", "none"]:
+                                # Reject labels misidentified as names (Social Affairs, Insurance, etc. + common typos)
+                                # Target: شؤون, اجتماعية, شذون, تأمين
+                                rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "social", "affairs", "insurance"]
+                                is_hallucination = key == 'patient_name' and any(s in val for s in rejection_terms)
                                 
-                                # Always update if current is empty or if VLM provides a non-hallucinated name
-                                if not current_is_valid or (not is_insurance_label):
+                                current_val = str(extracted_data.get(key, "")).strip()
+                                current_is_valid = current_val and not any(s in current_val for s in rejection_terms)
+                                
+                                # LOGIC: 
+                                # 1. If current is empty/invalid AND new value is NOT a hallucination -> UPDATe
+                                # 2. If new value is significantly better (longer name) and NOT a hallucination -> UPDATE
+                                if not current_is_valid:
+                                    if not is_hallucination:
+                                        extracted_data[key] = val
+                                elif not is_hallucination and len(val) > len(current_val):
                                     extracted_data[key] = val
-                        print(f"   👤 Patient info enriched from high-precision VLM")
+                        
+                        print(f"   👤 Patient info enriched (Final name: {extracted_data.get('patient_name')})")
                 except Exception as pe:
                     print(f"   ⚠️  Patient info extraction failed: {pe}")
             

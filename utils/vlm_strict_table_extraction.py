@@ -46,6 +46,49 @@ JSON RETURN ONLY:
 """
 
 
+def get_ocr_refinement_prompt(idx: int, total_pages: int, organized_text: str) -> str:
+    """
+    Prompt for a second-pass refinement where the VLM maps already-organized OCR text 
+    to the original image to produce the final, perfectly aligned JSON.
+    """
+    return f"""
+🔬 MEDICAL JSON DIGITIZATION - OCR REFINEMENT PASS
+Page {idx}/{total_pages}
+
+I have already extracted and organized the text from this report using OCR. 
+Your task is to act as a High-Precision Visual Validator. 
+
+INPUT: 
+1. **ORGANIZED OCR DATA**: (See the reference provided below)
+2. **ORIGINAL IMAGE**: (The attached medical report page)
+
+TASK:
+Map the results from the **ORGANIZED OCR DATA** to the **ORIGINAL IMAGE** using a **STRICT HORIZONTAL BASELINE LOCK**.
+
+🚨 OPERATIONAL PROTOCOL 🚨
+1. **Text Integrity**: Use the names and values from the OCR DATA as your primary textual source. They are usually more accurate for characters than a fresh VLM scan.
+2. **Baseline Locking**: For every test in the OCR data, find its location in the image. Verify that the result and range are DIRECTLY on the same horizontal baseline as the test name.
+3. **Alignment Correction**: If the OCR data has a value that appears shifted in the image, use your vision to fix it. Move the value to the correct test parameter.
+4. **Spacer Cleaning**: If the OCR data includes "empty" or "spacer" rows (e.g., results with '*', '.', or '#'), YOU MUST DISCARD THEM.
+5. **JSON Mapping**: Return the final, verified dataset in the strict JSON format requested below.
+
+JSON RETURN ONLY:
+{{
+    "medical_data": [
+        {{
+            "field_name": "Full Test Name from OCR (Verified)",
+            "field_value": "Numeric Result (Aligned via Image)",
+            "field_unit": "Unit",
+            "normal_range": "Literal Range (e.g. 10-20)"
+        }}
+    ]
+}}
+
+### ORGANIZED OCR DATA REFERENCE ###
+{organized_text}
+"""
+
+
 def get_alignment_verification_prompt(extracted_data: dict, page_num: int) -> str:
     """
     Generate a verification prompt that rechecks table alignment.
