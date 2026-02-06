@@ -1,0 +1,63 @@
+classDiagram
+    direction LR
+
+    class User {
+        +Integer id
+        +String email
+        +String password
+        +String first_name
+        +String last_name
+        +Date date_of_birth
+        +String phone_number
+        +String gender
+        +String profile_image
+        +Boolean is_active
+        +Boolean email_verified
+        +Boolean two_factor_enabled
+        +String google_id
+        +String facebook_id
+        +DateTime created_at
+    }
+
+    class Profile {
+        +Integer id
+        +Integer creator_id
+        +Integer linked_user_id
+        +String first_name
+        +String last_name
+        +Date date_of_birth
+        +String gender
+        +String relationship
+    }
+
+    class FamilyConnection {
+        +Integer id
+        +Integer requester_id
+        +Integer receiver_id
+        +String relationship
+        +String status
+        +String access_level
+        +Integer profile_id
+    }
+
+    class ProfileShare {
+        +Integer id
+        +Integer profile_id
+        +Integer shared_with_user_id
+        +String access_level
+    }
+
+    class UserDevice {
+        +Integer id
+        +Integer user_id
+        +String fcm_token
+        +String device_type
+        +DateTime last_active
+    }
+
+    %% Relationships
+    User "1" -- "0..*" Profile : creates
+    User "1" -- "0..*" FamilyConnection : requests
+    User "1" -- "0..*" UserDevice : uses
+    Profile "1" -- "0..*" ProfileShare : shared_via
+    User "1" -- "0..*" ProfileShare : accesses

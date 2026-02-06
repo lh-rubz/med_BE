@@ -1,0 +1,210 @@
+classDiagram
+    %% User Management
+    class User {
+        +Integer id
+        +String email
+        +String password
+        +String first_name
+        +String last_name
+        +Date date_of_birth
+        +String phone_number
+        +String gender
+        +String profile_image
+        +DateTime created_at
+        +Boolean is_active
+        +Boolean email_verified
+        +Boolean biometric_allowed
+        +String verification_code
+        +DateTime verification_code_expires
+        +String reset_code
+        +DateTime reset_code_expires
+        +String google_id
+        +String facebook_id
+        +Boolean two_factor_enabled
+        +String two_factor_code
+        +DateTime two_factor_code_expires
+    }
+
+    class Authenticator {
+        +Integer id
+        +Integer user_id
+        +Binary credential_id
+        +Binary public_key
+        +Integer sign_count
+        +String credential_device_type
+        +Boolean credential_backed_up
+        +String transports
+        +DateTime created_at
+        +DateTime last_used_at
+    }
+
+    class UserDevice {
+        +Integer id
+        +Integer user_id
+        +String fcm_token
+        +String device_type
+        +DateTime last_active
+        +DateTime created_at
+    }
+
+    class Notification {
+        +Integer id
+        +Integer user_id
+        +String title
+        +String message
+        +String notification_type
+        +Boolean is_read
+        +JSON data
+        +DateTime created_at
+    }
+
+    class AccessVerification {
+        +Integer id
+        +Integer user_id
+        +String resource_type
+        +Integer resource_id
+        +String verification_code
+        +DateTime verification_code_expires
+        +String verification_method
+        +String session_token
+        +DateTime verified_at
+        +DateTime expires_at
+        +String ip_address
+        +String user_agent
+        +Boolean verified
+        +DateTime created_at
+    }
+
+    %% Family & Profile Management
+    class Profile {
+        +Integer id
+        +Integer creator_id
+        +Integer linked_user_id
+        +String first_name
+        +String last_name
+        +Date date_of_birth
+        +String gender
+        +String relationship
+        +DateTime created_at
+    }
+
+    class FamilyConnection {
+        +Integer id
+        +Integer requester_id
+        +Integer receiver_id
+        +String relationship
+        +String status
+        +String access_level
+        +Integer profile_id
+        +DateTime created_at
+        +DateTime updated_at
+    }
+
+    class ProfileShare {
+        +Integer id
+        +Integer profile_id
+        +Integer shared_with_user_id
+        +String access_level
+        +DateTime created_at
+    }
+
+    %% Medical Reports & Data
+    class Report {
+        +Integer id
+        +Integer user_id
+        +Integer profile_id
+        +DateTime report_date
+        +String report_hash
+        +String report_name
+        +String report_type
+        +String report_category
+        +String patient_name
+        +String patient_age
+        +String patient_gender
+        +Text doctor_names
+        +String original_filename
+        +DateTime created_at
+    }
+
+    class ReportField {
+        +Integer id
+        +Integer report_id
+        +Integer user_id
+        +String field_name
+        +Text field_value
+        +String field_unit
+        +String normal_range
+        +Boolean is_normal
+        +String field_type
+        +String category
+        +Text notes
+        +DateTime created_at
+    }
+
+    class ReportFile {
+        +Integer id
+        +Integer report_id
+        +Integer user_id
+        +String original_filename
+        +String stored_filename
+        +String file_path
+        +String file_hash
+        +String file_type
+        +Integer file_size
+        +Integer page_number
+        +DateTime created_at
+    }
+
+    class AdditionalField {
+        +Integer id
+        +Integer user_id
+        +Integer report_id
+        +String field_name
+        +Text field_value
+        +String category
+        +Boolean is_approved
+        +DateTime approved_at
+        +Boolean merged_to_profile
+        +DateTime created_at
+    }
+
+    class MedicalSynonym {
+        +Integer id
+        +String standard_name
+        +String synonym
+        +DateTime created_at
+    }
+
+    class ReportData {
+        +Integer id
+        +Integer report_id
+        +String field_name
+        +String field_value
+        +String field_unit
+        +String normal_range
+        +Boolean is_normal
+        +Text notes
+        +DateTime created_at
+    }
+
+    %% Relationships
+    User "1" -- "0..*" Authenticator : has
+    User "1" -- "0..*" UserDevice : uses
+    User "1" -- "0..*" Notification : receives
+    User "1" -- "0..*" AccessVerification : performs
+    User "1" -- "0..*" Report : owns
+    User "1" -- "0..*" Profile : created_by
+    User "1" -- "0..*" Profile : linked_to
+    User "1" -- "0..*" FamilyConnection : requester
+    User "1" -- "0..*" FamilyConnection : receiver
+    User "1" -- "0..*" ProfileShare : shared_with
+    User "1" -- "0..*" AdditionalField : has_pending
+
+    Profile "1" -- "0..*" Report : contains
+    Profile "1" -- "0..*" ProfileShare : shared_via
+    Profile "1" -- "0..*" FamilyConnection : linked_in
+
+    Report "1" -- "0..*" ReportField : contains
+    Report "1" -- "0..*" ReportFile : has_files
+    Report "1" -- "0..*" AdditionalField : source_of
+    Report "1" -- "0..*" ReportData : contains_legacy
