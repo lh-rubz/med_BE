@@ -5,43 +5,45 @@ Enforces spatial alignment and careful sequential reading.
 
 
 def get_strict_table_extraction_prompt(idx: int, total_pages: int) -> str:
-    """Generate a strict table extraction prompt that enforces row-by-row alignment."""
-    
-    page_context = ""
-    if total_pages > 1:
-        page_context = f"""\n
-⚠️  MULTI-PAGE REPORT:
-This report has {total_pages} pages total. You are extracting page {idx}.
-- Each page may contain DIFFERENT TEST SECTIONS (page 1 = Biochemistry, page 2 = Hematology)
-- Extract ALL tests from THIS page - do NOT skip them
-- Do NOT skip data that appeared on a different page
-"""
+    """Generate a high-precision table extraction prompt that enforces spatial anchoring."""
     
     return f"""
-🔬 EXTRACT MEDICAL TABLE DATA - STRICT BASELINE LOCK
-Page {idx}/{total_pages}{page_context}
+🔬 MEDICAL TABLE DIGITIZATION - SPATIAL ANCHOR LOCK
+Page {idx}/{total_pages}
 
-🚨 HORIZONTAL BASELINE LOCK (CRITICAL) 🚨
-1. **Vertical Column Discovery (Arabic RTL)**: This report is primarily Arabic. Columns are arranged RIGHT to LEFT:
-   - [ الفحص (Test Title) | النتيجة (Result) | النتيجة الطبيعية (Normal Range) | الوحدة (Unit) | ملاحظات (Notes) ]
-2. **Horizontal Row Anchor**: For every row, identify the vertical center (baseline) of the Test Name. 
-3. **Strict Column Extraction**: ONLY extract values/ranges that are physically located on that SAME vertical baseline. 
-   - If a value is slightly above or below the baseline of the test name, it belongs to a DIFFERENT test. 
-4. **No Merging**: Do not merge the value and unit. Keep them separate.
-5. **Literal Capture**: Capture the Test Name exactly as written (Arabic or English). 
-6. **Full Name Capture**: For patient demographics, find "اسم المريض" on the right. Capture EVERY WORD to its left until the border of the box. Do not truncate names.
+🚨 OPERATIONAL PROTOCOL (CRITICAL) 🚨
+1. **Column Scanning (Right to Left)**: 
+   - Column 1 (Far Right): [ الفحص ] - Test Parameter
+   - Column 2: [ النتيجة ] - Numerical/Text Result
+   - Column 3: [ النتيجة الطبيعية ] - Reference Range
+   - Column 4: [ الوحدة ] - Measurement Unit
+   - Column 5 (Far Left): [ ملاحظات ] - Notes
 
-JSON RETURN:
+2. **Horizontal Baseline Lock**: 
+   - For every test name found, visually lock onto its horizontal center line. 
+   - Trace this line leftward. ONLY pick up text that sits DIRECTLY on this line.
+   - 🚫 DO NOT jump up or down to grab values from adjacent lines.
+
+3. **Empty Row Handling (User Priority)**: 
+   - If a row contains a test name but the "Result" column is empty (or only contains symbols like '.' or '*'), you MUST SKIP this row entirely. 
+   - Do NOT attempt to fill it with data from the line above or below. 
+   - Skip all "empty" or "separator" rows to prevent index-shift errors.
+
+4. **Literal Arabic Support**: 
+   - Capture the FULL test name exactly as written.
+   - For demographics: Look at the top grid. Find "اسم المريض" on the far right. The value is in the box to its IMMEDIATE LEFT. Capture EVERY word to avoid truncation (Arabic names can be very long).
+
+JSON RETURN ONLY:
 {{
-    "patient_name": "Full patient name (all words)",
+    "patient_name": "Literal full name from the grid",
     "patient_age": "Literal age/DOB",
-    "doctor_names": "Literal doctor name",
+    "doctor_names": "Literal personal name of the doctor (ignore clinic names)",
     "medical_data": [
         {{
-            "field_name": "Literal test name",
-            "field_value": "Literal result value",
-            "field_unit": "Literal unit",
-            "normal_range": "Literal Range (e.g. 0-200 or < 5.0)"
+            "field_name": "Full Test Name",
+            "field_value": "Numerical result (ONLY if present on baseline)",
+            "field_unit": "Unit (ONLY if present on baseline)",
+            "normal_range": "Range (ONLY if present on baseline)"
         }}
     ]
 }}

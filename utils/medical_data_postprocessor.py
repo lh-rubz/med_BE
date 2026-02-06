@@ -186,9 +186,25 @@ class MedicalDataPostProcessor:
         # Flag clearly malformed rows but keep them
         if MedicalDataPostProcessor._is_value_malformed(field_value, field_unit, normal_range):
             notes = MedicalDataPostProcessor._append_note(notes, "value_malformed")
-            # If the value looks like a range, it's likely a column swap
+            # If the value looks like a range, it's highly likely a column swap/misalignment
             if "(" in field_value and ")" in field_value and "-" in field_value:
+                # In strict mode, we might want to drop these, but for now we flag them
                 notes = MedicalDataPostProcessor._append_note(notes, "check_alignment")
+            
+        # USER REQUEST: Skip empty fields rows to prevent mixing up
+        # If both value and unit/range are missing or sentinel, drop it
+        sentinels = ["PHANTOM", "EMPTY_SPECIFIED", "N/A", "*", "#", "-", ".", "EMPTY", "EMPTY_IN_IMAGE"]
+        is_val_empty = not field_value or field_value.upper() in sentinels or field_value in sentinels
+        is_unit_empty = not field_unit or field_unit.upper() in sentinels or field_unit in sentinels
+        is_range_empty = not normal_range or normal_range.upper() in sentinels or normal_range in sentinels
+
+        if is_val_empty and is_unit_empty and not is_range_empty:
+             # Header-like row or spacer with range but no result, skip it
+             return None
+        
+        if is_val_empty and is_range_empty:
+            # Truly empty/spacer row, skip it
+            return None
         
         # Sanitize normal range if it looks malformed or wildly mismatched
         normal_range, notes = MedicalDataPostProcessor._sanitize_normal_range(
@@ -235,8 +251,10 @@ class MedicalDataPostProcessor:
                 field_name = field_name.replace(typo, fix)
         
         # Strip trailing punctuation/garbage numbers (common OCR artifacts)
-        # e.g. "Lymphocytes9" or "ResultI"
-        field_name = re.sub(r"[I19%]$", "", field_name).strip()
+        # e.g. "Lymphocytes9" or "ResultI" or "HGB))"
+        field_name = re.sub(r"[I19%)]$]+$", "", field_name)
+        # Fix double opening parens too
+        field_name = field_name.replace("((", "(").strip()
 
         cleaned_entry = {
             "field_name": field_name,

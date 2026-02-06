@@ -1031,29 +1031,31 @@ class ChatResource(Resource):
                     image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                     image_format = image_info['format']
                     
-                    patient_prompt = """Extract patient and report information from this medical lab report image.
+                    patient_prompt = """Extract patient and report information from this laboratory document.
 
-🚨 CRITICAL RULES FOR ARAIBIC RTL GRIDS 🚨
+🚨 DEMOGRAPHIC GRID MAP (STRICT) 🚨
+This report uses a 2-column grid layout for demographics. Labels are on the RIGHT, values are on the LEFT.
+
 1. **PATIENT NAME (اسم المريض)**:
-   - Identify the label "اسم المريض" in the grid.
-   - The actual name value is in the box IMMEDIATELY TO THE LEFT of this label.
-   - Capture the FULL NAME (e.g. 4-5 words). Do NOT stop at the first word. Capture everything in that box.
-   
+   - Location: Find the word "اسم المريض" in the RIGHT column of the top grid.
+   - Value: The name is in the box IMMEDIATELY to its LEFT.
+   - ⚠️ CRITICAL: Capture the FULL name. Do NOT stop at one word. If the box contains "رئيسة خضر طالب خطيب", return the whole string.
+   - 🚫 DO NOT return "شؤون اجتماعية" or "Social Affairs" - that is the Insurance (تأمين) field below the name.
+
 2. **DOCTOR NAME (الطبيب)**:
-   - Identify "الطبيب" on the right of the bottom demographic row.
-   - Capture the value in the box to its LEFT.
-   - EXCLUSION: If the box contains "عيادة..." (Clinic) or "جهة...", that is a facility. Look specifically for a person's name (e.g. جهاد العملة).
+   - Location: Bottom right of the demographic section. 
+   - Value: Personal name in the box to the LEFT of "الطبيب".
+   - 🚫 IGNORE clinic names like "عيادة...". Look for a person's name (e.g., لمى العملة).
 
 3. **GENDER (الجنس)**:
-   - Find "الجنس". The value is to its LEFT (أنثى -> Female, ذكر -> Male).
+   - Find "الجنس" on the right. Value is to the LEFT. (أنثى/انثى -> Female, ذكر -> Male).
 
-4. **DATES**:
-   - DOB (تاريخ الميلاد): Return as DD/MM/YYYY from the box to the LEFT of the label.
-   - Report Date: Find "تاريخ الطلب" or the date next to the lab logo.
+4. **REPORT DATE**:
+   - Extract the date from the header (e.g. 2025-12-1).
 
 Return JSON only:
 {
-    "patient_name": "Literal full name captured from the box to the LEFT of 'اسم المريض'",
+    "patient_name": "Literal full name captured from the box to the left of 'اسم المريض'",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
