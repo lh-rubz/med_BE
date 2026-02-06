@@ -21,23 +21,19 @@ Page {idx}/{total_pages}
 
 2. **Horizontal Baseline Lock**: 
    - For every test name found, visually lock onto its horizontal center line. 
-   - Trace this line leftward. ONLY pick up text that sits DIRECTLY on this line.
-   - 🚫 DO NOT jump up or down to grab values from adjacent lines.
+   Trace this line leftward. ONLY pick up text that sits DIRECTLY on this same vertical baseline.
+   - 🚫 DO NOT jump up or down. If a value is 5 pixels above or below the test name center, it belongs to another test or is a spacer.
 
-3. **Empty Row Handling (User Priority)**: 
-   - If a row contains a test name but the "Result" column is empty (or only contains symbols like '.' or '*'), you MUST SKIP this row entirely. 
-   - Do NOT attempt to fill it with data from the line above or below. 
-   - Skip all "empty" or "separator" rows to prevent index-shift errors.
+3. **Strict Empty/Spacer Skipping**: 
+   - If a row contains a test name but the "Result" column is empty, has a dot ".", or a star "*", you MUST SKIP this row. 
+   - 🚫 DO NOT extract it. 🚫 DO NOT pull data from adjacent lines to fill it.
+   - Only extract rows that have BOTH a clear Test Name and a clear Result on the same line.
 
 4. **Literal Arabic Support**: 
    - Capture the FULL test name exactly as written.
-   - For demographics: Look at the top grid. Find "اسم المريض" on the far right. The value is in the box to its IMMEDIATE LEFT. Capture EVERY word to avoid truncation (Arabic names can be very long).
 
 JSON RETURN ONLY:
 {{
-    "patient_name": "Literal full name from the grid",
-    "patient_age": "Literal age/DOB",
-    "doctor_names": "Literal personal name of the doctor (ignore clinic names)",
     "medical_data": [
         {{
             "field_name": "Full Test Name",

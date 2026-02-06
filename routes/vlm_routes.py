@@ -1019,14 +1019,12 @@ class ChatResource(Resource):
                 except Exception as vlm_err:
                     print(f"⚠️  VLM extraction failed: {vlm_err}")
             # Step 3: Always try VLM for patient info (it reads headers better than OCR)
-            # Check what patient fields are missing
-            missing_fields = []
-            for field in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
-                if not extracted_data.get(field):
-                    missing_fields.append(field)
+            # FORCE demographic extraction on Page 1 to ensure highest quality
+            should_run_demographics = (idx == 1) or any(not extracted_data.get(f) for f in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names'])
             
-            if missing_fields:
-                print(f"   🔍 Using VLM to extract patient info (missing: {', '.join(missing_fields)})...")
+            if should_run_demographics:
+                missing_fields = [f for f in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names'] if not extracted_data.get(f)]
+                print(f"   🔍 Using VLM to extract patient info (Page {idx})...")
                 try:
                     image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                     image_format = image_info['format']
@@ -1079,10 +1077,12 @@ Return JSON only:
                     json_match = re.search(r'\{.*\}', patient_response, re.DOTALL)
                     if json_match:
                         patient_data = json.loads(json_match.group())
+                        # Prioritize dedicated demographic extraction over table-step fallbacks
                         for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
-                            if patient_data.get(key) and not extracted_data.get(key):
+                            if patient_data.get(key):
+                                # Always update if the new data is non-empty
                                 extracted_data[key] = patient_data[key]
-                        print(f"   👤 Patient info enriched from VLM")
+                        print(f"   👤 Patient info enriched from high-precision VLM")
                 except Exception as pe:
                     print(f"   ⚠️  Patient info extraction failed: {pe}")
             
