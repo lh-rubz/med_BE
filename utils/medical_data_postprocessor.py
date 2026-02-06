@@ -76,39 +76,32 @@ class MedicalDataPostProcessor:
         return cleaned
     
     @staticmethod
+    @staticmethod
     def _deduplicate_entries(medical_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Remove ONLY exact consecutive duplicates (same field name + value + unit).
-        Does NOT remove same tests from different pages (e.g., Chemistry then Hematology).
-        
-        This trusts that the VLM extraction prompt "DO NOT extract duplicate test names"
-        is working correctly and only removes true duplicates from the same page.
-        
-        Args:
-            medical_data: List of extracted medical data entries
-        
-        Returns:
-            Deduplicated list (removes only exact consecutive duplicates)
+        Remove duplicates (including non-consecutive) across the entire report.
+        Normalizes names (e.g., 'M C V' -> 'MCV') for better matching.
         """
         if not medical_data:
             return medical_data
         
         unique_entries = []
-        last_entry_key = None
+        seen_keys = set()
         
         for entry in medical_data:
-            field_name = entry.get("field_name", "").strip().lower()
+            # Normalize name for the key (remove spaces/special chars)
+            raw_name = entry.get("field_name", "").strip().lower()
+            normalized_name = re.sub(r'[^a-zA-Z0-9]', '', raw_name)
+            
             field_value = entry.get("field_value", "").strip()
             field_unit = entry.get("field_unit", "").strip().lower()
             
-            # Create key from field name, value, AND unit
-            entry_key = (field_name, field_value, field_unit)
+            # Create key from normalized name, value, AND unit
+            entry_key = (normalized_name, field_value, field_unit)
             
-            # Only skip if this is EXACTLY the same as the previous entry
-            # This removes true duplicates while keeping same test names from different pages
-            if entry_key != last_entry_key and field_name and field_value:
+            if entry_key not in seen_keys and raw_name and field_value:
                 unique_entries.append(entry)
-                last_entry_key = entry_key
+                seen_keys.add(entry_key)
         
         return unique_entries
     
@@ -160,10 +153,13 @@ class MedicalDataPostProcessor:
         category = str(entry.get("category", "")).strip().strip('[]')
         notes = str(entry.get("notes", "")).strip().strip('[]')
         
-        # Skip rows that are clearly table headers
-        header_keywords = ["field", "test", "result", "value", "unit", "range", "normal", "remarks", "notes", "status",
-                         "الفحص", "النتيجة", "الوحدة", "النتيجة الطبيعية", "ملاحظات"]
-        if any(kw == field_name.lower() for kw in header_keywords):
+        # Skip rows that are clearly table headers (case-insensitive regex)
+        header_patterns = [
+            r'^result[:\s]*$', r'^investigation[:\s]*$', r'^normal[:\s]*ranges?$', 
+            r'^unit[:\s]*$', r'^field[:\s]*name$', r'^test[:\s]*name$',
+            r'^الفحص', r'^النتيجة', r'^الوحدة', r'^النتيجة الطبيعية', r'^ملاحظات'
+        ]
+        if any(re.search(pat, field_name.lower()) for pat in header_patterns):
             return None
             
         # Sentinel Check: Discard placeholders used to maintain alignment

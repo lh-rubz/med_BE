@@ -71,16 +71,16 @@ Lab Name: laboratory name if found
 Identify all laboratory tests/fields from the table. 
 
 🚨 SUB-HEADINGS (IMPORTANT):
-- If the report has bold sub-headings like "E.S.R", "CBC", or "Biochemistry", and tests are listed under them (like "I Hour", "II Hour"), you MUST prepend the sub-heading to the test name.
-- e.g., "I Hour" becomes "E.S.R: I Hour".
+- If the report has bold sub-headings (e.g., "Investigation", "Biochemistry", "Complete Blood Picture"), and tests are listed under them, you MUST prepend the sub-heading to the test name.
+- e.g., "Complete Blood Picture: Haemoglobin".
 
-🚨 NO-RESULT RULE:
-- DO NOT extract category headers like "C-REACTIVE PROTEIN" or "النتيجة" as a test if the line contains no numbers or symbols next to it.
-- If the image says "C-REACTIVE PROTEIN" and then below it "Latex: 6.0", only extract "C-REACTIVE PROTEIN (Latex)".
-- 🚫 IGNORE common table headers: "الفحص" (Test), "النتيجة" (Result), "الوحدة" (Unit), "النتيجة الطبيعية" (Normal Range), "ملاحظات" (Notes).
+🚨 NO-RESULT & HEADER RULES:
+- 🚫 **IGNORE TABLE HEADERS**: Do NOT extract words like "Investigation", "Result", "Normal Ranges", "Units", "النتيجة", "الفحص", "الوحدة", "ملاحظات" if they are just column labels.
+- 🚫 **NO DUPLICATES**: DO NOT list the same test twice in the medical data table. If a test appears multiple times in the OCR, only list it once with its final result.
+- DO NOT extract category headers as a test if the line contains no numbers or symbols next to it.
 
 For each test, extract:
-- Test name (field_name) - INCLUDE the sub-heading prefix if applicable.
+- Test name (field_name) - INCLUDE any grouped prefix if applicable.
 - Result (field_value) - INCLUDE symbols like "<" or ">" if they are part of the value.
 - Unit (field_unit)
 - Normal range (normal_range)

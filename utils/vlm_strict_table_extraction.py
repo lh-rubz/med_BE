@@ -70,9 +70,10 @@ Page {idx}/{total_pages}
    - 🚫 Fix disjointed characters (e.g. 'أحمد نعی رات' -> 'أحمد نعيرات').
 
 🚨 TABLE MIRRORING (PIXEL-TRACE RULES) 🚨
-1. **IGNORE HEADER ROWS**: Do NOT extract rows containing labels like: "النتيجة", "الفحص", "الوحدة", "النتيجة الطبيعية", "ملاحظات", "Result", "Test".
-2. **Handle [OCR HINT]**: A hint like `[OCR HINT: 109 mg/dl]` is provided to help you find the correct row. 
-   - 🚫 **IMAGE IS TRUTH**: If the image pixels say `257` but the hint says `0.1`, you MUST capture `257`.
+1. **STRICT HEADER SKIP**: Do NOT extract rows containing labels like: "النتيجة", "الفحص", "الوحدة", "النتيجة الطبيعية", "ملاحظات", "Result", "Test", "Investigation", "Normal Ranges", "Special", "Investigation Title".
+2. **ROW ALIGNMENT ONLY**: The OCR Reference below is for navigation only. 
+   - 🚫 **MIRROR PIXELS**: If a row in the Reference is empty or not visible in the image, return "EMPTY_SPECIFIED".
+   - 🚫 **NO GUESSING**: Do not reuse values from previous rows. Capture ONLY what is currently at the current horizontal line.
 3. **Trace Handwriting**: Mirror individual digit shapes and strokes exactly as they appear in the ink.
 4. **Exact Symbols**: If the result is `< 6.0`, you MUST capture `< 6.0`. 🚫 DO NOT strip signs.
 5. **Exact Units**: Mirror symbols and subscripts/superscripts exactly.

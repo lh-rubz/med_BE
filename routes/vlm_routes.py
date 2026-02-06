@@ -949,13 +949,14 @@ class ChatResource(Resource):
             # Only call VLM if we're using vlm_primary method
             if extraction_method == "vlm_primary":
                 try:
-                    # SEGMENTATION: Split Hematology/long tables for high-precision
+                    # SEGMENTATION: Only split if the table is actually long (e.g. > 30 detected rows)
+                    # 🚫 DISABLE keyword-based splitting which caused duplication on short reports
                     image_segments = [image_info['data']]
-                    is_long_report = any(term in str(image_info.get('source_filename', '')).lower() 
-                                      for term in ["hematology", "cbc", "bloodreport", "hebe", "heba", "blood", "ramallah", "phc", "جامع"])
+                    detected_rows = organized_data.get("medical_data", []) if organized_data else []
+                    is_long_report = len(detected_rows) > 30 
                     
                     if is_long_report:
-                        print(f"✂️  Segmenting Page {idx} (Long report detected) for high-precision extraction...")
+                        print(f"✂️  Segmenting Page {idx} (Long report: {len(detected_rows)} rows) for high-precision...")
                         image_segments = split_image_vertically(image_info['data'])
                     
                     page_results = []
@@ -966,17 +967,16 @@ class ChatResource(Resource):
                         image_base64 = base64.b64encode(segment_data).decode('utf-8')
                         image_format = image_info['format']
                         
-                        # USE REFINEMENT PROMPT (User Request: Feed organized text back into model with image)
+                        # USE REFINEMENT PROMPT
                         if organized_data:
-                            # Add row numbers to help VLM track the table structure
-                            # 🚨 OCR NAVIGATIONAL HINTS: These help you find the correct horizontal line.
-                            # BUT the image pixels are always the truth.
+                            # 🚨 ROW-ALIGNMENT ONLY: Send test names to help VLM find the line.
+                            # 🚫 NO VALUES: Force VLM to look at pixels for RESULTS.
                             numbered_medical_data = []
                             for r_idx, r in enumerate(organized_data.get("medical_data", []), 1):
-                                numbered_medical_data.append(f"Row {r_idx}: {r.get('field_name')} [OCR HINT: {r.get('field_value')} {r.get('field_unit')}]")
+                                numbered_medical_data.append(f"Row {r_idx}: {r.get('field_name')}")
                             
                             ref_text = f"PATIENT: {organized_data.get('patient_name')}\nDOCTOR: {organized_data.get('doctor_names')}\n\nTABLE STRUCTURE (Map each row to the image):\n" + "\n".join(numbered_medical_data)
-                            print(f"📋 Refinement Reference Sent to VLM (WITH NAV-HINTS):\n{ref_text[:500]}...")
+                            print(f"📋 Refinement Anchors Sent to VLM (Names Only):\n{ref_text[:500]}...")
                             prompt_text = get_ocr_refinement_prompt(idx=idx, total_pages=total_pages, organized_text=ref_text)
                         else:
                             # Fallback if no organized data exists
