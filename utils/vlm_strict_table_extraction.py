@@ -55,31 +55,40 @@ def get_ocr_refinement_prompt(idx: int, total_pages: int, organized_text: str) -
 🔬 MEDICAL JSON DIGITIZATION - OCR REFINEMENT PASS
 Page {idx}/{total_pages}
 
-I have already extracted and organized the text from this report using OCR. 
-Your task is to act as a High-Precision Visual Validator. 
+I have organized OCR text. You MUST act as a High-Precision Visual Validator to map it to the image.
 
-INPUT: 
-1. **ORGANIZED OCR DATA**: (See the reference provided below)
-2. **ORIGINAL IMAGE**: (The attached medical report page)
+🚨 TOP-GRID DEMOGRAPHIC ANCHORS (MANDATORY) 🚨
+1. **PATIENT NAME**: In the top-RIGHT grid. Locate the text "اسم المريض". The name is EXACTLY to its LEFT.
+2. **DOCTOR NAME**: In the top-LEFT grid. Locate the text "الطبيب" (bottom row). The name is EXACTLY to its LEFT. 
+   - 🚫 DO NOT use "د.منى على" or other hallucinated names. If the image says "أحمد محمد", you MUST return " أحمد محمد".
 
-TASK:
-Map the results from the **ORGANIZED OCR DATA** to the **ORIGINAL IMAGE** using a **STRICT HORIZONTAL BASELINE LOCK**.
+🚨 VERTICAL ROW INTEGRITY (STRICT BASELINE LOCK) 🚨
+Trace a perfectly horizontal line from the center of each TEST NAME leftward.
+Identify the result using these THREE SCENARIOS:
 
-🚨 OPERATIONAL PROTOCOL 🚨
-1. **Text Integrity**: Use the names and values from the OCR DATA as your primary textual source. They are usually more accurate for characters than a fresh VLM scan.
-2. **Baseline Locking**: For every test in the OCR data, find its location in the image. Verify that the result and range are DIRECTLY on the same horizontal baseline as the test name.
-3. **Alignment Correction**: If the OCR data has a value that appears shifted in the image, use your vision to fix it. Move the value to the correct test parameter.
-4. **Spacer Cleaning**: If the OCR data includes "empty" or "spacer" rows (e.g., results with '*', '.', or '#'), YOU MUST DISCARD THEM.
-5. **JSON Mapping**: Return the final, verified dataset in the strict JSON format requested below.
+- **Scenario A (Value Present)**: Result column has a number (e.g. 7.1, 0.1, 14.4).
+  - Extract the literal number.
+- **Scenario B (Symbol Present)**: Result column has a star "*", a dot ".", or "#".
+  - Return `field_value`: "EMPTY_SPECIFIED". 🚫 DO NOT borrow from the next line.
+- **Scenario C (True Empty)**: Result column is completely blank.
+  - Return `field_value`: "EMPTY_IN_IMAGE". 🚫 DO NOT borrow from the next line.
+
+🚨 MULTI-PAGE/SEGMENT CONTEXT 🚨
+- If a row is a header like "HEMATOLOGY" or "CBC", SKIP IT.
+- Preserve the Arabic/English test names exactly as provided in the OCR REFERENCE.
 
 JSON RETURN ONLY:
 {{
+    "patient_name": "Name next to 'اسم المريض'",
+    "doctor_names": "Name next to 'الطبيب'",
+    "patient_age": "Age/DOB",
+    "patient_gender": "Male/Female",
     "medical_data": [
         {{
-            "field_name": "Full Test Name from OCR (Verified)",
-            "field_value": "Numeric Result (Aligned via Image)",
+            "field_name": "Literal Test Name",
+            "field_value": "Number OR 'EMPTY_SPECIFIED' OR 'EMPTY_IN_IMAGE'",
             "field_unit": "Unit",
-            "normal_range": "Literal Range (e.g. 10-20)"
+            "normal_range": "Range"
         }}
     ]
 }}

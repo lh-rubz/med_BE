@@ -969,12 +969,12 @@ class ChatResource(Resource):
                         
                         # USE REFINEMENT PROMPT (User Request: Feed organized text back into model with image)
                         if organized_data:
-                            # Convert a representative sample of organized data to a readable string for the model
-                            ref_text = json.dumps({
-                                "patient_name": organized_data.get("patient_name"),
-                                "doctor_names": organized_data.get("doctor_names"),
-                                "medical_data": organized_data.get("medical_data", [])
-                            }, ensure_ascii=False, indent=2)
+                            # Add row numbers to help VLM track the table structure
+                            numbered_medical_data = []
+                            for r_idx, r in enumerate(organized_data.get("medical_data", []), 1):
+                                numbered_medical_data.append(f"Row {r_idx}: {r.get('field_name')} (Expected value: {r.get('field_value')})")
+                            
+                            ref_text = f"PATIENT: {organized_data.get('patient_name')}\nDOCTOR: {organized_data.get('doctor_names')}\n\nTABLE STRUCTURE:\n" + "\n".join(numbered_medical_data)
                             prompt_text = get_ocr_refinement_prompt(idx=idx, total_pages=total_pages, organized_text=ref_text)
                         else:
                             # Fallback if no organized data exists
