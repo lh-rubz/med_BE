@@ -904,7 +904,6 @@ class ChatResource(Resource):
             if organized_data and organized_data.get('medical_data'):
                 medical_list = organized_data['medical_data']
                 lab_name = (organized_data.get('lab_name', '') or '').lower()
-                from utils.medical_data_postprocessor import MedicalDataPostProcessor
                 
                 # Clean and check for alignment issues
                 temp_cleaned = MedicalDataPostProcessor.clean_extracted_data(organized_data)
