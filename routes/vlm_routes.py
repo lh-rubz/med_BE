@@ -969,12 +969,13 @@ class ChatResource(Resource):
                         # USE REFINEMENT PROMPT (User Request: Feed organized text back into model with image)
                         if organized_data:
                             # Add row numbers to help VLM track the table structure
+                            # 🚫 NO EXPECTED VALUES: Force VLM to rely on image pixels, not OCR hints.
                             numbered_medical_data = []
                             for r_idx, r in enumerate(organized_data.get("medical_data", []), 1):
                                 numbered_medical_data.append(f"Row {r_idx}: {r.get('field_name')}")
                             
-                            ref_text = "TABLE STRUCTURE (Verify every row against image):\n" + "\n".join(numbered_medical_data)
-                            print(f"📋 Refinement Reference Sent to VLM (Names only, no bias):\n{ref_text[:300]}...")
+                            ref_text = f"PATIENT: {organized_data.get('patient_name')}\nDOCTOR: {organized_data.get('doctor_names')}\n\nTABLE STRUCTURE (Map each row to the image):\n" + "\n".join(numbered_medical_data)
+                            print(f"📋 Refinement Reference Sent to VLM (ANCHORS ONLY):\n{ref_text[:500]}...")
                             prompt_text = get_ocr_refinement_prompt(idx=idx, total_pages=total_pages, organized_text=ref_text)
                         else:
                             # Fallback if no organized data exists
@@ -1091,11 +1092,11 @@ This report uses a 2-column grid layout for demographics. Labels are on the RIGH
 
 Return JSON only:
 {
-    "patient_name": "Literal full name ONLY. 🚫 NO AUTOCOMPLETE: If baseline says 'هبة جمال ابو', but image says 'هبة جمال ابو الرب', you MUST use 'الرب'. Capture at least 4 words.",
+    "patient_name": "Literal full name ONLY. 🚫 NO HINTS: Capture at least 4 words if available.",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
-    "doctor_names": "Literal personal name of the doctor. 🚫 Fix disjointed letters (e.g. 'أحمد نعی رات' -> 'أحمد نعيرات')."
+    "doctor_names": "Literal personal name of the doctor. Join disjointed letters if present."
 }"""
                     
                     content = [

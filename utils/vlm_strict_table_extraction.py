@@ -63,24 +63,25 @@ Page {idx}/{total_pages}
 - 🎨 **HANDWRITING/STAMPS**: You MUST capture all ink (stamps, handwriting, signatures). 
 
 🚨 DOCTOR & PATIENT SCAN (TOP GRIDS) 🚨
-1. **PATIENT NAME**: Top-RIGHT grid. Find "اسم المريض". The name is to its left.
-2. **DOCTOR NAME**: Top-LEFT grid (5-row box). Locate the label "التطبيب" or "الطبيب" in the VERY BOTTOM row.
-   - Look for a **STAMP** or **HANDWRITTEN NAME** immediately to its LEFT (e.g. جهاد العملة, أحمد نعيرات).
+1. **PATIENT NAME**: Top-RIGHT grid. Find the label for "Patient Name" (e.g. "اسم المريض"). The name is strictly to its left.
+2. **DOCTOR NAME**: Top-LEFT grid. Locate the label for "Doctor" (e.g. "الطبيب").
+   - Look for a **STAMP** or **HANDWRITTEN NAME** immediately to its LEFT.
    - 🚫 If no ink is visible next to the label, return "EMPTY_IN_IMAGE".
 
 🚨 TABLE MIRRORING (PIXEL-TRACE RULES) 🚨
 For every row in the OCR Reference:
 1. **Trace Handwriting**: If a result is handwritten (slanted, ink-based), look at the shape carefully. 
-   - `1.1` has two vertical strokes. `1.4` has a cross-stroke. MIRROR ONLY THE INK.
-   - IF the result is `< 6.0`, you MUST capture `< 6.0`. 🚫 DO NOT strip the `<` or `>`.
+   - Mirror individual digit shapes and strokes exactly as they appear in the ink.
+   - IF the result is `< 6.0`, you MUST capture `< 6.0`. 🚫 DO NOT strip signs (<, >).
+2. **Handle Symbols**: 
    - If a cell contains a diagonal line (`/`), a cross (`X`), or a star (`*`), return "EMPTY_SPECIFIED".
-   - 🚫 **NO BORROWING**: If Row X is empty, JSON Row X MUST be "EMPTY_SPECIFIED". Do not use data from Row X+1.
-3. **Exact Ranges**: If a range is `(0.7-4.8)`, you MUST NOT return `(1.5-4)`. Mirrored pixels only.
-4. **Exact Units**: Mirror symbols exactly (`K/uL`, `10(GSD)`, `M/uL`).
+   - 🚫 **NO BORROWING**: If a row in the reference image is empty, the JSON field MUST be "EMPTY_SPECIFIED".
+3. **Exact Ranges**: Mirror the range pixels exactly. 🚫 DO NOT use external knowledge.
+4. **Exact Units**: Mirror symbols and subscripts/superscripts exactly as they appear.
 
 🚨 ROW SEQUENCE INTEGRITY 🚨
 - Follow the OCR Reference order below 1:1. 
-- If the image has Row 3 blank, Row 3 in JSON is "EMPTY_SPECIFIED".
+- If a row in the physical image is blank, use "EMPTY_SPECIFIED".
 
 JSON RETURN ONLY:
 {{
