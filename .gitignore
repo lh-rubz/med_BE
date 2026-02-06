@@ -8,3 +8,6 @@ instance/
 *.db
 app_backup.py
 firebase-adminsdk.json
+core.*
+service_account.json
+uploads/
