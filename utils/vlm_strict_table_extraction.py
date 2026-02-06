@@ -52,30 +52,29 @@ def get_ocr_refinement_prompt(idx: int, total_pages: int, organized_text: str) -
     to the original image to produce the final, perfectly aligned JSON.
     """
     return f"""
-🔬 MEDICAL JSON DIGITIZATION - OCR REFINEMENT PASS
+🔬 MEDICAL JSON - TOTAL BASELINE LOCK & REFINEMENT
 Page {idx}/{total_pages}
 
-I have organized OCR text. You MUST act as a High-Precision Visual Validator to map it to the image.
+I have organized OCR text. You MUST act as a High-Precision Visual Validator to map it to the image. 
 
-🚨 TOP-GRID DEMOGRAPHIC ANCHORS (MANDATORY) 🚨
-1. **PATIENT NAME**: In the top-RIGHT grid. Locate the text "اسم المريض". The name is EXACTLY to its LEFT.
-2. **DOCTOR NAME**: In the top-LEFT grid. Locate the text "الطبيب" (bottom row). The name is EXACTLY to its LEFT. 
-   - 🚫 DO NOT use "د.منى على" or other hallucinated names. If the image says "أحمد محمد", you MUST return " أحمد محمد".
+🚨 DOCTOR/PATIENT ANCHORS (MANDATORY) 🚨
+1. **PATIENT NAME**: In the top-RIGHT grid. Locate "اسم المريض". The name is EXACTLY to its LEFT. (e.g., رئيسة خضر طالب خطيب).
+2. **DOCTOR NAME**: In the top-LEFT grid. Locate the label "الطبيب" (bottom row). The name is EXACTLY to its LEFT. 
+   - 🚫 BLOCK HALLUCINATION: If the image says "جهاد العملة", return "جهاد العملة". DO NOT use "د. راشد الله" or "د.منى على".
 
-🚨 VERTICAL ROW INTEGRITY (STRICT BASELINE LOCK) 🚨
-Trace a perfectly horizontal line from the center of each TEST NAME leftward.
-Identify the result using these THREE SCENARIOS:
+🚨 VERTICAL ROW INTEGRITY (NO-SKIP RULES) 🚨
+For EVERY row in the OCR REFERENCE, you must perform a "Pixel-Trace":
+1. Find the test name in the image.
+2. Trace a straight horizontal line to the Result column.
+3. **Capture EVERY character**:
+   - IF the result is `0.1`, you MUST capture `0.1`. 🚫 DO NOT skip the row.
+   - IF the result is `*`, capture `field_value`: "EMPTY_SPECIFIED". 🚫 DO NOT borrow from the next line.
+   - IF the unit is `%G`, `%L`, or `mg/dL`, you MUST capture it EXACTLY. 🚫 DO NOT shorten `%G` to `%`.
 
-- **Scenario A (Value Present)**: Result column has a number (e.g. 7.1, 0.1, 14.4).
-  - Extract the literal number.
-- **Scenario B (Symbol Present)**: Result column has a star "*", a dot ".", or "#".
-  - Return `field_value`: "EMPTY_SPECIFIED". 🚫 DO NOT borrow from the next line.
-- **Scenario C (True Empty)**: Result column is completely blank.
-  - Return `field_value`: "EMPTY_IN_IMAGE". 🚫 DO NOT borrow from the next line.
-
-🚨 MULTI-PAGE/SEGMENT CONTEXT 🚨
-- If a row is a header like "HEMATOLOGY" or "CBC", SKIP IT.
-- Preserve the Arabic/English test names exactly as provided in the OCR REFERENCE.
+🚨 ROW SEQUENCE SYNC 🚨
+- Row 1 In OCR MUST map to Row 1 in Image.
+- Row 2 In OCR MUST map to Row 2 in Image.
+- If you skip a row, the entire report will shift. YOU ARE NOT ALLOWED TO SKIP.
 
 JSON RETURN ONLY:
 {{
@@ -85,15 +84,15 @@ JSON RETURN ONLY:
     "patient_gender": "Male/Female",
     "medical_data": [
         {{
-            "field_name": "Literal Test Name",
-            "field_value": "Number OR 'EMPTY_SPECIFIED' OR 'EMPTY_IN_IMAGE'",
-            "field_unit": "Unit",
+            "field_name": "Test Name from OCR",
+            "field_value": "Literal number OR 'EMPTY_SPECIFIED'",
+            "field_unit": "EXACT Unit (e.g. %G, %L, MuL)",
             "normal_range": "Range"
         }}
     ]
 }}
 
-### ORGANIZED OCR DATA REFERENCE ###
+### ORGANIZED OCR REFERENCE (STRICT ORDER) ###
 {organized_text}
 """
 

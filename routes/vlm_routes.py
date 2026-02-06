@@ -972,9 +972,10 @@ class ChatResource(Resource):
                             # Add row numbers to help VLM track the table structure
                             numbered_medical_data = []
                             for r_idx, r in enumerate(organized_data.get("medical_data", []), 1):
-                                numbered_medical_data.append(f"Row {r_idx}: {r.get('field_name')} (Expected value: {r.get('field_value')})")
+                                numbered_medical_data.append(f"Row {r_idx}: {r.get('field_name')} (Expected: {r.get('field_value')} {r.get('field_unit')})")
                             
                             ref_text = f"PATIENT: {organized_data.get('patient_name')}\nDOCTOR: {organized_data.get('doctor_names')}\n\nTABLE STRUCTURE:\n" + "\n".join(numbered_medical_data)
+                            print(f"📋 Refinement Reference Sent to VLM:\n{ref_text[:500]}...")
                             prompt_text = get_ocr_refinement_prompt(idx=idx, total_pages=total_pages, organized_text=ref_text)
                         else:
                             # Fallback if no organized data exists
@@ -997,25 +998,20 @@ class ChatResource(Resource):
                                 vlm_data = json.loads(json_match.group(0))
                                 page_results.append(vlm_data)
                                 
-                                # Capture patient info from first segment
+                                # Capture/Enrich patient info from first segment
                                 if seg_idx == 1:
                                     for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
                                         val = str(vlm_data.get(key, "")).strip()
                                         if val and val.lower() not in ["unknown", "n/a", "none"]:
-                                            # Reject labels misidentified as names (Social Affairs, Insurance, etc. + common typos)
-                                            # Target: شؤون, اجتماعية, شذون, تأمين
-                                            rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "social", "affairs", "insurance"]
-                                            is_hallucination = key == 'patient_name' and any(s in val for s in rejection_terms)
+                                            # Reject labels misidentified as names
+                                            rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "عيادة", "مختبر", "وزارة", "مديرية"]
+                                            is_hallucination = any(s in val for s in rejection_terms)
                                             
                                             current_val = str(extracted_data.get(key, "")).strip()
-                                            current_is_valid = current_val and not any(s in current_val for s in rejection_terms)
-                                            
-                                            # Update only if not already filled with valid data or if this is a better match
-                                            if not current_is_valid:
-                                                if not is_hallucination:
+                                            # If new value is visually captured from the image and NOT a hallucination, prioritize it
+                                            if not is_hallucination:
+                                                if not current_val or len(val) > len(current_val) or key == 'doctor_names':
                                                     extracted_data[key] = val
-                                            elif not is_hallucination and len(val) > len(current_val):
-                                                extracted_data[key] = val
                         except Exception as parse_err:
                             print(f"⚠️  Parsing segment {seg_idx} failed: {parse_err}")
 
