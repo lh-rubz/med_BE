@@ -63,21 +63,19 @@ Page {idx}/{total_pages}
 - 🎨 **HANDWRITING/STAMPS**: You MUST capture all ink (stamps, handwriting, signatures). 
 
 🚨 DOCTOR & PATIENT SCAN (TOP GRIDS) 🚨
-1. **PATIENT NAME**: Top-RIGHT grid. Find the label for "Patient Name" (e.g. "اسم المريض"). The name is strictly to its left.
+1. **PATIENT NAME**: Top-RIGHT grid. Find "اسم المريض". The name is to its left.
+   - 🚫 MUST capture at least 4 words (e.g. هبة جمال ابو الرب).
 2. **DOCTOR NAME**: Top-LEFT grid. Locate the label for "Doctor" (e.g. "الطبيب").
    - Look for a **STAMP** or **HANDWRITTEN NAME** immediately to its LEFT.
-   - 🚫 If no ink is visible next to the label, return "EMPTY_IN_IMAGE".
+   - 🚫 Fix disjointed characters (e.g. 'أحمد نعی رات' -> 'أحمد نعيرات').
 
 🚨 TABLE MIRRORING (PIXEL-TRACE RULES) 🚨
-For every row in the OCR Reference:
-1. **Trace Handwriting**: If a result is handwritten (slanted, ink-based), look at the shape carefully. 
-   - Mirror individual digit shapes and strokes exactly as they appear in the ink.
-   - IF the result is `< 6.0`, you MUST capture `< 6.0`. 🚫 DO NOT strip signs (<, >).
-2. **Handle Symbols**: 
-   - If a cell contains a diagonal line (`/`), a cross (`X`), or a star (`*`), return "EMPTY_SPECIFIED".
-   - 🚫 **NO BORROWING**: If a row in the reference image is empty, the JSON field MUST be "EMPTY_SPECIFIED".
-3. **Exact Ranges**: Mirror the range pixels exactly. 🚫 DO NOT use external knowledge.
-4. **Exact Units**: Mirror symbols and subscripts/superscripts exactly as they appear.
+1. **IGNORE HEADER ROWS**: Do NOT extract rows containing labels like: "النتيجة", "الفحص", "الوحدة", "النتيجة الطبيعية", "ملاحظات", "Result", "Test".
+2. **Handle [OCR HINT]**: A hint like `[OCR HINT: 109 mg/dl]` is provided to help you find the correct row. 
+   - 🚫 **IMAGE IS TRUTH**: If the image pixels say `257` but the hint says `0.1`, you MUST capture `257`.
+3. **Trace Handwriting**: Mirror individual digit shapes and strokes exactly as they appear in the ink.
+4. **Exact Symbols**: If the result is `< 6.0`, you MUST capture `< 6.0`. 🚫 DO NOT strip signs.
+5. **Exact Units**: Mirror symbols and subscripts/superscripts exactly.
 
 🚨 ROW SEQUENCE INTEGRITY 🚨
 - Follow the OCR Reference order below 1:1. 

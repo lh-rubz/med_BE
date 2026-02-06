@@ -71,20 +71,21 @@ Lab Name: laboratory name if found
 Identify all laboratory tests/fields from the table. 
 
 🚨 SUB-HEADINGS (IMPORTANT):
-- If the report has bold sub-headings and tests are listed under them, you MUST prepend the sub-heading to the test name.
-- e.g., "Sub-Heading: Test Name".
+- If the report has bold sub-headings like "E.S.R", "CBC", or "Biochemistry", and tests are listed under them (like "I Hour", "II Hour"), you MUST prepend the sub-heading to the test name.
+- e.g., "I Hour" becomes "E.S.R: I Hour".
 
 🚨 NO-RESULT RULE:
-- DO NOT extract category headers as a test if the line contains no numbers or symbols next to it.
-- If the image has a header and then a specific test below it with results, group them logically.
+- DO NOT extract category headers like "C-REACTIVE PROTEIN" or "النتيجة" as a test if the line contains no numbers or symbols next to it.
+- If the image says "C-REACTIVE PROTEIN" and then below it "Latex: 6.0", only extract "C-REACTIVE PROTEIN (Latex)".
+- 🚫 IGNORE common table headers: "الفحص" (Test), "النتيجة" (Result), "الوحدة" (Unit), "النتيجة الطبيعية" (Normal Range), "ملاحظات" (Notes).
 
 For each test, extract:
-- Test name (field_name) - INCLUDE any grouped prefix if applicable.
+- Test name (field_name) - INCLUDE the sub-heading prefix if applicable.
 - Result (field_value) - INCLUDE symbols like "<" or ">" if they are part of the value.
 - Unit (field_unit)
 - Normal range (normal_range)
 - Category (e.g. CBC, Liver, etc.)
-- Normal Range contains a dash or parentheses
+- Normal Range contains a dash or parentheses (e.g., "74-110", "(0.5-0.9)")
 - DO NOT confuse Value with Normal Range!
 - DO NOT put square brackets around names or values
 

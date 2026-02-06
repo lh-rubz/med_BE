@@ -160,9 +160,10 @@ class MedicalDataPostProcessor:
         category = str(entry.get("category", "")).strip().strip('[]')
         notes = str(entry.get("notes", "")).strip().strip('[]')
         
-        # Skip table headers extracted as data
-        header_keywords = ["test name", "field name", "result", "value", "unit", "normal range", "reference"]
-        if field_name.lower() in header_keywords and (not field_value or field_value.lower() in header_keywords):
+        # Skip rows that are clearly table headers
+        header_keywords = ["field", "test", "result", "value", "unit", "range", "normal", "remarks", "notes", "status",
+                         "الفحص", "النتيجة", "الوحدة", "النتيجة الطبيعية", "ملاحظات"]
+        if any(kw == field_name.lower() for kw in header_keywords):
             return None
             
         # Sentinel Check: Discard placeholders used to maintain alignment
