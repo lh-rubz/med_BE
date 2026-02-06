@@ -455,34 +455,34 @@ class MedicalDataPostProcessor:
         
         return name
 
-@staticmethod
-def _normalize_arabic_text(text: str) -> str:
-    """
-    Remove Arabic Tatweel (Kashida) and fix disjointed character patterns.
-    e.g. "أحمد نعی رات" -> "أحمد نعيرات"
-    """
-    if not text:
-        return ""
-    
-    # 1. Remove Tatweel (U+0640)
-    text = text.replace("\u0640", "")
-    
-    # 2. Fix common disjointed patterns (single space between Arabic letters)
-    # This regex looks for an Arabic character followed by a space followed by another Arabic character
-    # But only if it's not a word boundary. This is tricky.
-    # Simpler: If there are many single-letter "words", it's likely disjointed.
-    words = text.split()
-    if len([w for w in words if len(w) == 1]) > len(words) / 3:
-        # High density of single letters - aggressive rejoin
-        text = "".join(words)
-        # Re-insert spaces after common ending letters? No, too risky.
-        # Let's try a simpler fix for specific name patterns if needed.
-    
-    # 3. Standardize common characters
-    text = text.replace("ی", "ي") # Persian Yi to Arabic Ya
-    text = text.replace("ک", "ك") # Persian Keh to Arabic Kahf
-    
-    return text.strip()
+    @staticmethod
+    def _normalize_arabic_text(text: str) -> str:
+        """
+        Remove Arabic Tatweel (Kashida) and fix disjointed character patterns.
+        e.g. "أحمد نعی رات" -> "أحمد نعيرات"
+        """
+        if not text:
+            return ""
+        
+        # 1. Remove Tatweel (U+0640)
+        text = text.replace("\u0640", "")
+        
+        # 2. Fix common disjointed patterns (single space between Arabic letters)
+        # This regex looks for an Arabic character followed by a space followed by another Arabic character
+        # But only if it's not a word boundary. This is tricky.
+        # Simpler: If there are many single-letter "words", it's likely disjointed.
+        words = text.split()
+        if len([w for w in words if len(w) == 1]) > len(words) / 3:
+            # High density of single letters - aggressive rejoin
+            text = "".join(words)
+            # Re-insert spaces after common ending letters? No, too risky.
+            # Let's try a simpler fix for specific name patterns if needed.
+        
+        # 3. Standardize common characters
+        text = text.replace("ی", "ي") # Persian Yi to Arabic Ya
+        text = text.replace("ک", "ك") # Persian Keh to Arabic Kahf
+        
+        return text.strip()
     
     @staticmethod
     def _clean_age(age: str, report_date: str = "") -> str:
