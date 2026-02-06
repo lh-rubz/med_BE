@@ -1004,7 +1004,7 @@ class ChatResource(Resource):
                                     val = str(vlm_data.get(key, "")).strip()
                                     
                                     # Sentinels from VLM that count as "failure"
-                                    is_sentinel = val.lower() in ["unknown", "n/a", "none", "empty_in_image", "empty"]
+                                    is_sentinel = val.lower() in ["unknown", "n/a", "none", "empty_in_image", "empty", "empty_specified"]
                                     
                                     if val and not is_sentinel:
                                         # Reject labels/names misidentified as demographics

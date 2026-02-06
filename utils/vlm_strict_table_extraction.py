@@ -52,50 +52,51 @@ def get_ocr_refinement_prompt(idx: int, total_pages: int, organized_text: str) -
     to the original image to produce the final, perfectly aligned JSON.
     """
     return f"""
-🔬 MEDICAL JSON - STRICT IMAGE MIRRORING PASS
+🔬 MEDICAL JSON - EXTREME VISUAL MIRRORING (INK-FIRST MODE)
 Page {idx}/{total_pages}
 
-🚨 CRITICAL: YOU ARE A DUMB VISUAL MIRROR. DO NOT USE MEDICAL KNOWLEDGE.
-- If the image says range "(0.7-4.8)", you MUST NOT return "(1.5-4)".
-- If the image says result "1.1", you MUST NOT return "1.4".
-- Trust ONLY physical pixels. If columns are empty/diagonal, do not "fill" them.
+🚨 OPERATING RULE: YOU ARE A HIGH-RESOLUTION SCANNER. 
+- 🚫 DO NOT use medical knowledge (e.g. if it looks like `1.1`, do not return `1.4`).
+- 🚫 DO NOT "fix" typos. Mirror exactly what is on the paper.
+- 🎨 **HANDWRITING/STAMPS**: You MUST capture all ink (stamps, handwriting, signatures). 
 
-🚨 DOCTOR & PATIENT SCAN (TOP BOXES) 🚨
-1. **PATIENT NAME**: Top-Right grid. Locate "اسم المريض". The name is in the same cell area immediately to its left.
-2. **DOCTOR NAME**: Top-LEFT grid (smaller box). Find the very LAST row labeled "الطبيب". Extract the name immediately to its LEFT (e.g., جهاد العملة).
-   - 🚫 **BLANK RULE**: If that space is empty, return "EMPTY_IN_IMAGE". Do not invent names based on clinic titles.
+🚨 DOCTOR & PATIENT SCAN (TOP GRIDS) 🚨
+1. **PATIENT NAME**: Top-RIGHT grid. Find "اسم المريض". The name is to its left.
+2. **DOCTOR NAME**: Top-LEFT grid (5-row box). Locate the label "التطبيب" or "الطبيب" in the VERY BOTTOM row.
+   - Look for a **STAMP** or **HANDWRITTEN NAME** immediately to its LEFT (e.g. جهاد العملة, أحمد نعيرات).
+   - 🚫 If no ink is visible next to the label, return "EMPTY_IN_IMAGE".
 
-🚨 TABLE INTEGRITY (THE "NO-BRAIN" MIRROR RULES) 🚨
+🚨 TABLE MIRRORING (PIXEL-TRACE RULES) 🚨
 For every row in the OCR Reference:
-1. **Horizontal Trace**: Locate test name -> Trace 100% horizontally to the Result column.
-2. **Literal Capture**: 
-   - Capture small numbers (`0.1`, `1.1`, `0.23`) exactly.
-   - **Scenario: Symbol**: If the result column has a star (`*`), a diagonal line (`/` or `X`), or a dash (`-`), you MUST return `EMPTY_SPECIFIED`. 
-   - 🚫 **DO NOT BORROW**: Do not pull data from a neighboring row just because the current row is empty. 
-3. **Exact Units**: Mirror every character. If it says `K/uL`, do not return `KuL`. If it says `10(GSD)`, return `10(GSD)`. 
+1. **Trace Handwriting**: If a result is handwritten (slanted, ink-based), look at the shape carefully. 
+   - `1.1` has two vertical strokes. `1.4` has a cross-stroke. MIRROR ONLY THE INK.
+2. **Handle Symbols**: 
+   - If a cell contains a diagonal line (`/`), a cross (`X`), or a star (`*`), return "EMPTY_SPECIFIED".
+   - 🚫 **NO BORROWING**: If Row X is empty, JSON Row X MUST be "EMPTY_SPECIFIED". Do not use data from Row X+1.
+3. **Exact Ranges**: If a range is `(0.7-4.8)`, you MUST NOT return `(1.5-4)`. Mirrored pixels only.
+4. **Exact Units**: Mirror symbols exactly (`K/uL`, `10(GSD)`, `M/uL`).
 
-🚨 ROW SEQUENCE SYNC 🚨
-- You MUST follow the EXACT order of the OCR Reference below.
-- Row 1 In OCR MUST map to Row 1 in Image.
-- If Row 3 is empty in the image, Row 3 in JSON MUST be `EMPTY_SPECIFIED`.
+🚨 ROW SEQUENCE INTEGRITY 🚨
+- Follow the OCR Reference order below 1:1. 
+- If the image has Row 3 blank, Row 3 in JSON is "EMPTY_SPECIFIED".
 
 JSON RETURN ONLY:
 {{
-    "patient_name": "As seen in image",
-    "doctor_names": "Name next to 'الطبيب' (Mirror physical name)",
-    "patient_age": "Age",
+    "patient_name": "Exact name from image",
+    "doctor_names": "Exact ink/stamp next to 'الطبيب'",
+    "patient_age": "Literal age/DOB",
     "patient_gender": "Male/Female",
     "medical_data": [
         {{
             "field_name": "Name from OCR",
             "field_value": "Literal mirrored value or 'EMPTY_SPECIFIED'",
-            "field_unit": "EXACT mirrored unit (e.g. K/uL, %G, 10(GSD))",
-            "normal_range": "EXACT mirrored range (e.g. 0.7-4.8)"
+            "field_unit": "EXACT mirrored unit (e.g. K/uL, 10(GSD))",
+            "normal_range": "EXACT mirrored range"
         }}
     ]
 }}
 
-### ORGANIZED OCR REFERENCE (STRICT ORDER) ###
+### ORGANIZED OCR REFERENCE (STRICT MIRROR ORDER) ###
 {organized_text}
 """
 
