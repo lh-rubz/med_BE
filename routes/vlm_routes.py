@@ -1002,7 +1002,11 @@ class ChatResource(Resource):
                                 # 🚨 PROTECTION: Only capture demographics from FIRST PAGE, or only if currently EMPTY
                                 for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
                                     val = str(vlm_data.get(key, "")).strip()
-                                    if val and val.lower() not in ["unknown", "n/a", "none"]:
+                                    
+                                    # Sentinels from VLM that count as "failure"
+                                    is_sentinel = val.lower() in ["unknown", "n/a", "none", "empty_in_image", "empty"]
+                                    
+                                    if val and not is_sentinel:
                                         # Reject labels/names misidentified as demographics
                                         rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "عيادة", "مختبر", "وزارة", "مديرية"]
                                         is_hallucination = any(s in val for s in rejection_terms)

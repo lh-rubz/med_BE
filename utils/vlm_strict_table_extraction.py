@@ -52,45 +52,50 @@ def get_ocr_refinement_prompt(idx: int, total_pages: int, organized_text: str) -
     to the original image to produce the final, perfectly aligned JSON.
     """
     return f"""
-🔬 MEDICAL JSON - TOTAL BASELINE LOCK & REFINEMENT
+🔬 MEDICAL JSON - STRICT IMAGE MIRRORING PASS
 Page {idx}/{total_pages}
 
-I have organized OCR text names. You MUST act as a High-Precision Visual Validator to map them to the image. 
+🚨 CRITICAL: YOU ARE A DUMB VISUAL MIRROR. DO NOT USE MEDICAL KNOWLEDGE.
+- If the image says range "(0.7-4.8)", you MUST NOT return "(1.5-4)".
+- If the image says result "1.1", you MUST NOT return "1.4".
+- Trust ONLY physical pixels. If columns are empty/diagonal, do not "fill" them.
 
-🚨 DOCTOR/PATIENT ANCHORS (STRICT) 🚨
-1. **PATIENT NAME**: Top-RIGHT grid. Locate "اسم المريض". The name is EXACTLY to its LEFT.
-2. **DOCTOR NAME**: Top-LEFT grid. Locate the label "الطبيب" (bottom row of left grid). The name is EXACTLY to its LEFT. 
-   - 🚫 **BLANK ANCHOR RULE**: IF the space next to "الطبيب" is blank, you MUST return `EMPTY_IN_IMAGE`. 🚫 DO NOT hallucinate "د.منى على" or "د. راشد الله".
-   - 🚫 **LABEL PROTECTION**: Do not extract "عيادة", "مختبر", or "وزارة" as a name.
+🚨 DOCTOR & PATIENT SCAN (TOP BOXES) 🚨
+1. **PATIENT NAME**: Top-Right grid. Locate "اسم المريض". The name is in the same cell area immediately to its left.
+2. **DOCTOR NAME**: Top-LEFT grid (smaller box). Find the very LAST row labeled "الطبيب". Extract the name immediately to its LEFT (e.g., جهاد العملة).
+   - 🚫 **BLANK RULE**: If that space is empty, return "EMPTY_IN_IMAGE". Do not invent names based on clinic titles.
 
-🚨 VERTICAL ROW INTEGRITY (NON-BORROWING RULES) 🚨
-For EVERY row in the OCR REFERENCE, perform a "Pixel-Trace":
-1. Find the literal test name in the image.
-2. Trace a straight horizontal line to the Result column.
-3. **Capture EVERY character**:
-   - IF the result is `0.1` or `0.23`, capture it. 🚫 DO NOT skip.
-   - 🚫 **THE NO-BORROW RULE**: If Row X has no value in the image, return `EMPTY_SPECIFIED`. 🚫 DO NOT take the value from Row X+1 or Row X-1. This causes "Shift Errors".
-   - 🚫 **UNIT MIRRORING**: Capture units exactly (e.g., `%G`, `%L`, `KuL`). Do not strip the trailing letters.
+🚨 TABLE INTEGRITY (THE "NO-BRAIN" MIRROR RULES) 🚨
+For every row in the OCR Reference:
+1. **Horizontal Trace**: Locate test name -> Trace 100% horizontally to the Result column.
+2. **Literal Capture**: 
+   - Capture small numbers (`0.1`, `1.1`, `0.23`) exactly.
+   - **Scenario: Symbol**: If the result column has a star (`*`), a diagonal line (`/` or `X`), or a dash (`-`), you MUST return `EMPTY_SPECIFIED`. 
+   - 🚫 **DO NOT BORROW**: Do not pull data from a neighboring row just because the current row is empty. 
+3. **Exact Units**: Mirror every character. If it says `K/uL`, do not return `KuL`. If it says `10(GSD)`, return `10(GSD)`. 
 
 🚨 ROW SEQUENCE SYNC 🚨
+- You MUST follow the EXACT order of the OCR Reference below.
 - Row 1 In OCR MUST map to Row 1 in Image.
-- Row 2 In OCR MUST map to Row 2 in Image.
+- If Row 3 is empty in the image, Row 3 in JSON MUST be `EMPTY_SPECIFIED`.
 
 JSON RETURN ONLY:
 {{
-    "patient_name": "Name or 'EMPTY_IN_IMAGE'",
-    "doctor_names": "Name or 'EMPTY_IN_IMAGE'",
-    "patient_age": "Age/DOB",
+    "patient_name": "As seen in image",
+    "doctor_names": "Name next to 'الطبيب' (Mirror physical name)",
+    "patient_age": "Age",
     "patient_gender": "Male/Female",
     "medical_data": [
         {{
-            "field_name": "Test Name from OCR",
-            "field_value": "Literal value OR 'EMPTY_SPECIFIED'",
-            "field_unit": "EXACT Unit (e.g. %G, %L, KuL)",
-            "normal_range": "Range"
+            "field_name": "Name from OCR",
+            "field_value": "Literal mirrored value or 'EMPTY_SPECIFIED'",
+            "field_unit": "EXACT mirrored unit (e.g. K/uL, %G, 10(GSD))",
+            "normal_range": "EXACT mirrored range (e.g. 0.7-4.8)"
         }}
     ]
 }}
+
+### ORGANIZED OCR REFERENCE (STRICT ORDER) ###
 {organized_text}
 """
 
