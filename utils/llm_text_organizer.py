@@ -17,86 +17,32 @@ Benefits:
 def get_text_organizer_prompt():
     """
     Prompt for Stage 1: Organize raw OCR text into structured sections.
-    This is a TEXT-ONLY prompt (no image) for faster processing.
+    Focuses on creating high-quality "Anchors" for Stage 2 VLM refinement.
     """
     return """You are an expert at organizing messy OCR text from medical lab reports.
 
-Your task: Take the raw OCR text below and organize it into a clean, structured format.
+Your task: Take the raw OCR text below and organize it into clean "Anchors" that will be used for visual verification.
 
 IMPORTANT RULES:
-1. DO NOT invent or guess any data - only organize what's in the text
-2. Fix obvious OCR errors (e.g., "Glurose" → "Glucose", "0.B" → "0.8")
-3. Handle both Arabic (RTL) and English (LTR) text
-4. Separate patient information from test results
-5. Keep original values exactly as they appear (don't calculate or convert)
-
-CRITICAL FOR ARABIC TABLES:
-Arabic lab reports have columns in RIGHT-TO-LEFT order:
-- RIGHTMOST column = Test Name (الفحص)
-- Next column to left = Result/Value (النتيجة) - THIS IS THE NUMERIC RESULT (e.g., 109, 0.56, 12.6)
-- Next column to left = Normal Range (النتيجة الطبيعية) - contains dash like "74-110", "(0.5-0.9)"
-- Next column to left = Unit (الوحدة) - like mg/dL, U/L, %
-- LEFTMOST column = Notes (ملاحظات)
-
-1-OFF ERROR & MULTI-LINE PREVENTION:
-- MULTI-LINE NAMES: Some test names are long and wrap to the next line (e.g., "Red blood cell distribution\nwidth coefficient of variation"). UNITE them into one name.
-- Labels like "of variation", "(CBC)", or "Granuloc" on a line by themselves should be MERGED with the test name above them.
-- The VALUE is typically aligned with the LAST line of a multi-line name.
-- IF a line has text but NO numeric result, it's likely part of a name or a header.
-- The VALUE is a single number. The RANGE has a dash or parentheses.
-
-When you see a table row like:
-"mg/dL (74-110) 109 Fasting Blood Sugar"
-Reading RIGHT-TO-LEFT:
-- Test Name: Fasting Blood Sugar
-- Result: 109
-- Range: (74-110)
-- Unit: mg/dL
-
-OUTPUT FORMAT (use this exact structure):
+1. **FOCUS ON NAMES**: The most important task is capturing every Test Name correctly.
+2. **UNITE MULTI-LINE NAMES**: Some test names wrap to multiple lines. UNITE them (e.g., "Red blood cell \n distribution width" → "Red blood cell distribution width").
+3. **DO NOT GUESS VALUES**: Only organize what is in the text. If a value looks misaligned, keep it as is; Stage 2 will fix it visually.
+4. **RTL AWARENESS**: In Arabic reports, the Test Name is on the FAR RIGHT. Values are to the LEFT.
 
 ===PATIENT INFORMATION===
-Patient Name: look for "اسم المريض" (Patient Name). In Arabic reports, names are often 4+ words (e.g., "هبة جمال ابو الرب"). 
-🚨 CRITICAL: DO NOT truncate names. If you see "ابو" (Abu), you MUST include the word that follows it. Capture at least 4 words if visible.
-CRITICAL: DO NOT take "شؤون اجتماعية" (Social Case) or "Social" as the patient name. That is the Insurance type.
-Patient ID: ID number if found
-Gender: Male/Female - look for "الجنس", "Gender", "Sex", "ذكر"=Male, "أنثى"=Female
-Age: number only - look for "العمر", "Age", or number followed by "years"/"سنة"
-Date of Birth: YYYY-MM-DD or DD/MM/YYYY - look for "تاريخ الميلاد", "DOB", "Date of Birth"
-Report Date: YYYY-MM-DD or DD/MM/YYYY - look for "تاريخ التقرير", "Date", "Report Date", date near top
-Doctor Name: doctor name - look for "الطبيب", "Doctor", "Dr.", "Physician"
-Lab Name: laboratory name if found
+- Capture Patient Name (look for اسم المريض), Doctor Name (الطبيب), Age, Gender, and Report Date.
+- 🚨 PATIENT NAME: Capture the FULL string (usually 4+ words).
 
 ===MEDICAL DATA TABLE===
-Identify all laboratory tests/fields from the table. 
+List every test found in this exact format:
+Test Name | Result | Unit | Normal Range
 
-🚨 SUB-HEADINGS (IMPORTANT):
-- If the report has bold sub-headings (e.g., "Investigation", "Biochemistry", "Complete Blood Picture"), and tests are listed under them, you MUST prepend the sub-heading to the test name.
-- e.g., "Complete Blood Picture: Haemoglobin".
-
-🚨 NO-RESULT & HEADER RULES:
-- 🚫 **IGNORE TABLE HEADERS**: Do NOT extract words like "Investigation", "Result", "Normal Ranges", "Units", "النتيجة", "الفحص", "الوحدة", "ملاحظات" if they are just column labels.
-- 🚫 **NO DUPLICATES**: DO NOT list the same test twice in the medical data table. If a test appears multiple times in the OCR, only list it once with its final result.
-- DO NOT extract category headers as a test if the line contains no numbers or symbols next to it.
-
-For each test, extract:
-- Test name (field_name) - INCLUDE any grouped prefix if applicable.
-- Result (field_value) - INCLUDE symbols like "<" or ">" if they are part of the value.
-- Unit (field_unit)
-- Normal range (normal_range)
-- Category (e.g. CBC, Liver, etc.)
-- Normal Range contains a dash or parentheses (e.g., "74-110", "(0.5-0.9)")
-- DO NOT confuse Value with Normal Range!
-- DO NOT put square brackets around names or values
-
-VALIDATION:
-- Value should be a simple number (e.g., 109, 0.56, 12.6)
-- Normal Range contains a dash or parentheses (e.g., "74-110", "(0.5-0.9)")
-- DO NOT confuse Value with Normal Range!
-- DO NOT put square brackets around names or values (e.g., use "12.5" NOT "[12.5]")
+- If a line is just a header (no numeric result), IGNORE it unless it's a sub-heading (prepend it to the tests below it).
+- If Result is missing, leave it blank between the pipes.
 
 ---
 RAW OCR TEXT TO ORGANIZE:
+"""
 """
 
 

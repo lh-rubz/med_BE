@@ -50,57 +50,67 @@ JSON RETURN ONLY:
 
 def get_ocr_refinement_prompt(idx: int, total_pages: int, organized_text: str) -> str:
     """
-    Prompt for a second-pass refinement where the VLM maps already-organized OCR text 
-    to the original image to produce the final, perfectly aligned JSON.
+    Enhanced VLM prompt featuring Chain-of-Thought reasoning, explicit RTL rules, 
+    and one-shot examples for high-precision medical data extraction.
     """
     return f"""
-🔬 MEDICAL JSON - EXTREME VISUAL MIRRORING (INK-FIRST MODE)
+🔬 MEDICAL REPORT DIGITIZATION - PHASE 2 (VISUAL VERIFICATION)
 Page {idx}/{total_pages}
 
-🚨 OPERATING RULE: YOU ARE A HIGH-RESOLUTION SCANNER. 
-- 🚫 DO NOT use medical knowledge (e.g. if it looks like `1.1`, do not return `1.4`).
-- 🚫 DO NOT "fix" typos. Mirror exactly what is on the paper.
-- 🎨 **HANDWRITING/STAMPS**: You MUST capture all ink (stamps, handwriting, signatures). 
+### 🧠 STEP-BY-STEP REASONING (DO THIS FIRST)
+1. **Analyze Layout**: Identify if the report is a Grid, a List, or a Tabular structure.
+2. **Identify Column Order**: Look for Arabic labels (الفحص, النتيجة). If present, columns scan RIGHT-TO-LEFT.
+3. **Anchor Matching**: Locate the Test Names provided in the 'OCR REFERENCE' on the physical image.
+4. **Visual Alignment**: For each Test Name, trace a horizontal line ➔ capture ONLY the value, unit, and range that sits on that exact line.
 
-🚨 DOCTOR & PATIENT SCAN (TOP GRIDS) 🚨
-1. **PATIENT NAME**: Top-RIGHT grid. Find "اسم المريض". The name is to its left.
-   - 🚫 MUST capture at least 4 words (e.g. هبة جمال ابو الرب).
-2. **DOCTOR NAME**: Top-LEFT grid. Locate the label for "Doctor" (e.g. "الطبيب").
-   - Look for a **STAMP** or **HANDWRITTEN NAME** immediately to its LEFT.
-   - 🚫 Fix disjointed characters (e.g. 'أحمد نعی رات' -> 'أحمد نعيرات').
+### 🚨 OPERATIONAL RULES
+- 🚫 **NO HALLUCINATION**: If the image shows '12.5' but OCR says '12.8', use '12.5'.
+- 🚫 **NO SHIFTING**: Do NOT pull a result from the row above or below. If the current row is empty, use "EMPTY_SPECIFIED".
+- 🌍 **MULTILINGUAL**: Supports English, Arabic, and Mixed text. Keep labels in their original language.
+- 🎨 **INK-CAPTURE**: Mirror handwriting, stamps, and signatures exactly as they appear in ink.
 
-🚨 TABLE MIRRORING (PIXEL-TRACE RULES) 🚨
-1. **STRICT HEADER SKIP**: Do NOT extract rows containing labels like: "النتيجة", "الفحص", "الوحدة", "النتيجة الطبيعية", "ملاحظات", "Result", "Test", "Investigation", "Normal Ranges", "Special", "Investigation Title".
-2. **ROW ALIGNMENT ONLY**: The OCR Reference below is for navigation only. 
-   - 🚫 **MIRROR PIXELS**: If a row in the Reference is empty or not visible in the image, return "EMPTY_SPECIFIED".
-   - 🚫 **NO GUESSING**: Do not reuse values from previous rows. Capture ONLY what is currently at the current horizontal line.
-3. **Trace Handwriting**: Mirror individual digit shapes and strokes exactly as they appear in the ink.
-4. **Exact Symbols**: If the result is `< 6.0`, you MUST capture `< 6.0`. 🚫 DO NOT strip signs.
-5. **Exact Units**: Mirror symbols and subscripts/superscripts exactly.
+### ⬅️ ARABIC TABLE FLOW (RIGHT-TO-LEFT)
+If the table is Arabic, the column sequence is:
+[RIGHTMOST] Test Name (الفحص) ➔ Result (النتيجة) ➔ Range (النتيجة الطبيعية) ➔ Unit (الوحدة) [LEFTMOST]
 
-🚨 ROW SEQUENCE INTEGRITY 🚨
-- Follow the OCR Reference order below 1:1. 
-- If a row in the physical image is blank, use "EMPTY_SPECIFIED".
+### 📝 EXTRACTION EXAMPLES
+Example 1 (Clear Row):
+- Image: "Hemoglobin ...... 14.2 ...... g/dL ...... (12-16)"
+- JSON: {{"field_name": "Hemoglobin", "field_value": "14.2", "field_unit": "g/dL", "normal_range": "(12-16)"}}
+
+Example 2 (Handwritten/Signed Row):
+- Image: "WBC [handwritten 11.5*] K/uL"
+- JSON: {{"field_name": "WBC", "field_value": "11.5", "field_unit": "K/uL", "normal_range": "", "notes": "Handwritten/Starred"}}
+
+Example 3 (Empty Row):
+- Image: "Glucose [no value visible]"
+- JSON: {{"field_name": "Glucose", "field_value": "EMPTY_SPECIFIED", "field_unit": "", "normal_range": ""}}
+
+### 👤 DEMOGRAPHICS
+1. **Patient Name**: Find "اسم المريض". Capture the FULL string to its left (usually 4+ words).
+2. **Doctor**: Find "الطبيب". Extract the person's name, ignoring facility labels like "Clinic".
+
+---
+### 📋 OCR REFERENCE (ANCHORS)
+{organized_text}
 
 JSON RETURN ONLY:
 {{
-    "patient_name": "Literal full name ONLY. 🚫 NO AUTOCOMPLETE: If baseline says 'هبة جمال ابو', but image says 'هبة جمال ابو الرب', you MUST use 'الرب'. Capture at least 4 words.",
-    "patient_age": "Literal age or DOB",
+    "patient_name": "Literal full name",
+    "patient_age": "Literal age/DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
-    "doctor_names": "Literal personal name of the doctor. 🚫 Fix disjointed letters (e.g. 'أحمد نعی رات' -> 'أحمد نعيرات').",
+    "doctor_names": "Literal doctor name",
     "medical_data": [
         {{
-            "field_name": "Name from OCR",
-            "field_value": "Literal mirrored value or 'EMPTY_SPECIFIED'",
-            "field_unit": "EXACT mirrored unit (e.g. K/uL, 10(GSD))",
-            "normal_range": "EXACT mirrored range"
+            "field_name": "Test Name",
+            "field_value": "Value or 'EMPTY_SPECIFIED'",
+            "field_unit": "Unit",
+            "normal_range": "Range",
+            "notes": "Any visual flags (handwritten, stamp, etc)"
         }}
     ]
 }}
-
-### ORGANIZED OCR REFERENCE (STRICT MIRROR ORDER) ###
-{organized_text}
 """
 
 

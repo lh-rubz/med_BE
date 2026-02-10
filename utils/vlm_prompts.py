@@ -171,3 +171,40 @@ def generate_prompt_for_page(page_text, page_idx, total_pages):
         "doctor_names": ""
     }}}}
     """
+
+
+def get_robust_demographics_prompt():
+    """
+    Consolidated high-precision demographic extraction prompt.
+    Targets grid layouts, labels-to-right, and specific Arabic medical terminology.
+    """
+    return """Extract patient and report information from this laboratory document.
+
+🚨 DEMOGRAPHIC GRID MAP (STRICT) 🚨
+This report uses a 2-column grid layout for demographics. Labels are on the RIGHT, values are on the LEFT.
+
+1. **PATIENT NAME (اسم المريض)**:
+   - Location: Find the word "اسم المريض" in the RIGHT column of the top grid.
+   - Value: The name is in the box IMMEDIATELY to its LEFT.
+   - ⚠️ CRITICAL: Capture the FULL name. Do NOT stop at one word. If the box contains a long name, return the whole string.
+   - 🚫 DO NOT return insurance or facility categories.
+
+2. **DOCTOR NAME (الطبيب)**:
+   - Location: Bottom right of the demographic section. 
+   - Value: Personal name in the box to the LEFT of "الطبيب".
+   - 🚫 IGNORE clinic names like "عيادة...". Look for a person's name (e.g., THE DOCTOR NAME).
+
+3. **GENDER (الجنس)**:
+   - Find "الجنس" on the right. Value is to the LEFT. (أنثى/انثى -> Female, ذكر -> Male).
+
+4. **REPORT DATE**:
+   - Extract the date from the header (e.g. 2024-01-01).
+
+Return JSON only:
+{
+    "patient_name": "Literal full name ONLY. 🚫 NO HINTS: Capture at least 4 words if available.",
+    "patient_age": "Literal age or DOB",
+    "patient_gender": "Male or Female",
+    "report_date": "YYYY-MM-DD",
+    "doctor_names": "Literal personal name of the doctor. Join disjointed letters if present."
+}"""
