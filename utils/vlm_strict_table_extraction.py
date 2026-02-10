@@ -64,11 +64,12 @@ Page {idx}/{total_pages}
 4. **Visual Alignment**: For each Test Name, trace a horizontal line ➔ capture ONLY the value, unit, and range that sits on that exact line.
 
 ### 🚨 OPERATIONAL RULES
-- 🚫 **NO HALLUCINATION**: If the image shows '12.5' but OCR says '12.8', use '12.5'.
 - 🚫 **NO SHIFTING**: Do NOT pull a result from the row above or below. 
-- 🚫 **NO MERGING**: Each Test in the `OCR REFERENCE` below is ONE ROW. DO NOT merge two tests into one (e.g. "RDW" and "Platelets" must remain separate).
+- 🚫 **SKIP EMPTY ROWS (CRITICAL)**: If a line in the image has a Test Name but the Result (النتيجة) column is empty/blank in the ink, **DO NOT EXTRACT IT**. Only extract tests with visible, corresponding values.
+- 🚫 **NO MERGING**: Each Test in the `OCR REFERENCE` below corresponds to **EXACTLY ONE ROW**. DO NOT merge two anchors into one JSON entry (e.g. "RDW" and "Platelets" must be separate entries).
 - 🚨 **INK-FIRST (ARABIC)**: OCR often fails on Arabic characters. **READ THE IMAGE INK DIRECTLY**. Use the `OCR REFERENCE` below to find the correct line, but the image pixels always provide the final characters.
 - 🎨 **INK-CAPTURE**: Mirror handwriting, stamps, and signatures exactly as they appear in ink.
+- 🚨 **UNIT FIDELITY**: Capture units **EXACTLY** as they appear. If the image says "%L" or "%G", DO NOT simplify it to "%". Extract exactly what is written.
 
 ### ⬅️ ARABIC TABLE FLOW (RIGHT-TO-LEFT)
 [RIGHTMOST] Test Name (الفحص) ➔ Result (النتيجة) ➔ Range (النتيجة الطبيعية) ➔ Unit (الوحدة) [LEFTMOST]
@@ -101,9 +102,9 @@ JSON RETURN ONLY:
     "doctor_names": "Literal doctor name (🔍 Cross-check OCR Anchor with Header Ink/Stamps)",
     "medical_data": [
         {{
-            "field_name": "Test Name (⚠️ Keep prefixes like 'C -' here)",
-            "field_value": "Numeric Value (⚠️ NEVER a single letter)",
-            "field_unit": "Unit",
+            "field_name": "Test Name (⚠️ EXACT mapping to one OCR anchor)",
+            "field_value": "Numeric Value (⚠️ ONLY if visible in this specific line)",
+            "field_unit": "Unit (🚨 MIRROR PRECISELY: e.g. '%L', '%G', 'mg/dL'). No simplification.",
             "normal_range": "Literal Range (🚨 CAPTURE EVERY WORD: e.g. 'Normal: less than...', 'Diabetes: >...'). Do NOT truncate.",
             "notes": "Any visual flags (handwritten, signature, etc)"
         }}

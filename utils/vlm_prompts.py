@@ -186,15 +186,14 @@ This report uses a 2-column grid layout for demographics. Labels are on the RIGH
 1. **PATIENT NAME (اسم المريض)**:
    - Location: Top demographics table.
    - Value: Capture the FULL name.
-   - 🚨 **INK IS GROUND TRUTH (ARABIC)**: OCR often misreads Arabic names (e.g., misreading "رئيسة" as "دنيسة"). **YOU MUST READ THE INK IN THE IMAGE**. Use the `OCR REFERENCE` only as a location guide. If the ink says "رئيسة", extract "رئيسة".
+   - 🚨 **ARABIC CHARACTER FIDELITY**: If the ink is ambiguous (e.g., looks like دنيسة vs رئيسة), and the OCR Anchor below says "رئيسة", YOU MUST USE "رئيسة". Typed Arabic in medical reports is very structured; do not let visual "noise" change common names.
    - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change letters. 🚫 NO Hallucinations.
    - 🚨 **SPACING**: "ابو" (Abu) is always separate (e.g., "أبو الرب" NOT "ابوراب").
 
 2. **DOCTOR NAME (الطبيب)**:
-   - 🔍 **PRIMARY SEARCH**: Look at the cell immediately to the LEFT or below the label "الطبيب" (Doctor). 
-   - 🔍 **SECONDARY (LAB DIRECTOR)**: Only use names from logo/header boxes (e.g. "أحمد نعيرات") if the "الطبيب" cell is empty or missing.
-   - 🚨 **TRUST ANCHORS**: If the `OCR REFERENCE` identifies a human name (e.g. جهاد العملة), find it in the ink and capture it.
-   - 🚨 **INK IS GROUND TRUTH (ARABIC)**: OCR often misreads Arabic names (e.g., misreading "رئيسة" as "دنيسة"). **YOU MUST READ THE INK IN THE IMAGE**. Use the `OCR REFERENCE` only as a location guide. If the ink says "رئيسة", extract "رئيسة".
+   - 🔍 **PRIMARY SEARCH**: Look at the cell immediately to the LEFT or below the label "الطبيب" (Doctor). In this report, check the bottom-left of the demographic grid.
+   - 🔍 **SECONDARY**: Check background logo boxes (top-left) for proprietary names like "أحمد نعيرات".
+   - 🚨 **VOID REJECTION**: Discard titles like "عيادة" (Clinic) or "مختبر" (Lab). We want the PERSON'S name.
    - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change letters. 🚫 NO Hallucinations.
    - 🎨 **INK-CAPTURE**: Mirror handwriting, stamps, and signatures exactly as they appear in ink.
 
