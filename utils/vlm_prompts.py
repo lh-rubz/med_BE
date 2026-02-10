@@ -186,7 +186,7 @@ This report uses a 2-column grid layout for demographics. Labels are on the RIGH
 1. **PATIENT NAME (اسم المريض)**:
    - Location: Top demographics table.
    - Value: Capture the FULL name.
-   - 🚨 **RELY ON OCR ANCHOR (ARABIC)**: Trust the spelling provided in the `OCR REFERENCE` below. If OCR says "رئيسة", use "رئيسة". DO NOT try to "re-read" the ink if OCR already captured it correctly.
+   - 🚨 **INK IS GROUND TRUTH (ARABIC)**: OCR often misreads Arabic names (e.g., misreading "رئيسة" as "دنيسة"). **YOU MUST READ THE INK IN THE IMAGE**. Use the `OCR REFERENCE` only as a location guide. If the ink says "رئيسة", extract "رئيسة".
    - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change letters. 🚫 NO Hallucinations.
    - 🚨 **SPACING**: "ابو" (Abu) is always separate (e.g., "أبو الرب" NOT "ابوراب").
 
@@ -194,6 +194,9 @@ This report uses a 2-column grid layout for demographics. Labels are on the RIGH
    - 🔍 **PRIMARY SEARCH**: Look at the cell immediately to the LEFT or below the label "الطبيب" (Doctor). 
    - 🔍 **SECONDARY (LAB DIRECTOR)**: Only use names from logo/header boxes (e.g. "أحمد نعيرات") if the "الطبيب" cell is empty or missing.
    - 🚨 **TRUST ANCHORS**: If the `OCR REFERENCE` identifies a human name (e.g. جهاد العملة), find it in the ink and capture it.
+   - 🚨 **INK IS GROUND TRUTH (ARABIC)**: OCR often misreads Arabic names (e.g., misreading "رئيسة" as "دنيسة"). **YOU MUST READ THE INK IN THE IMAGE**. Use the `OCR REFERENCE` only as a location guide. If the ink says "رئيسة", extract "رئيسة".
+   - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change letters. 🚫 NO Hallucinations.
+   - 🎨 **INK-CAPTURE**: Mirror handwriting, stamps, and signatures exactly as they appear in ink.
 
 3. **GENDER (الجنس)**:
    - Find "الجنس" on the right. Value is to the LEFT. (أنثى/انثى -> Female, ذكر -> Male).
