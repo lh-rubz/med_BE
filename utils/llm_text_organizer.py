@@ -30,8 +30,9 @@ IMPORTANT RULES:
 4. **RTL AWARENESS**: In Arabic reports, the Test Name is on the FAR RIGHT. Values are to the LEFT.
 
 ===PATIENT INFORMATION===
-- Capture Patient Name (look for اسم المريض), Doctor Name (الطبيب), Age, Gender, and Report Date.
-- 🚨 PATIENT NAME: Capture the FULL string (usually 4+ words).
+- Patient Name: Capture the FULL name (look for اسم المريض or Patient Name). 🚨 Capture at least 3-4 words.
+- Doctor Name: 🔍 **SCAN THE WHOLE TEXT**. Look for "الطبيب", "Dr.", "Prof.", "Physician", or names in stamps/headers/footers.
+- Capture Age, Gender, and Report Date.
 
 ===MEDICAL DATA TABLE===
 List every test found in this exact format:
@@ -128,6 +129,10 @@ def parse_organized_text(organized_text):
     if not organized_text:
         return result
     
+    # Detection of Arabic text for conditional date parsing
+    # Arabic: DD/MM/YYYY, English: MM/DD/YYYY
+    has_arabic = any('\u0600' <= char <= '\u06FF' for char in organized_text)
+    
     def clean_value(val):
         """Clean extracted value - remove NOT FOUND and trim"""
         if not val:
@@ -142,11 +147,19 @@ def parse_organized_text(organized_text):
         if not date_str:
             return ''
         date_str = date_str.strip()
-        # Try DD/MM/YYYY
+        
+        # Try XX/XX/YYYY (Conditional logic based on has_arabic)
         match = re.match(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', date_str)
         if match:
-            d, m, y = match.groups()
+            v1, v2, y = match.groups()
+            if has_arabic:
+                # Arabic: DD/MM/YYYY
+                d, m = v1, v2
+            else:
+                # English: MM/DD/YYYY
+                m, d = v1, v2
             return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+            
         # Try YYYY-MM-DD or YYYY/MM/DD
         match = re.match(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', date_str)
         if match:

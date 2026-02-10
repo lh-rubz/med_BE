@@ -184,21 +184,25 @@ def get_robust_demographics_prompt():
 This report uses a 2-column grid layout for demographics. Labels are on the RIGHT, values are on the LEFT.
 
 1. **PATIENT NAME (اسم المريض)**:
-   - Location: Find the word "اسم المريض" in the RIGHT column of the top grid.
-   - Value: The name is in the box IMMEDIATELY to its LEFT.
-   - ⚠️ CRITICAL: Capture the FULL name. Do NOT stop at one word. If the box contains a long name, return the whole string.
-   - 🚫 DO NOT return insurance or facility categories.
+   - Location: Typically in the top grid near "اسم المريض".
+   - Value: Capture the FULL name (at least 3-4 words). 
+   - ⚠️ **CRITICAL**: Do NOT include labels or categories (e.g., skip "Social Affairs").
+   - 🔍 **STRICT CHECK**: Ensure the name is the Actual Person (e.g., "أحمد محمد علي").
 
 2. **DOCTOR NAME (الطبيب)**:
-   - Location: Bottom right of the demographic section. 
-   - Value: Personal name in the box to the LEFT of "الطبيب".
-   - 🚫 IGNORE clinic names like "عيادة...". Look for a person's name (e.g., THE DOCTOR NAME).
+   - 🔍 **WHOLE-REPORT SEARCH**: Look specifically for a person's name (e.g., Prof. X, Dr. Y, or a signature name).
+   - Check: Top demographics, bottom margins, stamps, and signatures.
+   - 🚫 **IGNORE**: Facility names, clinic titles, or "General Practitioner" labels. Find the actual human name.
 
 3. **GENDER (الجنس)**:
    - Find "الجنس" on the right. Value is to the LEFT. (أنثى/انثى -> Female, ذكر -> Male).
 
 4. **REPORT DATE**:
-   - Extract the date from the header (e.g. 2024-01-01).
+   - Extract the date from the header.
+   - 🚨 **DATE FORMAT RULE**: 
+     - If the report is in Arabic, interpret "XX/XX/YYYY" as **DD/MM/YYYY**.
+     - If the report is in English, interpret "XX/XX/YYYY" as **MM/DD/YYYY**.
+   - Convert to standard **YYYY-MM-DD** for the JSON output.
 
 Return JSON only:
 {

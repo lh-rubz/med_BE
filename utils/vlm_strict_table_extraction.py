@@ -87,8 +87,10 @@ Example 3 (Empty Row):
 - JSON: {{"field_name": "Glucose", "field_value": "EMPTY_SPECIFIED", "field_unit": "", "normal_range": ""}}
 
 ### 👤 DEMOGRAPHICS
-1. **Patient Name**: Find "اسم المريض". Capture the FULL string to its left (usually 4+ words).
-2. **Doctor**: Find "الطبيب". Extract the person's name, ignoring facility labels like "Clinic".
+1. **Patient Name**: Find "اسم المريض". Capture the FULL person's name (at least 3-4 words). 
+   - ⚠️ Fix disjointed characters (e.g. 'أحمد نعی رات' -> 'أحمد نعيرات').
+2. **Doctor**: 🔍 **WHOLE-REPORT SEARCH**. Locate the actual human doctor's name. Check demographics, stamps, signatures, or footer margins.
+   - 🚫 IGNORE facility labels (e.g., skip "Clinic Name").
 
 ---
 ### 📋 OCR REFERENCE (ANCHORS)
@@ -97,9 +99,9 @@ Example 3 (Empty Row):
 JSON RETURN ONLY:
 {{
     "patient_name": "Literal full name",
-    "patient_age": "Literal age/DOB",
+    "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
-    "report_date": "YYYY-MM-DD",
+    "report_date": "YYYY-MM-DD (Interpret XX/XX/YYYY as DD/MM/YYYY for Arabic, MM/DD/YYYY for English)",
     "doctor_names": "Literal doctor name",
     "medical_data": [
         {{
