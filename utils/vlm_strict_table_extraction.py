@@ -65,8 +65,9 @@ Page {idx}/{total_pages}
 
 ### 🚨 OPERATIONAL RULES
 - 🚫 **NO SHIFTING**: Do NOT pull a result from the row above or below. 
-- 🚫 **SKIP EMPTY ROWS (CRITICAL)**: If a line in the image has a Test Name but the Result (النتيجة) column is empty/blank in the ink, **DO NOT EXTRACT IT**. Only extract tests with visible, corresponding values.
-- 🚫 **NO MERGING**: Each Test in the `OCR REFERENCE` below corresponds to **EXACTLY ONE ROW**. DO NOT merge two anchors into one JSON entry (e.g. "RDW" and "Platelets" must be separate entries).
+- 🚫 **SKIP EMPTY ROWS (CRITICAL)**: If a line in the image has a Test Name but the Result column is blank/empty in the ink, **DO NOT EXTRACT IT**. Only extract tests with visible, corresponding values.
+- 🚫 **ZERO HALLUCINATION (VALUES)**: If there is NO visible numeric ink for a row, set `field_value` to "EMPTY_SPECIFIED". **NEVER** invent a number or pull it from an adjacent column or the range.
+- 🚫 **NO MERGING**: Each Test in the `OCR REFERENCE` below corresponds to **EXACTLY ONE ROW**. DO NOT merge two anchors into one JSON entry.
 - 🚨 **INK-FIRST (ARABIC)**: OCR often fails on Arabic characters. **READ THE IMAGE INK DIRECTLY**. Use the `OCR REFERENCE` below to find the correct line, but the image pixels always provide the final characters.
 - 🎨 **INK-CAPTURE**: Mirror handwriting, stamps, and signatures exactly as they appear in ink.
 - 🚨 **UNIT FIDELITY**: Capture units **EXACTLY** as they appear. If the image says "%L" or "%G", DO NOT simplify it to "%". Extract exactly what is written.
@@ -74,10 +75,11 @@ Page {idx}/{total_pages}
 ### ⬅️ ARABIC TABLE FLOW (RIGHT-TO-LEFT)
 [RIGHTMOST] Test Name (الفحص) ➔ Result (النتيجة) ➔ Range (النتيجة الطبيعية) ➔ Unit (الوحدة) [LEFTMOST]
 
-### 🚨 PREFIX PROTECT (CRITICAL)
-- Some tests have prefixes like "C -", "S -", "T -". 
-- YOU MUST keep the prefix as part of the Test Name. 
-- 🚫 **NEVER** put a single letter like "C" as the numeric "Result". "C" is not a result; it is part of the name "C-Reactive Protein".
+### 🚨 PREFIX3. **DO NOT GUESS VALUES**: Only organize what is in the text. If a value looks misaligned, keep it as is; Stage 2 will fix it visually.
+4. **NO RANGE BLEEDING**: Strictly keep "Normal Range" separate from "Test Name".
+   - Bad: "Monocytes (% (1.0-3.0)"
+   - Good: Name="Monocytes (%)", Range="(1.0-3.0)"
+5. � **PREFIX PROTECTION**: If a test starts with a letter and dash (e.g., "C - Reactive Proteins", "S - Albumin"), YOU MUST capture the "C -" as part of the Test Name. NEVER put "C" in the Result column.
 
 ### 👤 DEMOGRAPHICS (ULTRA-SEARCH MODE)
 1. **Patient Name**: Find "اسم المريض". Capture the FULL person's name (at least 3-4 words). 

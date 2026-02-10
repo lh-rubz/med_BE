@@ -938,13 +938,12 @@ class ChatResource(Resource):
                 yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Reading table data carefully on page {idx}...'})}\n\n"
                 extraction_method = "vlm_primary"
 
-            # PRE-LOAD Demographics from organized OCR (often more reliable for name text than VLM)
-            if organized_data:
-                for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
-                    if organized_data.get(key) and not any(s in str(organized_data[key]) for s in ["شؤون", "اجتماعية"]):
-                        # Use OCR data as baseline if it's non-empty and doesn't contain insurance labels
-                        extracted_data[key] = organized_data[key]
-                print(f"   👤 Patient demographics pre-loaded from OCR baseline")
+            # PRE-LOAD Demographics from organized OCR (Disabled for high-precision visual isolation)
+            # if organized_data:
+            #     for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
+            #         if organized_data.get(key) and not any(s in str(organized_data[key]) for s in ["شؤون", "اجتماعية"]):
+            #             extracted_data[key] = organized_data[key]
+            #     print(f"   👤 Patient demographics pre-loaded from OCR baseline")
 
             # Only call VLM if we're using vlm_primary method
             if extraction_method == "vlm_primary":
@@ -1081,9 +1080,9 @@ class ChatResource(Resource):
                             val = str(patient_data.get(key, "")).strip()
                             if val and val.lower() not in ["unknown", "n/a", "none"]:
                                 # Reject labels misidentified as names (Social Affairs, Insurance, etc. + common typos)
-                                # Target: شؤون, اجتماعية, شذون, تأمين
-                                rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "social", "affairs", "insurance"]
-                                is_hallucination = key == 'patient_name' and any(s in val for s in rejection_terms)
+                                # Target: شؤون, اجتماعية, شذون, تأمين, عيادة
+                                rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "social", "affairs", "insurance", "عيادة", "مختبر"]
+                                is_hallucination = (key in ['patient_name', 'doctor_names']) and any(s in val for s in rejection_terms)
                                 
                                 current_val = str(extracted_data.get(key, "")).strip()
                                 current_is_valid = current_val and not any(s in current_val for s in rejection_terms)
