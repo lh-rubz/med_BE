@@ -70,8 +70,12 @@ Page {idx}/{total_pages}
 - 🎨 **INK-CAPTURE**: Mirror handwriting, stamps, and signatures exactly as they appear in ink.
 
 ### ⬅️ ARABIC TABLE FLOW (RIGHT-TO-LEFT)
-If the table is Arabic, the column sequence is:
 [RIGHTMOST] Test Name (الفحص) ➔ Result (النتيجة) ➔ Range (النتيجة الطبيعية) ➔ Unit (الوحدة) [LEFTMOST]
+
+### 🚨 PREFIX PROTECT (CRITICAL)
+- Some tests have prefixes like "C -", "S -", "T -". 
+- YOU MUST keep the prefix as part of the Test Name. 
+- 🚫 **NEVER** put a single letter like "C" as the numeric "Result". "C" is not a result; it is part of the name "C-Reactive Protein".
 
 ### 👤 DEMOGRAPHICS (ULTRA-SEARCH MODE)
 1. **Patient Name**: Find "اسم المريض". Capture the FULL person's name (at least 3-4 words). 
@@ -96,10 +100,10 @@ JSON RETURN ONLY:
     "doctor_names": "Literal doctor name (🔍 Cross-check OCR Anchor with Header Ink/Stamps)",
     "medical_data": [
         {{
-            "field_name": "Test Name",
-            "field_value": "Value or 'EMPTY_SPECIFIED'",
+            "field_name": "Test Name (⚠️ Keep prefixes like 'C -' here)",
+            "field_value": "Numeric Value (⚠️ NEVER a single letter)",
             "field_unit": "Unit",
-            "normal_range": "Range (🚨 PRECISION CHECK: Recount vertical pixels for numbers like '5.7' vs '1.7'. Do NOT guess.)",
+            "normal_range": "Literal Range (🚨 CAPTURE EVERY WORD: e.g. 'Normal: less than...', 'Diabetes: >...'). Do NOT truncate.",
             "notes": "Any visual flags (handwritten, signature, etc)"
         }}
     ]

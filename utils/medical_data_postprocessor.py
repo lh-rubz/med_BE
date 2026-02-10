@@ -325,17 +325,21 @@ class MedicalDataPostProcessor:
         if not range_str:
             return "", notes
 
-        # If range has no digits and no inequality/limit word, it's unusable
-        has_digit = bool(re.search(r"\d", range_str))
-        has_inequality = any(sym in range_str for sym in ["<", ">"])
-        has_limit_word = any(word in range_str.lower() for word in ["up to", "less than", "below", "above", "more than"])
+        # Validate percent-like ranges
+        name_lower = str(field_name).lower()
+        unit_lower = str(field_unit).lower()
         
+        # If the range contains clear medical state words, it is valid even with no digits
+        medical_state_keywords = ["normal", "deficient", "insufficient", "sufficient", "toxicity", "prediabetes", "diabetes", "negative", "positive", "reactive", "non-reactive"]
+        if any(word in range_str.lower() for word in medical_state_keywords):
+            return range_str, notes
+
         if not has_digit and not has_inequality and not has_limit_word:
             return "", MedicalDataPostProcessor._append_note(notes, "range_invalid")
 
         # Extract numeric values from the range
         range_numbers = re.findall(r"[\d.]+", range_str)
-        if len(range_numbers) < 2 and not has_inequality and not has_limit_word:
+        if len(range_numbers) < 1 and not has_inequality and not has_limit_word:
             return "", MedicalDataPostProcessor._append_note(notes, "range_invalid")
 
         # Validate percent-like ranges

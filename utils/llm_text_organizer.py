@@ -28,6 +28,7 @@ IMPORTANT RULES:
 2. **UNITE MULTI-LINE NAMES**: Some test names wrap to multiple lines. UNITE them (e.g., "Red blood cell \n distribution width" → "Red blood cell distribution width").
 3. **DO NOT GUESS VALUES**: Only organize what is in the text. If a value looks misaligned, keep it as is; Stage 2 will fix it visually.
 4. **RTL AWARENESS**: In Arabic reports, the Test Name is on the FAR RIGHT. Values are to the LEFT.
+5. 🚨 **PREFIX PROTECTION**: If a test starts with a letter and dash (e.g., "C - Reactive Proteins", "S - Albumin"), YOU MUST capture the "C -" as part of the Test Name. NEVER put "C" in the Result column.
 
 ===PATIENT INFORMATION===
 Patient Name: [Capture FULL name, 🚨 2+ words, NO TRUNCATION]
