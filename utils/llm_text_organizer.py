@@ -31,6 +31,7 @@ IMPORTANT RULES:
    - Bad: "Monocytes (% (1.0-3.0)"
    - Good: Name="Monocytes (%)", Range="(1.0-3.0)"
 5. 🚨 **PREFIX PROTECTION**: If a test starts with a letter and dash (e.g., "C - Reactive Proteins", "S - Albumin"), YOU MUST capture the "C -" as part of the Test Name. NEVER put "C" in the Result column.
+6. 🚨 **UNIT FIDELITY**: If the text says "%L" or "%G", **DO NOT** simplify it to "%". Capture every character of the unit exactly as written.
 
 ===PATIENT INFORMATION===
 Patient Name: [Capture FULL name, 🚨 2+ words, NO TRUNCATION]

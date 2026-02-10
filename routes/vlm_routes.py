@@ -938,12 +938,12 @@ class ChatResource(Resource):
                 yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Reading table data carefully on page {idx}...'})}\n\n"
                 extraction_method = "vlm_primary"
 
-            # PRE-LOAD Demographics from organized OCR (Disabled for high-precision visual isolation)
-            # if organized_data:
-            #     for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
-            #         if organized_data.get(key) and not any(s in str(organized_data[key]) for s in ["شؤون", "اجتماعية"]):
-            #             extracted_data[key] = organized_data[key]
-            #     print(f"   👤 Patient demographics pre-loaded from OCR baseline")
+            # PRE-LOAD Demographics from organized OCR (Serves as a spelling baseline for VLM verification)
+            if organized_data:
+                for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
+                    if organized_data.get(key) and not any(s in str(organized_data[key]) for s in ["شؤون", "اجتماعية"]):
+                        extracted_data[key] = organized_data[key]
+                print(f"   👤 Patient demographics pre-loaded from OCR baseline")
 
             # Only call VLM if we're using vlm_primary method
             if extraction_method == "vlm_primary":

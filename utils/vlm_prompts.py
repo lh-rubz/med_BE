@@ -185,15 +185,15 @@ This report uses a 2-column grid layout for demographics. Labels are on the RIGH
 
 1. **PATIENT NAME (اسم المريض)**:
    - Location: Top demographics table.
-   - Value: Capture the FULL name.
+   - Location: 🚨 **WHOLE PAGE SEARCH**. Scan the top tables, stamps, and footer text.
    - 🚨 **ARABIC CHARACTER FIDELITY**: If the ink is ambiguous (e.g., looks like دنيسة vs رئيسة), and the OCR Anchor below says "رئيسة", YOU MUST USE "رئيسة". Typed Arabic in medical reports is very structured; do not let visual "noise" change common names.
-   - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change letters. 🚫 NO Hallucinations.
+   - 🚨 **MIRROR PERFECT SPELLING**: Mirror the OCR characters exactly for typed text.
    - 🚨 **SPACING**: "ابو" (Abu) is always separate (e.g., "أبو الرب" NOT "ابوراب").
 
 2. **DOCTOR NAME (الطبيب)**:
    - 🔍 **PRIMARY SEARCH**: Look at the cell immediately to the LEFT or below the label "الطبيب" (Doctor). In this report, check the bottom-left of the demographic grid.
    - 🔍 **SECONDARY**: Check background logo boxes (top-left) for proprietary names like "أحمد نعيرات".
-   - 🚨 **VOID REJECTION**: Discard titles like "عيادة" (Clinic) or "مختبر" (Lab). We want the PERSON'S name.
+   - 🚨 **VOID REJECTION**: Discard titles like "عيادة" (Clinic) or "مختبر" (Lab). **"عيادة" IS NOT A NAME**. If only a clinic name is found, doctor name must be "EMPTY_SPECIFIED".
    - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change letters. 🚫 NO Hallucinations.
    - 🎨 **INK-CAPTURE**: Mirror handwriting, stamps, and signatures exactly as they appear in ink.
 

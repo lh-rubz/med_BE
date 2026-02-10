@@ -62,15 +62,11 @@ Page {idx}/{total_pages}
 2. **Identify Column Order**: Look for Arabic labels (الفحص, النتيجة). If present, columns scan RIGHT-TO-LEFT.
 3. **Anchor Matching**: Locate the Test Names provided in the 'OCR REFERENCE' on the physical image.
 4. **Visual Alignment**: For each Test Name, trace a horizontal line ➔ capture ONLY the value, unit, and range that sits on that exact line.
-
-### 🚨 OPERATIONAL RULES
+- 🚨 **UNIT FIDELITY (ULTRA-STRICT)**: Capture units **EXACTLY** as they appear in the ink. If the image says "%L" or "%G", DO NOT simplify it to "%". **DO NOT "HELP" BY CLEANING THE UNIT**. Extract exactly what is written, character-for-character.
 - 🚫 **NO SHIFTING**: Do NOT pull a result from the row above or below. 
-- 🚫 **SKIP EMPTY ROWS (CRITICAL)**: If a line in the image has a Test Name but the Result column is blank/empty in the ink, **DO NOT EXTRACT IT**. Only extract tests with visible, corresponding values.
-- 🚫 **ZERO HALLUCINATION (VALUES)**: If there is NO visible numeric ink for a row, set `field_value` to "EMPTY_SPECIFIED". **NEVER** invent a number or pull it from an adjacent column or the range.
-- 🚫 **NO MERGING**: Each Test in the `OCR REFERENCE` below corresponds to **EXACTLY ONE ROW**. DO NOT merge two anchors into one JSON entry.
-- 🚨 **INK-FIRST (ARABIC)**: OCR often fails on Arabic characters. **READ THE IMAGE INK DIRECTLY**. Use the `OCR REFERENCE` below to find the correct line, but the image pixels always provide the final characters.
-- 🎨 **INK-CAPTURE**: Mirror handwriting, stamps, and signatures exactly as they appear in ink.
-- 🚨 **UNIT FIDELITY**: Capture units **EXACTLY** as they appear. If the image says "%L" or "%G", DO NOT simplify it to "%". Extract exactly what is written.
+- 🚨 **PIXEL-LOCKED ALIGNMENT**: For each Test Name, trace a direct horizontal path (baseline). Capture ONLY the numeric value and unit that sits on that exact vertical level. If you hit a different row's pixels, STOP.
+- 🚨 **UNIT FIDELITY**: If the text says "%L" or "%G", DO NOT simplify it to "%".
+- 🚫 **ZERO HALLUCINATION (VALUES)**: If there is NO visible numeric ink for a row, set `field_value` to "EMPTY_SPECIFIED". **NEVER** guess a number from the range or a separate row.
 
 ### ⬅️ ARABIC TABLE FLOW (RIGHT-TO-LEFT)
 [RIGHTMOST] Test Name (الفحص) ➔ Result (النتيجة) ➔ Range (النتيجة الطبيعية) ➔ Unit (الوحدة) [LEFTMOST]
