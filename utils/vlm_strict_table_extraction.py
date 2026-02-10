@@ -73,30 +73,33 @@ Page {idx}/{total_pages}
 If the table is Arabic, the column sequence is:
 [RIGHTMOST] Test Name (الفحص) ➔ Result (النتيجة) ➔ Range (النتيجة الطبيعية) ➔ Unit (الوحدة) [LEFTMOST]
 
-###  DEMOGRAPHICS
+### 👤 DEMOGRAPHICS (ULTRA-SEARCH MODE)
 1. **Patient Name**: Find "اسم المريض". Capture the FULL person's name (at least 3-4 words). 
+   - 🚨 **SPACING RULE**: The word "ابو" (Abu) is ALWAYS a separate word. NEVER merge it with the next word (e.g. 'أبو الرب' NOT 'أبورب').
    - ⚠️ Fix disjointed characters (e.g. 'أحمد نعی رات' -> 'أحمد نعيرات').
-2. **Doctor**: 🔍 **WHOLE-REPORT SEARCH**. Locate the actual human doctor's name. Check demographics, stamps, signatures, or footer margins.
-   - 🚫 IGNORE facility labels (e.g., skip "Clinic Name").
+2. **Doctor**: 🔍 **MANDATORY ANCHOR CHECK**. 
+   - Look at the `OCR REFERENCE` doctor name below. 
+   - Cross-reference this name with the **TOP-LEFT RED/BLUE HEADER BOXES** and any **STAMPS** at the bottom.
+   - If the OCR anchor says a name (e.g. احمد نعيرات), and you see matching ink in the image, YOU MUST capture it. DO NOT return "Not found" if it exists in ink.
 
 ---
-### 📋 OCR REFERENCE (ANCHORS)
+### 📋 OCR REFERENCE (STRICT ANCHORS)
 {organized_text}
 
 JSON RETURN ONLY:
 {{
-    "patient_name": "Literal full name (⚠️ Ensure spaces between words like 'ابو الرب', NOT 'ابوراب')",
+    "patient_name": "Literal full name (🚫 NEVER merge 'أبو' with following word)",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
-    "report_date": "YYYY-MM-DD (Interpret XX/XX/YYYY as DD/MM/YYYY for Arabic, MM/DD/YYYY for English)",
-    "doctor_names": "Literal doctor name (🔍 Check HEADER LOGO BOXES if not found in grid)",
+    "report_date": "YYYY-MM-DD (Arabic: DD/MM/YYYY, English: MM/DD/YYYY)",
+    "doctor_names": "Literal doctor name (🔍 Cross-check OCR Anchor with Header Ink/Stamps)",
     "medical_data": [
         {{
             "field_name": "Test Name",
             "field_value": "Value or 'EMPTY_SPECIFIED'",
             "field_unit": "Unit",
-            "normal_range": "Range (🚨 TRIPLE-CHECK COMPLEX RANGES: e.g. HbA1c ranges like 'less than 5.7%' must be captured exactly, avoiding hallucinations like '1.7%')",
-            "notes": "Any visual flags (handwritten, stamp, etc)"
+            "normal_range": "Range (🚨 PRECISION CHECK: Recount vertical pixels for numbers like '5.7' vs '1.7'. Do NOT guess.)",
+            "notes": "Any visual flags (handwritten, signature, etc)"
         }}
     ]
 }}
