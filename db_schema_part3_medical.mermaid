@@ -1,0 +1,68 @@
+classDiagram
+    direction LR
+
+    class Report {
+        +Integer id
+        +Integer user_id
+        +Integer profile_id
+        +DateTime report_date
+        +String report_name
+        +String report_type
+        +String report_category
+        +String patient_name
+        +String patient_age
+        +String patient_gender
+        +Text doctor_names
+        +String original_filename
+        +String report_hash
+    }
+
+    class ReportField {
+        +Integer id
+        +Integer report_id
+        +String field_name
+        +Text field_value
+        +String field_unit
+        +String normal_range
+        +Boolean is_normal
+        +String field_type
+        +String category
+        +Text notes
+    }
+
+    class ReportFile {
+        +Integer id
+        +Integer report_id
+        +String original_filename
+        +String stored_filename
+        +String file_path
+        +String file_type
+        +Integer file_size
+        +Integer page_number
+    }
+
+    class AdditionalField {
+        +Integer id
+        +Integer report_id
+        +String field_name
+        +Text field_value
+        +String category
+        +Boolean is_approved
+        +Boolean merged_to_profile
+    }
+
+    class ReportData {
+        +Integer id
+        +Integer report_id
+        +String field_name
+        +String field_value
+        +String field_unit
+        +String normal_range
+        +Boolean is_normal
+    }
+
+    %% Relationships
+    Report "1" -- "0..*" ReportField : contains_extracted_data
+    Report "1" -- "0..*" ReportFile : has_attachments
+    Report "1" -- "0..*" AdditionalField : has_custom_fields
+    Report "1" -- "0..*" ReportData : legacy_data

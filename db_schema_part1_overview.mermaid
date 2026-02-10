@@ -1,0 +1,26 @@
+classDiagram
+    direction TB
+    
+    %% Core Entities Only - No Attributes for High Level View
+    class User
+    class Profile
+    class FamilyConnection
+    class Report
+    class ReportField
+    class ReportFile
+    class Notification
+    class AccessVerification
+    class Authenticator
+
+    %% Main Relationships
+    User "1" -- "0..*" Profile : manages
+    User "1" -- "0..*" Report : owns
+    User "1" -- "0..*" FamilyConnection : connects_via
+    User "1" -- "0..*" Notification : receives
+    User "1" -- "0..*" Authenticator : secures_with
+
+    Profile "1" -- "0..*" Report : linked_to
+    Profile "1" -- "0..*" FamilyConnection : member_of
+
+    Report "1" -- "0..*" ReportField : contains
+    Report "1" -- "0..*" ReportFile : stores

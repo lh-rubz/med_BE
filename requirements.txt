@@ -36,3 +36,4 @@ google-auth
 authlib
 firebase-admin
 webauthn
+easyocr

@@ -1,0 +1,101 @@
+classDiagram
+    direction LR
+
+    %% ==========================================
+    %% 1. USER & SECURITY CORE
+    %% ==========================================
+    namespace User_Security {
+        class User {
+            +String email
+            +String password
+            +String first_name
+            +String last_name
+            +Date date_of_birth
+            +String phone_number
+            +Boolean is_active
+            +Boolean two_factor_enabled
+        }
+
+        class Authenticator {
+            +Binary credential_id
+            +String device_type
+            +DateTime last_used_at
+        }
+
+        class AccessVerification {
+            +String resource_type
+            +String verification_method
+            +Boolean verified
+            +DateTime expires_at
+        }
+    }
+
+    %% ==========================================
+    %% 2. FAMILY & PROFILE MODULE
+    %% ==========================================
+    namespace Family_Module {
+        class Profile {
+            +String first_name
+            +String relationship
+            +Date date_of_birth
+            +String gender
+        }
+
+        class FamilyConnection {
+            +String relationship
+            +String status
+            +String access_level
+        }
+
+        class ProfileShare {
+            +String access_level
+        }
+    }
+
+    %% ==========================================
+    %% 3. MEDICAL DATA MODULE
+    %% ==========================================
+    namespace Medical_Data {
+        class Report {
+            +String report_name
+            +String report_type
+            +String category
+            +DateTime report_date
+            +String patient_name
+            +Text doctor_names
+        }
+
+        class ReportField {
+            +String field_name
+            +Text field_value
+            +String field_unit
+            +String normal_range
+            +Boolean is_normal
+        }
+
+        class ReportFile {
+            +String original_filename
+            +String file_path
+            +String file_type
+        }
+    }
+
+    %% ==========================================
+    %% RELATIONSHIPS
+    %% ==========================================
+    
+    %% User Core
+    User "1" -- "0..*" Authenticator : secures
+    User "1" -- "0..*" AccessVerification : performs
+
+    %% Family
+    User "1" -- "0..*" Profile : manages
+    User "1" -- "0..*" FamilyConnection : requests
+    Profile "1" -- "0..*" ProfileShare : shared_via
+    User "1" -- "0..*" ProfileShare : receives_access
+
+    %% Medical
+    User "1" -- "0..*" Report : owns
+    Profile "1" -- "0..*" Report : associated_with
+    Report "1" -- "0..*" ReportField : contains_data
+    Report "1" -- "0..*" ReportFile : has_attachment
