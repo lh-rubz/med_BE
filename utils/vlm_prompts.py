@@ -184,17 +184,16 @@ def get_robust_demographics_prompt():
 This report uses a 2-column grid layout for demographics. Labels are on the RIGHT, values are on the LEFT.
 
 1. **PATIENT NAME (اسم المريض)**:
-   - Location: Typically in the top grid near "اسم المريض".
-   - Value: Capture the FULL person's name (at least 3-4 words). 
-   - 🚨 **SPACING**: "ابو" (Abu) and "الرب" (Al-Rub) are ALWAYS separate words. NEVER merge them (e.g., "أبو الرب" NOT "ابورب").
-   - ⚠️ **CRITICAL**: Do NOT include labels or categories (e.g., skip "Social Affairs").
-   - 🔍 **STRICT CHECK**: Ensure the name is the Actual Person (e.g., "أحمد محمد علي").
+   - Location: Top-center/right demographics.
+   - Value: Capture the FULL person's name (at least 3-4 words).
+   - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change letters. If it says "الرب" (Al-Rub), capture it as "الرب". DO NOT add letters like "الروب".
+   - 🚨 **SPACING**: "ابو" (Abu) is always separate (e.g., "أبو الرب" NOT "ابوراب").
+   - 🚫 Skip labels like "Social Affairs".
 
 2. **DOCTOR NAME (الطبيب)**:
-   - 🔍 **WHOLE-REPORT SEARCH**: Look specifically for a person's name (e.g., Prof. X, Dr. Y, or a signature name).
-   - **HEADER LOGO BOXES**: Check the top-left/top-right HEADER background boxes (often red/blue) for names like "بإدارة الطبيب أحمد نعيرات".
-   - Check: Top demographics, bottom margins, stamps, and signatures.
-   - 🚫 **IGNORE**: Facility names, clinic titles, or "General Practitioner" labels. Find the actual human name.
+   - 🔍 **WHOLE-REPORT SEARCH**: Mandatory search of the FULL image.
+   - **HEADER LOGO BOXES**: Look in the top-left background boxes (often red/blue) for proprietor names like "بإدارة الطبيب أحمد نعيرات".
+   - **MANDATORY**: If the OCR Reference text mentions a name, you MUST find its exact location in the ink and mirror it. DO NOT return "Not found" if ink exists in logo or header.
 
 3. **GENDER (الجنس)**:
    - Find "الجنس" on the right. Value is to the LEFT. (أنثى/انثى -> Female, ذكر -> Male).

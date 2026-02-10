@@ -75,12 +75,13 @@ If the table is Arabic, the column sequence is:
 
 ### 👤 DEMOGRAPHICS (ULTRA-SEARCH MODE)
 1. **Patient Name**: Find "اسم المريض". Capture the FULL person's name (at least 3-4 words). 
+   - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change the letters. If it says "الرب" (Al-Rub), capture it as "الرب". DO NOT add letters like "الروب".
    - 🚨 **SPACING RULE**: The word "ابو" (Abu) is ALWAYS a separate word. NEVER merge it with the next word (e.g. 'أبو الرب' NOT 'أبورب').
    - ⚠️ Fix disjointed characters (e.g. 'أحمد نعی رات' -> 'أحمد نعيرات').
-2. **Doctor**: 🔍 **MANDATORY ANCHOR CHECK**. 
+2. **Doctor**: 🔍 **MANDATORY ANCHOR RESPECT**. 
    - Look at the `OCR REFERENCE` doctor name below. 
-   - Cross-reference this name with the **TOP-LEFT RED/BLUE HEADER BOXES** and any **STAMPS** at the bottom.
-   - If the OCR anchor says a name (e.g. احمد نعيرات), and you see matching ink in the image, YOU MUST capture it. DO NOT return "Not found" if it exists in ink.
+   - You MUST locate this name in the IMAGE (check top-left red/blue header area, background logos, and stamps).
+   - If the Anchor says "أحمد نعيرات", and you see ink that says "أحمد نعيرات", YOU MUST EXTRACT IT. DO NOT return "Not found".
 
 ---
 ### 📋 OCR REFERENCE (STRICT ANCHORS)

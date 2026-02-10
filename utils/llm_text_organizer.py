@@ -30,9 +30,11 @@ IMPORTANT RULES:
 4. **RTL AWARENESS**: In Arabic reports, the Test Name is on the FAR RIGHT. Values are to the LEFT.
 
 ===PATIENT INFORMATION===
-- Patient Name: Capture the FULL name (look for اسم المريض or Patient Name). 🚨 Capture at least 3-4 words. Ensure space between "Abu" and the following word (e.g. "Abu Al-Rub").
-- Doctor Name: 🔍 **SCAN THE WHOLE TEXT**. Look for "الطبيب", "Dr.", "Prof.", "Physician". 🚨 **CHECK TOP-LEFT LOGO/HEADER AREA** for names like "أحمد نعيرات".
-- Capture Age, Gender, and Report Date.
+Patient Name: [Capture FULL name, 🚨 2+ words, NO TRUNCATION]
+Doctor Name: [🔍 SCAN WHOLE TEXT, logo area, stamps, etc.]
+Age: [Value]
+Gender: [Male/Female]
+Report Date: [DD/MM/YYYY or MM/DD/YYYY]
 
 ===MEDICAL DATA TABLE===
 List every test found in this exact format:
@@ -221,7 +223,7 @@ def parse_organized_text(organized_text):
             result['lab_name'] = clean_value(lab_match.group(1))
     
     # Extract medical tests section
-    tests_section = re.search(r'===MEDICAL TESTS===(.*?)(?:===|$)', organized_text, re.DOTALL)
+    tests_section = re.search(r'===MEDICAL DATA TABLE===(.*?)(?:===|$)', organized_text, re.DOTALL)
     if tests_section:
         section_text = tests_section.group(1)
         
