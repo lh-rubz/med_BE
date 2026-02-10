@@ -43,7 +43,6 @@ Test Name | Result | Unit | Normal Range
 ---
 RAW OCR TEXT TO ORGANIZE:
 """
-"""
 
 
 def get_enhanced_extraction_prompt(organized_text, page_idx, total_pages):
