@@ -30,8 +30,8 @@ IMPORTANT RULES:
 4. **RTL AWARENESS**: In Arabic reports, the Test Name is on the FAR RIGHT. Values are to the LEFT.
 
 ===PATIENT INFORMATION===
-- Patient Name: Capture the FULL name (look for اسم المريض or Patient Name). 🚨 Capture at least 3-4 words.
-- Doctor Name: 🔍 **SCAN THE WHOLE TEXT**. Look for "الطبيب", "Dr.", "Prof.", "Physician", or names in stamps/headers/footers.
+- Patient Name: Capture the FULL name (look for اسم المريض or Patient Name). 🚨 Capture at least 3-4 words. Ensure space between "Abu" and the following word (e.g. "Abu Al-Rub").
+- Doctor Name: 🔍 **SCAN THE WHOLE TEXT**. Look for "الطبيب", "Dr.", "Prof.", "Physician". 🚨 **CHECK TOP-LEFT LOGO/HEADER AREA** for names like "أحمد نعيرات".
 - Capture Age, Gender, and Report Date.
 
 ===MEDICAL DATA TABLE===

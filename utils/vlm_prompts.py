@@ -185,12 +185,14 @@ This report uses a 2-column grid layout for demographics. Labels are on the RIGH
 
 1. **PATIENT NAME (اسم المريض)**:
    - Location: Typically in the top grid near "اسم المريض".
-   - Value: Capture the FULL name (at least 3-4 words). 
+   - Value: Capture the FULL person's name (at least 3-4 words). 
+   - ⚠️ **SPACING**: Ensure correct spacing between words (e.g., "ابو الرب" must have a space, NOT "ابوراب").
    - ⚠️ **CRITICAL**: Do NOT include labels or categories (e.g., skip "Social Affairs").
    - 🔍 **STRICT CHECK**: Ensure the name is the Actual Person (e.g., "أحمد محمد علي").
 
 2. **DOCTOR NAME (الطبيب)**:
    - 🔍 **WHOLE-REPORT SEARCH**: Look specifically for a person's name (e.g., Prof. X, Dr. Y, or a signature name).
+   - **HEADER LOGO AREA**: Check the top-left/top-right HEADER background boxes (often red/blue) for names like "بإدارة الطبيب أحمد نعيرات".
    - Check: Top demographics, bottom margins, stamps, and signatures.
    - 🚫 **IGNORE**: Facility names, clinic titles, or "General Practitioner" labels. Find the actual human name.
 

@@ -73,20 +73,7 @@ Page {idx}/{total_pages}
 If the table is Arabic, the column sequence is:
 [RIGHTMOST] Test Name (الفحص) ➔ Result (النتيجة) ➔ Range (النتيجة الطبيعية) ➔ Unit (الوحدة) [LEFTMOST]
 
-### 📝 EXTRACTION EXAMPLES
-Example 1 (Clear Row):
-- Image: "Hemoglobin ...... 14.2 ...... g/dL ...... (12-16)"
-- JSON: {{"field_name": "Hemoglobin", "field_value": "14.2", "field_unit": "g/dL", "normal_range": "(12-16)"}}
-
-Example 2 (Handwritten/Signed Row):
-- Image: "WBC [handwritten 11.5*] K/uL"
-- JSON: {{"field_name": "WBC", "field_value": "11.5", "field_unit": "K/uL", "normal_range": "", "notes": "Handwritten/Starred"}}
-
-Example 3 (Empty Row):
-- Image: "Glucose [no value visible]"
-- JSON: {{"field_name": "Glucose", "field_value": "EMPTY_SPECIFIED", "field_unit": "", "normal_range": ""}}
-
-### 👤 DEMOGRAPHICS
+###  DEMOGRAPHICS
 1. **Patient Name**: Find "اسم المريض". Capture the FULL person's name (at least 3-4 words). 
    - ⚠️ Fix disjointed characters (e.g. 'أحمد نعی رات' -> 'أحمد نعيرات').
 2. **Doctor**: 🔍 **WHOLE-REPORT SEARCH**. Locate the actual human doctor's name. Check demographics, stamps, signatures, or footer margins.
@@ -98,17 +85,17 @@ Example 3 (Empty Row):
 
 JSON RETURN ONLY:
 {{
-    "patient_name": "Literal full name",
+    "patient_name": "Literal full name (⚠️ Ensure spaces between words like 'ابو الرب', NOT 'ابوراب')",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD (Interpret XX/XX/YYYY as DD/MM/YYYY for Arabic, MM/DD/YYYY for English)",
-    "doctor_names": "Literal doctor name",
+    "doctor_names": "Literal doctor name (🔍 Check HEADER LOGO BOXES if not found in grid)",
     "medical_data": [
         {{
             "field_name": "Test Name",
             "field_value": "Value or 'EMPTY_SPECIFIED'",
             "field_unit": "Unit",
-            "normal_range": "Range",
+            "normal_range": "Range (🚨 TRIPLE-CHECK COMPLEX RANGES: e.g. HbA1c ranges like 'less than 5.7%' must be captured exactly, avoiding hallucinations like '1.7%')",
             "notes": "Any visual flags (handwritten, stamp, etc)"
         }}
     ]
