@@ -184,16 +184,16 @@ def get_robust_demographics_prompt():
 This report uses a 2-column grid layout for demographics. Labels are on the RIGHT, values are on the LEFT.
 
 1. **PATIENT NAME (اسم المريض)**:
-   - Location: Top-center/right demographics.
-   - Value: Capture the FULL person's name (at least 3-4 words).
-   - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change letters. If it says "الرب" (Al-Rub), capture it as "الرب". DO NOT add letters like "الروب".
+   - Location: Top demographics table.
+   - Value: Capture the FULL name.
+   - 🚨 **RELY ON OCR ANCHOR (ARABIC)**: Trust the spelling provided in the `OCR REFERENCE` below. If OCR says "رئيسة", use "رئيسة". DO NOT try to "re-read" the ink if OCR already captured it correctly.
+   - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change letters. 🚫 NO Hallucinations.
    - 🚨 **SPACING**: "ابو" (Abu) is always separate (e.g., "أبو الرب" NOT "ابوراب").
-   - 🚫 Skip labels like "Social Affairs".
 
 2. **DOCTOR NAME (الطبيب)**:
-   - 🔍 **WHOLE-REPORT SEARCH**: Mandatory search of the FULL image.
-   - **HEADER LOGO BOXES**: Look in the top-left background boxes (often red/blue) for proprietor names like "بإدارة الطبيب أحمد نعيرات".
-   - **MANDATORY**: If the OCR Reference text mentions a name, you MUST find its exact location in the ink and mirror it. DO NOT return "Not found" if ink exists in logo or header.
+   - 🔍 **PRIMARY SEARCH**: Look at the cell immediately to the LEFT or below the label "الطبيب" (Doctor). 
+   - 🔍 **SECONDARY (LAB DIRECTOR)**: Only use names from logo/header boxes (e.g. "أحمد نعيرات") if the "الطبيب" cell is empty or missing.
+   - 🚨 **TRUST ANCHORS**: If the `OCR REFERENCE` identifies a human name (e.g. جهاد العملة), find it in the ink and capture it.
 
 3. **GENDER (الجنس)**:
    - Find "الجنس" on the right. Value is to the LEFT. (أنثى/انثى -> Female, ذكر -> Male).

@@ -65,8 +65,9 @@ Page {idx}/{total_pages}
 
 ### 🚨 OPERATIONAL RULES
 - 🚫 **NO HALLUCINATION**: If the image shows '12.5' but OCR says '12.8', use '12.5'.
-- 🚫 **NO SHIFTING**: Do NOT pull a result from the row above or below. If the current row is empty, use "EMPTY_SPECIFIED".
-- 🌍 **MULTILINGUAL**: Supports English, Arabic, and Mixed text. Keep labels in their original language.
+- 🚫 **NO SHIFTING**: Do NOT pull a result from the row above or below. 
+- 🚫 **NO MERGING**: Each Test in the `OCR REFERENCE` below is ONE ROW. DO NOT merge two tests into one (e.g. "RDW" and "Platelets" must remain separate).
+- 🚨 **ARABIC TRUST**: For Arabic test names and patient names, TRUST the `OCR REFERENCE` spelling. Do not "re-read" the ink unless the OCR is obviously nonsensical.
 - 🎨 **INK-CAPTURE**: Mirror handwriting, stamps, and signatures exactly as they appear in ink.
 
 ### ⬅️ ARABIC TABLE FLOW (RIGHT-TO-LEFT)
