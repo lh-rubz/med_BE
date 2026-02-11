@@ -107,9 +107,11 @@ Page {idx}/{total_pages}
 ### 👤 DEMOGRAPHICS (READ FROM IMAGE)
 1. **Patient Name**: Look at the cell next to "اسم المريض" in the header. **Read the EXACT characters from the image**, letter by letter. Do NOT copy the OCR name below — OCR may have wrong letters.
    - 🚨 **SPACING RULE**: The word "ابو" (Abu) is ALWAYS a separate word. NEVER merge it with the next word.
-2. **Doctor Name**: Look at the cell next to "الطبيب" in the header. **Read the EXACT characters from the image**.
+2. **Doctor Name**: **Search the ENTIRE page** for the doctor's name — header (next to "الطبيب"), footer, signature area, stamp, or "إعداد".
    - 🚫 Do NOT confuse "عيادة" (Clinic) or "مختبر" (Lab) or "وزارة" (Ministry) with a doctor name.
    - The doctor name is a PERSON's name (e.g., "جهاد العملة"), NOT a facility or department.
+   - If the header field is empty, look at the BOTTOM of the page for a signature or stamp.
+   - If no doctor name is found anywhere, return empty string "".
 
 ---
 ### 📋 OCR REFERENCE (ROW COUNT ONLY — do NOT copy names or spelling from here)

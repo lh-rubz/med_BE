@@ -93,11 +93,9 @@ class MedicalDataPostProcessor:
     @staticmethod
     def _merge_esr_rows(medical_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Merge E.S.R sub-rows (I Hour, II Hour) into the parent E.S.R entry.
-        In many reports, E.S.R has value on the 'I Hour' line, and 'II Hour' is empty.
-        The VLM sometimes extracts E.S.R as one row AND I Hour/II Hour as separate rows.
-        This merges them: if E.S.R already has the value, drop the I Hour/II Hour duplicates.
-        If E.S.R has no value but I Hour does, move the value up.
+        Rename E.S.R sub-rows (I Hour, II Hour) to include the parent name.
+        e.g., "I Hour" → "E.S.R - I Hour", "II Hour" → "E.S.R - II Hour".
+        If a standalone E.S.R row exists with the same value as I Hour, remove the duplicate.
         """
         if not medical_data:
             return medical_data
@@ -112,24 +110,27 @@ class MedicalDataPostProcessor:
             elif name in ('i hour', 'ii hour', '1 hour', '2 hour', 'i hour (esr)', 'ii hour (esr)'):
                 hour_indices.append(i)
         
-        if esr_idx is not None and hour_indices:
-            esr_entry = medical_data[esr_idx]
-            esr_value = str(esr_entry.get('field_value', '')).strip()
+        if hour_indices:
+            # Rename hour rows to include parent name: "I Hour" → "E.S.R - I Hour"
+            for hi in hour_indices:
+                original_name = medical_data[hi].get('field_name', '').strip()
+                if not original_name.upper().startswith('E.S.R'):
+                    medical_data[hi]['field_name'] = f"E.S.R - {original_name}"
             
-            # If E.S.R has no value, try to get it from I Hour
-            if not esr_value:
+            # If a standalone E.S.R row exists, check if it's a duplicate of I Hour
+            if esr_idx is not None:
+                esr_value = str(medical_data[esr_idx].get('field_value', '')).strip()
+                # If E.S.R row has a value that matches one of the hour rows, remove the standalone
                 for hi in hour_indices:
                     hval = str(medical_data[hi].get('field_value', '')).strip()
-                    if hval and hval.lower() not in ('none', ''):
-                        esr_entry['field_value'] = hval
-                        if not esr_entry.get('field_unit'):
-                            esr_entry['field_unit'] = medical_data[hi].get('field_unit', '')
-                        if not esr_entry.get('normal_range'):
-                            esr_entry['normal_range'] = medical_data[hi].get('normal_range', '')
+                    if esr_value and hval and esr_value == hval:
+                        # Duplicate — remove the standalone E.S.R row, keep the named hour row
+                        medical_data = [e for i, e in enumerate(medical_data) if i != esr_idx]
                         break
-            
-            # Remove the I Hour / II Hour rows (they're sub-rows of E.S.R)
-            medical_data = [e for i, e in enumerate(medical_data) if i not in hour_indices]
+                else:
+                    # No duplicate — if E.S.R has no value, remove it (empty parent header)
+                    if not esr_value:
+                        medical_data = [e for i, e in enumerate(medical_data) if i != esr_idx]
         
         return medical_data
 
@@ -358,6 +359,10 @@ class MedicalDataPostProcessor:
         # Fix double opening parens
         field_name = field_name.replace("((", "(").strip()
 
+        # Remove unit from normal_range if it's already in field_unit
+        # e.g., "12 - 16 g/dl" → "12 - 16" when field_unit is "g/dl"
+        normal_range = MedicalDataPostProcessor._strip_unit_from_range(normal_range, field_unit)
+
         cleaned_entry = {
             "field_name": field_name,
             "field_value": field_value,
@@ -581,6 +586,40 @@ class MedicalDataPostProcessor:
                 break
         
         return normal_range, notes
+
+    @staticmethod
+    def _strip_unit_from_range(normal_range: str, field_unit: str) -> str:
+        """
+        Remove the unit from normal_range when it duplicates field_unit.
+        e.g., "12 - 16 g/dl" with unit "g/dl" → "12 - 16"
+              "70 - 150 ug/dl" with unit "ug/dl" → "70 - 150"
+              "Male: < 15, Female: < 20 mm/l" with unit "mm" → "Male: < 15, Female: < 20"
+        Preserves ranges that contain medical state words (e.g., "Normal: less than 5.7 %").
+        """
+        if not normal_range or not field_unit:
+            return normal_range
+        
+        unit = field_unit.strip()
+        if not unit:
+            return normal_range
+        
+        # Build list of unit variants to strip (case-insensitive)
+        # e.g., for "g/dl" also try "g/dL", "G/dL", etc.
+        unit_lower = unit.lower()
+        
+        # Strip the unit (and optional whitespace before it) from the end of each line
+        lines = normal_range.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            stripped = line.rstrip()
+            # Try removing the unit from the end of the line
+            if stripped.lower().endswith(unit_lower):
+                stripped = stripped[:len(stripped) - len(unit_lower)].rstrip()
+                # Also remove trailing comma or semicolon left behind
+                stripped = stripped.rstrip(',;').rstrip()
+            cleaned_lines.append(stripped)
+        
+        return '\n'.join(cleaned_lines)
 
     @staticmethod
     def _append_note(existing: str, note: str) -> str:

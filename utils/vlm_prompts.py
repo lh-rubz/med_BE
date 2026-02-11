@@ -17,8 +17,12 @@ REQUIRED FIELDS:
 3. **Gender**: Text INSIDE the box for "الجنس". (أنثى -> Female, ذكر -> Male).
 4. **DOB**: Text INSIDE the box for "تاريخ الميلاد".
 5. **Order Date**: Text INSIDE the box for "تاريخ الطلب". Extract as YYYY-MM-DD.
-6. **Doctor Name**: Text INSIDE the box for "الطبيب".
+6. **Doctor Name**: Search the ENTIRE page for the doctor's name:
+   - Header: text INSIDE the box for "الطبيب" or "Doctor Name" or "Physician".
+   - Footer/bottom: next to a signature, stamp, "إعداد" (Prepared by), or "المختص" (Specialist).
+   - Signature area: a handwritten or printed name near the bottom.
    - ⚠️ ALERT: "عيادة الطب العام" is a clinic, NOT a doctor. "جهة الطلب" is a facility. Extract ONLY the person's name (e.g., جهاد العملة).
+   - If no doctor name found anywhere, return empty string "".
 
 JSON OUTPUT ONLY:
 {{
@@ -207,10 +211,16 @@ Arabic characters must be read carefully — each dot and letter matters.
    - 🚫 Do NOT guess or "correct" the name. Read the EXACT ink.
 
 2. **DOCTOR NAME (الطبيب)**:
-   - 🔍 Look at the cell next to the label "الطبيب" (Doctor) in the header grid.
+   - 🔍 **SEARCH THE ENTIRE PAGE** for the doctor's name. It may appear in ANY of these locations:
+     * Header area: next to "الطبيب" or "Doctor Name" or "Physician" or "Requesting Doctor" or "الطبيب المعالج"
+     * Footer/bottom: next to a signature, stamp, or "إعداد" (Prepared by) or "المختص" (Specialist)
+     * Signature area: a handwritten name or printed name near the bottom of the report
+     * Stamp: a doctor's stamp with their name and credentials
    - 🚨 **READ CHARACTER BY CHARACTER**: The doctor is a PERSON's name (e.g., "جهاد العملة").
    - 🚨 **VOID REJECTION**: "عيادة" (Clinic), "مختبر" (Lab), "وزارة" (Ministry), "مديرية" (Directorate) are NOT doctor names. 
    - 🚫 Do NOT confuse the clinic/facility name with the doctor's personal name.
+   - If the doctor name field is empty in the header, look at the BOTTOM of the page for a signature or stamp.
+   - If no doctor name is found anywhere on the page, return empty string "".
 
 3. **GENDER (الجنس)**:
    - Find "الجنس" on the right. Value is to the LEFT. (أنثى/انثى -> Female, ذكر -> Male).
@@ -241,7 +251,7 @@ Return JSON only:
     "report_date": "YYYY-MM-DD",
     "report_name": "Full title of the report as written (e.g. CBC)",
     "report_type": "Category of report (e.g. Haematology)",
-    "doctor_names": "Read EXACT person name from image next to الطبيب. Not a clinic or facility."
+    "doctor_names": "Search ENTIRE page: header, footer, signature, stamp. Return person name only, or empty string."
 }"""
 
 
@@ -278,9 +288,14 @@ Your task is to VERIFY this name against the image:
    - 🚫 Do NOT guess or invent a name. If you cannot read it clearly, use the OCR version.
 
 2. **DOCTOR NAME (الطبيب)**:
-   - Find the cell next to "الطبيب" in the header.
+   - 🔍 **SEARCH THE ENTIRE PAGE** for the doctor's name. Check ALL of these locations:
+     * Header: next to "الطبيب" or "Doctor Name" or "Physician"
+     * Footer/bottom: next to a signature, stamp, "إعداد" (Prepared by), or "المختص" (Specialist)
+     * Signature area: a handwritten or printed name near the bottom
+     * Stamp: a doctor's stamp with their name
    {"- OCR read it as: " + chr(34) + ocr_doctor_name + chr(34) + ". Verify against the image." if ocr_doctor_name else "- Read the name directly from the image."}
    - 🚫 "عيادة" (Clinic), "مختبر" (Lab), "وزارة" (Ministry), "مديرية" (Directorate) are NOT doctor names.
+   - If no doctor name is found anywhere on the page, return empty string "".
 
 3. **GENDER (الجنس)**:
    - Find "الجنس". (أنثى/انثى → Female, ذكر → Male).
