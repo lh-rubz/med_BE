@@ -109,7 +109,7 @@ class MedicalDataPostProcessor:
             # Create key from normalized name, value, AND unit
             entry_key = (normalized_name, field_value, field_unit)
             
-            if entry_key not in seen_keys and raw_name and field_value:
+            if entry_key not in seen_keys and raw_name:
                 unique_entries.append(entry)
                 seen_keys.add(entry_key)
         
@@ -173,22 +173,18 @@ class MedicalDataPostProcessor:
             return None
             
         # Sentinel Check: Discard placeholders used to maintain alignment
-        sentinels = ["PHANTOM", "EMPTY_SPECIFIED", "N/A", "*", "#", "-", ".", "EMPTY"]
+        sentinels = ["PHANTOM", "EMPTY_SPECIFIED", "N/A", "EMPTY", "EMPTY_IN_IMAGE"]
         if field_value.upper() in sentinels or field_value in sentinels:
-            return None
+            field_value = ""
             
         # Drop only if everything is missing
         if not field_name and not field_value and not field_unit and not normal_range and not category and not notes:
             return None
 
-        # Special check: if field_value is empty but other signals exist, keep it
-        if not field_value:
-            # If it's a flagged row from VLM retry, we keep it
-            if "*" in field_name or "#" in field_name:
-                pass
-            elif not field_unit and not normal_range:
-                # Truly empty row
-                return None
+        # Special check: if field_value is empty, we keep it if it has a name
+        # (USER REQUEST: Total Row Extraction Mode)
+        if not field_value and not field_name:
+            return None
 
         # Flag clearly malformed rows but keep them
         if MedicalDataPostProcessor._is_value_malformed(field_value, field_unit, normal_range):
@@ -198,16 +194,11 @@ class MedicalDataPostProcessor:
                 # In strict mode, we might want to drop these, but for now we flag them
                 notes = MedicalDataPostProcessor._append_note(notes, "check_alignment")
             
-        # USER REQUEST: Skip empty fields rows to prevent mixing up
-        # If both value and unit/range are missing or sentinel, drop it
-        sentinels = ["PHANTOM", "EMPTY_SPECIFIED", "N/A", "*", "#", "-", ".", "EMPTY", "EMPTY_IN_IMAGE"]
-        is_val_empty = not field_value or field_value.upper() in sentinels or field_value in sentinels
-        is_unit_empty = not field_unit or field_unit.upper() in sentinels or field_unit in sentinels
-        is_range_empty = not normal_range or normal_range.upper() in sentinels or normal_range in sentinels
-
+        # USER REQUEST: Total Extraction Mode (preserving empty rows)
+        is_val_empty = not field_value or field_value in ["-", ".", "(-)", "EMPTY"]
         if is_val_empty:
-             # USER REQUEST: Skip ALL rows that don't have a value.
-             return None
+             # Preserve row for the user
+             field_value = ""
         
         # Sanitize normal range if it looks malformed or wildly mismatched
         normal_range, notes = MedicalDataPostProcessor._sanitize_normal_range(

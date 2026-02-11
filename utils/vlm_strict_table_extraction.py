@@ -64,13 +64,13 @@ Page {idx}/{total_pages}
 3. **Row Counting**: Count the rows in the OCR REFERENCE below — your output MUST have the SAME number of rows.
 4. **Visual Reading**: For each row, READ the test name, value, unit, and range DIRECTLY FROM THE IMAGE.
 
-### 🚨🚨🚨 ROW EXTRACTION GUIDANCE (STRICT) 🚨🚨🚨
-- The OCR REFERENCE below lists the rows found in the report. Use it ONLY to identify test names and their search areas.
-- 🚨 **ONLY output rows** that have a VISIBLE NUMERIC or TEXT RESULT in the image on the same horizontal baseline as the test name.
-- 🚫 **SKIP any row** that has NO visible result, or shows only "*", "-", ".", or is blank in the Result column.
-- 🚫 **DO NOT force row count**: If OCR lists 10 rows but only 5 have visible results, you MUST only output 5 rows.
+### 🚨🚨🚨 ROW EXTRACTION GUIDANCE (TOTAL EXTRACTION MODE) 🚨🚨🚨
+- The OCR REFERENCE below lists the rows found in the report. Use it ONLY to identify the search areas.
+- 🚨 **LITERAL SYMMETRY**: Your output MUST have a 1-to-1 mapping with the rows in the image.
+- ✅ **EXTRACT EVERY ROW**: Capture every parameter row you see in the report, sequentially.
+- ⚪ **EMPTY VALUES**: If a row exists but has no numeric result, or shows ONLY "-", ".", or "(-)", return `field_value`: "". Do NOT skip the row.
 - 🚫 **NEVER MERGE TWO ROWS**: Even if names are similar (e.g. "Neutrophils" and "Neutrophils %"), you MUST output them as TWO separate JSON objects if they are on different lines.
-- 🚫 **ZERO HALLUCINATION**: If you cannot see a clear numeric result or a placeholder like "*" for a row in the image, DO NOT INCLUDE THAT ROW.
+- 🚫 **ZERO HALLUCINATION (VALUES)**: If a value column is empty, return empty string. Do NOT invent numbers.
 
 ### 🚨🚨 FIELD NAME RULE (READ FROM IMAGE, NOT OCR) 🚨🚨
 - The OCR list below is for **ROW COUNT and ORDER reference ONLY**.
@@ -85,8 +85,8 @@ Page {idx}/{total_pages}
 - 🚫 **NO SHIFTING**: Do NOT pull a result from the row above or below. 
 - 🚨 **PIXEL-LOCKED ALIGNMENT**: For each Test Name, trace a direct horizontal path (baseline). Capture ONLY the numeric value and unit that sits on that exact vertical level. If you hit a different row's pixels or a vertical space, STOP. Do NOT borrow values from above or below.
 - 🚫 **SECTION HEADER SKIP**: Do NOT extract headers like "Biochemistry", "Haematology", "Main Report", or "Clinical Chemistry" as test rows. Only extract actual medical parameters.
-- 🚨 **PLACEHOLDER VALUES**: If a result column shows a "*", return `field_value`: "*". Do NOT skip this row if it belongs to a valid parameter like "RDW" or "Platelets".
-- 🚫 **ZERO HALLUCINATION (VALUES)**: If there is NO visible numeric ink or "*" for a row, **DO NOT INCLUDE THAT ROW**. Skip it entirely.
+- 🚨 **PLACEHOLDER VALUES**: If a result column shows a "*", return `field_value`: "*". 
+- ✅ **ALLOW EMPTY RESULTS**: If a valid medical parameter line exists but has no result, capture the name and return an empty `field_value`.
 - 🚫 **NO RANGE BLEEDING**: Strictly keep "Normal Range" separate from "Test Name".
    - Bad: "Monocytes (% (1.0-3.0)"
    - Good: Name="Monocytes (%)", Range="(1.0-3.0)"

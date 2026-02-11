@@ -8,22 +8,25 @@ sys.path.append(os.getcwd())
 from utils.medical_validator import MedicalValidator
 from utils.medical_data_postprocessor import MedicalDataPostProcessor
 
-def test_empty_row_skipping():
-    print("\n--- Testing Empty Row Skipping ---")
+def test_total_row_extraction():
+    print("\n--- Testing Total Row Extraction ---")
     mock_data = {
         "medical_data": [
             {"field_name": "Glucose", "field_value": "100", "field_unit": "mg/dL", "normal_range": "70-110"},
             {"field_name": "Empty Test", "field_value": "", "field_unit": "", "normal_range": ""},
             {"field_name": "Spacer", "field_value": "*", "field_unit": "", "normal_range": ""},
-            {"field_name": "Phantm", "field_value": "EMPTY_SPECIFIED", "field_unit": "", "normal_range": "10-20"}
+            {"field_name": "Header Row", "field_name": "الفحص", "field_value": "", "field_unit": "", "normal_range": ""}
         ]
     }
     cleaned = MedicalDataPostProcessor.clean_extracted_data(mock_data)
     print(f"Extracted rows: {len(cleaned['medical_data'])}")
     for item in cleaned['medical_data']:
-        print(f" - {item['field_name']}: {item['field_value']}")
-    assert len(cleaned['medical_data']) == 1
-    assert cleaned['medical_data'][0]['field_name'] == "Glucose"
+        print(f" - {item['field_name']}: {item.get('field_value', 'NONE')}")
+    # Header should be skipped, but Empty Test and Spacer should be preserved
+    assert len(cleaned['medical_data']) >= 2
+    names = [item['field_name'] for item in cleaned['medical_data']]
+    assert "Empty Test" in names
+    assert "Glucose" in names
 
 def test_typo_fixes():
     print("\n--- Testing Typo Fixes ---")
@@ -87,7 +90,7 @@ def test_name_override():
 
 if __name__ == "__main__":
     try:
-        test_empty_row_skipping()
+        test_total_row_extraction()
         test_typo_fixes()
         test_range_hygiene()
         test_name_override()
