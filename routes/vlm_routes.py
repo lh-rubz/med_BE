@@ -819,7 +819,7 @@ class ChatResource(Resource):
                     return
 
                 # Process Images Generator
-                yield from self._process_multiple_images_stream(all_images_to_process, current_user_id, user, saved_files)
+                yield from self._process_multiple_images_stream(all_images_to_process, current_user_id, user, saved_files, allow_duplicate)
                 
             except Exception as e:
                 print(f"Stream Error: {e}")
@@ -829,7 +829,7 @@ class ChatResource(Resource):
 
         return Response(stream_with_context(generate_progress()), content_type='text/event-stream')
 
-    def _process_multiple_images_stream(self, images_list, current_user_id, user, saved_files):
+    def _process_multiple_images_stream(self, images_list, current_user_id, user, saved_files, allow_duplicate=False):
         """Generator that yields progress for image processing steps"""
         total_pages = len(images_list)
         all_extracted_data = []
@@ -1039,7 +1039,9 @@ class ChatResource(Resource):
                                         val = str(vlm_data.get(key, "")).strip()
                                         if val and val.lower() not in ["unknown", "n/a", "none", "", "empty_specified"]:
                                             rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "عيادة", "مختبر", "وزارة", "مديرية"]
-                                            if not any(s in val for s in rejection_terms):
+                                            prompt_echo_phrases = ["read exact", "from image", "person name", "verified", "letter by letter", "not a clinic", "not a facility", "next to", "اسم المريض", "الطبيب"]
+                                            is_echo = sum(1 for p in prompt_echo_phrases if p in val.lower()) >= 2 or (len(val) > 60 and sum(1 for p in prompt_echo_phrases if p in val.lower()) >= 1)
+                                            if not any(s in val for s in rejection_terms) and not is_echo:
                                                 extracted_data[f'_vlm_table_{key}'] = val
                                                 print(f"   📝 VLM table candidate {key}: {val}")
                         except Exception as parse_err:
@@ -1107,7 +1109,9 @@ class ChatResource(Resource):
                     # Add OCR names as strong candidates (counted twice for Arabic names)
                     if ocr_patient_name:
                         rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "عيادة", "مختبر", "وزارة", "مديرية"]
-                        if not any(s in ocr_patient_name for s in rejection_terms):
+                        prompt_echo_phrases = ["read exact", "from image", "person name", "verified", "letter by letter", "char-by-char", "not a clinic", "not a facility", "next to", "اسم المريض", "الطبيب"]
+                        is_prompt_echo = sum(1 for p in prompt_echo_phrases if p in ocr_patient_name.lower()) >= 2
+                        if not any(s in ocr_patient_name for s in rejection_terms) and not is_prompt_echo:
                             # OCR gets extra weight for Arabic names
                             ocr_weight = 3 if is_arabic_name else 1
                             for _ in range(ocr_weight):
@@ -1116,7 +1120,9 @@ class ChatResource(Resource):
                     
                     if ocr_doctor_name:
                         rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "عيادة", "مختبر", "وزارة", "مديرية"]
-                        if not any(s in ocr_doctor_name for s in rejection_terms):
+                        prompt_echo_phrases = ["read exact", "from image", "person name", "verified", "letter by letter", "char-by-char", "not a clinic", "not a facility", "next to", "اسم المريض", "الطبيب"]
+                        is_prompt_echo = sum(1 for p in prompt_echo_phrases if p in ocr_doctor_name.lower()) >= 2
+                        if not any(s in ocr_doctor_name for s in rejection_terms) and not is_prompt_echo:
                             ocr_weight = 3 if _has_arabic(ocr_doctor_name) else 1
                             for _ in range(ocr_weight):
                                 doctor_candidates.append(ocr_doctor_name)
@@ -1169,11 +1175,15 @@ class ChatResource(Resource):
                             dname = str(patient_data.get('doctor_names', '')).strip()
                             
                             rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "social", "affairs", "insurance", "عيادة", "مختبر", "وزارة", "مديرية"]
+                            prompt_echo_phrases = ["read exact", "from image", "person name", "verified", "letter by letter", "char-by-char", "not a clinic", "not a facility", "next to", "اسم المريض", "الطبيب"]
                             
-                            if pname and not any(s in pname for s in rejection_terms):
+                            def _is_prompt_echo_text(t):
+                                return sum(1 for p in prompt_echo_phrases if p in t.lower()) >= 2 or (len(t) > 60 and sum(1 for p in prompt_echo_phrases if p in t.lower()) >= 1)
+                            
+                            if pname and not any(s in pname for s in rejection_terms) and not _is_prompt_echo_text(pname):
                                 name_candidates.append(pname)
                                 print(f"      VLM demographics pass {pass_num+1} name: {pname}")
-                            if dname and not any(s in dname for s in rejection_terms):
+                            if dname and not any(s in dname for s in rejection_terms) and not _is_prompt_echo_text(dname):
                                 doctor_candidates.append(dname)
                                 print(f"      VLM demographics pass {pass_num+1} doctor: {dname}")
                     

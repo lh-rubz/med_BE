@@ -54,7 +54,7 @@ class MedicalDataPostProcessor:
             "report_date": cleaned_report_date,
             "report_name": extracted_data.get("report_name", ""),
             "report_type": best_type,
-            "doctor_names": extracted_data.get("doctor_names", ""),
+            "doctor_names": MedicalDataPostProcessor._clean_doctor_name(extracted_data.get("doctor_names", "")),
             "medical_data": []
         }
         
@@ -81,11 +81,58 @@ class MedicalDataPostProcessor:
             cleaned["medical_data"]
         )
         
+        # Merge E.S.R sub-rows (I Hour / II Hour) into the parent E.S.R row
+        cleaned["medical_data"] = MedicalDataPostProcessor._merge_esr_rows(
+            cleaned["medical_data"]
+        )
+        
         cleaned["total_fields_in_image"] = len(cleaned["medical_data"])
         
         return cleaned
     
     @staticmethod
+    def _merge_esr_rows(medical_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Merge E.S.R sub-rows (I Hour, II Hour) into the parent E.S.R entry.
+        In many reports, E.S.R has value on the 'I Hour' line, and 'II Hour' is empty.
+        The VLM sometimes extracts E.S.R as one row AND I Hour/II Hour as separate rows.
+        This merges them: if E.S.R already has the value, drop the I Hour/II Hour duplicates.
+        If E.S.R has no value but I Hour does, move the value up.
+        """
+        if not medical_data:
+            return medical_data
+        
+        esr_idx = None
+        hour_indices = []
+        
+        for i, entry in enumerate(medical_data):
+            name = entry.get('field_name', '').strip().lower()
+            if name in ('e.s.r', 'esr', 'e.s.r.', 'erythrocyte sedimentation rate'):
+                esr_idx = i
+            elif name in ('i hour', 'ii hour', '1 hour', '2 hour', 'i hour (esr)', 'ii hour (esr)'):
+                hour_indices.append(i)
+        
+        if esr_idx is not None and hour_indices:
+            esr_entry = medical_data[esr_idx]
+            esr_value = str(esr_entry.get('field_value', '')).strip()
+            
+            # If E.S.R has no value, try to get it from I Hour
+            if not esr_value:
+                for hi in hour_indices:
+                    hval = str(medical_data[hi].get('field_value', '')).strip()
+                    if hval and hval.lower() not in ('none', ''):
+                        esr_entry['field_value'] = hval
+                        if not esr_entry.get('field_unit'):
+                            esr_entry['field_unit'] = medical_data[hi].get('field_unit', '')
+                        if not esr_entry.get('normal_range'):
+                            esr_entry['normal_range'] = medical_data[hi].get('normal_range', '')
+                        break
+            
+            # Remove the I Hour / II Hour rows (they're sub-rows of E.S.R)
+            medical_data = [e for i, e in enumerate(medical_data) if i not in hour_indices]
+        
+        return medical_data
+
     @staticmethod
     def _deduplicate_entries(medical_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -162,6 +209,10 @@ class MedicalDataPostProcessor:
         normal_range = str(entry.get("normal_range", "")).strip().strip('[]')
         category = str(entry.get("category", "")).strip().strip('[]')
         notes = str(entry.get("notes", "")).strip().strip('[]')
+        
+        # Clean literal "None" string in notes (VLM sometimes outputs "None" instead of empty)
+        if notes.lower() == "none":
+            notes = ""
         
         # Skip rows that are clearly table headers (case-insensitive regex)
         header_patterns = [
@@ -513,8 +564,16 @@ class MedicalDataPostProcessor:
                 known_max_range = bounds['max']  # (plausible_low, plausible_high) for the max boundary
                 
                 # Check if extracted min is WAY outside plausible range for min boundary
-                min_way_off = extracted_min < known_min_range[0] * 0.3 or extracted_min > known_min_range[1] * 3
-                max_way_off = extracted_max < known_max_range[0] * 0.3 or extracted_max > known_max_range[1] * 3
+                # Special handling: when known min upper bound is 0 ("Up to X" style ranges),
+                # don't flag the min as "way off" — there's no real lower bound.
+                if known_min_range[1] == 0:
+                    min_way_off = False  # "Up to X" ranges have no meaningful lower bound
+                else:
+                    min_way_off = extracted_min < known_min_range[0] * 0.3 or extracted_min > known_min_range[1] * 3
+                if known_max_range[0] == 0:
+                    max_way_off = extracted_max > known_max_range[1] * 3
+                else:
+                    max_way_off = extracted_max < known_max_range[0] * 0.3 or extracted_max > known_max_range[1] * 3
                 
                 if min_way_off or max_way_off:
                     notes = MedicalDataPostProcessor._append_note(notes, "range_suspect")
@@ -533,6 +592,66 @@ class MedicalDataPostProcessor:
             return existing
         return f"{existing}; {note}"
     
+    # Phrases that indicate the VLM echoed the prompt template instead of reading the image
+    PROMPT_ECHO_PATTERNS = [
+        "read exact", "from image", "person name", "verified/corrected",
+        "literal age", "letter by letter", "char-by-char", "absolute authority",
+        "visually confirmed", "hallucination", "الطبيب", "اسم المريض",
+        "not a clinic", "not a facility", "next to",
+    ]
+
+    @staticmethod
+    def _is_prompt_echo(text: str) -> bool:
+        """Detect if text is a VLM prompt echo (instruction text returned as value)."""
+        if not text:
+            return False
+        lower = text.lower()
+        # If it contains 2+ prompt-like phrases, it's definitely a prompt echo
+        matches = sum(1 for p in MedicalDataPostProcessor.PROMPT_ECHO_PATTERNS if p in lower)
+        if matches >= 2:
+            return True
+        # If it's very long and contains instruction-like words
+        if len(text) > 60 and matches >= 1:
+            return True
+        return False
+
+    @staticmethod
+    def _clean_doctor_name(name: str) -> str:
+        """
+        Clean doctor name.
+        Reject prompt echoes, facility names, and corrupted text.
+        """
+        if not name:
+            return ""
+        name = str(name).strip()
+        
+        # Reject prompt echoes (VLM returned the instruction text as the value)
+        if MedicalDataPostProcessor._is_prompt_echo(name):
+            return ""
+        
+        # Reject facility/institution names
+        rejection_terms = ["مختبر", "مرفق", "مستشفى", "تأمين", "وزارة", "مديرية",
+                          "مستوصف", "رعاية", "شؤون", "شذون", "اجتماعية",
+                          "عيادة", "clinic", "hospital", "lab", "laboratory",
+                          "ministry", "directorate", "insurance"]
+        name_lower = name.lower()
+        for term in rejection_terms:
+            if term in name_lower:
+                return ""
+        
+        # Remove titles
+        titles = ["dr.", "dr", "prof.", "prof", "د.", "دكتور", "أ.د", "الدكتور",
+                 "أستاذ", "البروفيسور"]
+        for title in titles:
+            if name_lower.startswith(title):
+                name = name[len(title):].strip()
+                name_lower = name.lower()
+        
+        if len(name) < 2:
+            return ""
+        
+        return MedicalDataPostProcessor._normalize_arabic_text(name)
+
     @staticmethod
     def _clean_patient_name(name: str) -> str:
         """
@@ -546,6 +665,10 @@ class MedicalDataPostProcessor:
         name = str(name).strip()
         
         # Indicators of corruption: random symbols, facility words, insurance terms
+        # Reject prompt echoes (VLM returned the instruction text as the value)
+        if MedicalDataPostProcessor._is_prompt_echo(name):
+            return ""
+        
         corruption_indicators = ["مختبر", "مرفق", "مستشفى", "تأمين", "وزارة", "مديرية", "مستوصف", "رعاية", "شؤون", "شذون", "اجتماعية"]
         for indicator in corruption_indicators:
             if indicator in name:
