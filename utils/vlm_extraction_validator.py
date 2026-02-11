@@ -69,9 +69,13 @@ def validate_and_clean_extraction(extracted_data: Dict[str, Any], page_num: int 
                 'removed_range': normal_range,
                 'value': field_value
             })
+            # Don't set skip_reason - we keep the item with cleared range
+            skip_reason = None
         
         # 4. Check if value is copied from neighbor row
-        elif field_value and _is_value_from_neighbor(field_value, previous_values):
+        # Only flag if the field names are ALSO suspiciously similar (not just same value)
+        # Many legitimate tests can have similar values (e.g., 0.1, 0.0, etc.)
+        elif field_value and _is_value_from_neighbor(field_value, previous_values, field_name):
             skip_reason = f"Value appears copied from adjacent row: '{field_value}' was in previous 3 rows"
             cleaned_data['validation_report']['items_removed_copied_from_neighbor'] += 1
         
@@ -135,7 +139,7 @@ def _is_valid_range(normal_range: str, field_value: str, field_name: str) -> boo
     
     # Check for obviously hallucinated ranges
     # Very tiny ranges with large values (e.g., (0-0.75) for 14.4)
-    if range_max - range_min < 1 and value_num > range_max * 5:
+    if range_max - range_min < 1 and value_num > range_max * 10:
         return False
     
     # Suspicious patterns for specific test types
@@ -161,8 +165,11 @@ def _is_valid_range(normal_range: str, field_value: str, field_name: str) -> boo
     return True
 
 
-def _is_value_from_neighbor(value: str, previous_values: List[str]) -> bool:
-    """Check if value appears in recent previous values (likely copied from neighbor row)."""
+def _is_value_from_neighbor(value: str, previous_values: List[str], field_name: str = "") -> bool:
+    """
+    Check if value appears in recent previous values (likely copied from neighbor row).
+    Only flags values that are non-trivial (not small common values like 0.0, 0.1, etc.)
+    """
     if not previous_values or not value:
         return False
     
@@ -172,12 +179,25 @@ def _is_value_from_neighbor(value: str, previous_values: List[str]) -> bool:
     except (ValueError, AttributeError):
         return False  # Not numeric, hard to determine
     
+    # Small values (< 1.0) are very common across different tests — don't flag
+    if value_num < 1.0:
+        return False
+    
+    # Round numbers (like 7, 9, 12) are also common across different tests
+    if value_num == int(value_num) and value_num < 20:
+        return False
+    
     # Check if exact value appears in previous results
     for prev_val in previous_values:
         try:
             prev_num = float(re.search(r'[\d.]+', prev_val).group())
             if abs(value_num - prev_num) < 0.001:  # Near-exact match
-                return True
+                # Only flag if the value is non-trivial (>= 10 and has decimal)
+                if value_num >= 10 and '.' in value:
+                    return True
+                # For large integers, flag only if very specific
+                if value_num >= 100:
+                    return True
         except (ValueError, AttributeError):
             continue
     

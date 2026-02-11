@@ -93,6 +93,14 @@ Page {idx}/{total_pages}
 - 🔬 **PREFIX PROTECTION**: If a test starts with a letter and dash (e.g., "C - Reactive Proteins", "S - Albumin"), YOU MUST capture the "C -" as part of the Test Name. NEVER put "C" in the Result column.
 - 🚨 **EMPTY RANGE RULE**: If the Normal Range column shows only `(-)`, `(—)`, `(-)` or a single dash, that means NO reference range exists. Return `normal_range`: "" (empty string). Do NOT return "(-)".
 
+### 🚨🚨 DECIMAL PRECISION (CRITICAL) 🚨🚨
+- Read EVERY digit in the Normal Range column character by character, including decimals.
+- Example: If the range says "(27-31.2)", you MUST capture "(27-31.2)" — NOT "(27-31)" or "(27-32)".
+- Example: If the range says "(0.7-4.8)", you MUST capture "(0.7-4.8)" — NOT "(1.0-3.0)" or "(0-5)".
+- Example: If the range says "(140-450)", you MUST capture "(140-450)" — NOT "(150-400)".
+- 🚫 Do NOT round, truncate, or "clean up" any numbers. Copy the EXACT digits from the image.
+- 🚫 Do NOT substitute commonly known medical ranges. Read what is physically printed.
+
 ### ⬅️ ARABIC TABLE FLOW (RIGHT-TO-LEFT)
 [RIGHTMOST] Test Name (الفحص) ➔ Result (النتيجة) ➔ Range (النتيجة الطبيعية) ➔ Unit (الوحدة) [LEFTMOST]
 
@@ -128,6 +136,17 @@ JSON RETURN ONLY:
 }}
 
 🚨 FINAL CHECK: Verify that every row in your output has a REAL numeric value that you can see in the image. If any row has a value you are not confident about, REMOVE that row.
+
+🚨🚨 RANGE PRECISION CHECK (BEFORE SUBMITTING) 🚨🚨
+For EACH row, re-read the Normal Range column one more time:
+- Count every digit and decimal point in the range.
+- Does the range in your JSON exactly match what is printed? If not, FIX IT.
+- Common mistakes to avoid:
+  * Writing (27-31) when image shows (27-31.2)
+  * Writing (150-400) when image shows (140-450)
+  * Writing (1-9) when image shows (3-7)
+  * Writing (32-36) when image shows (31-35)
+  * Writing (1.0-3.0) when image shows (0.7-4.8)
 """
 
 

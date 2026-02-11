@@ -42,8 +42,8 @@ Task: Extract LAB DATA (page {idx}/{total_pages}).
 2. **ONE BAND AT A TIME**: For each Test Name, stay strictly within its horizontal band.
 3. **"EMPTY_SPECIFIED"**: If the Result column is empty or only contains a symbol (`*`) within the horizontal band of a test, you MUST return `field_value`: "EMPTY_SPECIFIED".
    - **NEVER** pull a value from a different horizontal line. This is why Take 5 failed!
-4. **LITERAL RANGE**: Capture the "Normal Range" column exactly as written, including brackets and hyphens.
-
+4. **LITERAL RANGE**: Capture the "Normal Range" column exactly as written, including brackets and hyphens.   - 🚨 **DECIMAL PRECISION**: Read EVERY digit and decimal point. If the range says "(27-31.2)", write "(27-31.2)" NOT "(27-31)".
+   - 🚨 Do NOT round, truncate, or substitute commonly known ranges. Copy the EXACT printed numbers.
 VALIDATION:
 - Produced JSON must contain one entry for every physical row in the table.
 
@@ -89,6 +89,7 @@ CRITICAL ALIGNMENT RULES
    - Each field_unit is a medical unit (NOT a number, range, or percentage symbol alone)
    - Each normal_range is a range like (X-Y) (NOT a number or unit)
    - If any two different tests share the EXACT same range AND same unit -> re-check alignment.
+   - 🚨 DECIMAL PRECISION: Read EVERY digit & decimal in the range. (27-31.2) is NOT (27-31). (140-450) is NOT (150-400).
 
 READING STEPS PER ROW
 - field_name: test column in THIS row. Must be a medical test name.
@@ -191,9 +192,19 @@ Arabic characters must be read carefully — each dot and letter matters.
 1. **PATIENT NAME (اسم المريض)**:
    - Location: Top demographics table, next to label "اسم المريض".
    - 🚨 **EXTREME CHARACTER AWARENESS**: Mirror the INK letter-for-letter. Look closely at dots and "teeth" of letters.
-   - Example: Significant difference between "رئيسة" (Raeesa) and "رابعة" (Rabaa). Look for single dots vs multi-dot clusters.
+   - 🚨 **ARABIC LETTER DISCRIMINATION** (CRITICAL):
+     * Count dots carefully: ب (1 dot below) vs ت (2 dots above) vs ث (3 dots above)
+     * خ (dot above) vs ح (no dot) vs ج (dot below)
+     * ذ (dot above) vs د (no dot)
+     * ض (dot above) vs ص (no dot)
+     * ظ (dot above) vs ط (no dot)
+     * غ (dot above) vs ع (no dot)
+     * ر (no dot) vs ز (dot above)
+     * ن (dot above) vs ب (dot below)
+     * ك vs ل - different shapes
+     * د vs ر - different curves
    - 🚨 **SPACING**: "ابو" (Abu) is always separate (e.g., "أبو الرب" NOT "ابوراب").
-   - 🚫 Do NOT guess or "correct" the name.
+   - 🚫 Do NOT guess or "correct" the name. Read the EXACT ink.
 
 2. **DOCTOR NAME (الطبيب)**:
    - 🔍 Look at the cell next to the label "الطبيب" (Doctor) in the header grid.
@@ -213,6 +224,8 @@ Arabic characters must be read carefully — each dot and letter matters.
 
 5. **REPORT NAME & TYPE**:
    - Identify the specific title of the report (e.g., "Complete Blood Count", "Biochemistry Report").
+   - 🚨 **MULTI-SECTION REPORTS**: If the report has MULTIPLE sections (e.g., both "HEMATOLOGY" and "CLINICAL CHEMISTRY"), 
+     list ALL section names separated by " & " (e.g., "HEMATOLOGY & CLINICAL CHEMISTRY").
    - 🚨 **REPORT TYPE CATEGORY**: You MUST pick EXACTLY ONE from this list: [`Lab results`, `Prescriptions`, `Imaging`, `Cardiology`, `Neurology`, `Orthopedic`].
    - If it is a blood test, urine test, or biopsy, it is ALWAYS `Lab results`.
 

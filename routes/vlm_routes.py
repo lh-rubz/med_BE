@@ -21,7 +21,7 @@ from config import ollama_client, Config
 from utils.medical_validator import validate_medical_data, MedicalValidator
 from utils.medical_mappings import add_new_alias
 from utils.ocr_extractor import get_ocr_instance
-from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_personal_info_prompt
+from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_personal_info_prompt, get_robust_demographics_prompt
 from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt, generate_prompt_enhancement_request
 from utils.vlm_self_extraction_prompt import get_self_prompting_analysis_prompt, get_self_directed_extraction_prompt, get_simplified_extraction_prompt
 from utils.vlm_line_by_line_verifier import verify_extracted_fields_against_image_openai
@@ -1064,54 +1064,124 @@ class ChatResource(Resource):
                     print(f"⚠️  VLM extraction failed: {vlm_err}")
             # Step 3: Always try VLM for patient info (it reads headers better than OCR)
             # FORCE demographic extraction on Page 1 to ensure highest quality
+            # Use MULTI-PASS VOTING for Arabic names to ensure consistency
             should_run_demographics = (idx == 1) or any(not extracted_data.get(f) for f in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names', 'report_name', 'report_type'])
             
             if should_run_demographics:
                 missing_fields = [f for f in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names', 'report_name', 'report_type'] if not extracted_data.get(f)]
-                print(f"   🔍 Using VLM to extract patient info (Page {idx})...")
+                print(f"   🔍 Using VLM to extract patient info (Page {idx}) with name voting...")
                 try:
                     image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                     image_format = image_info['format']
                     
-                    patient_prompt = get_robust_demographics_prompt()
+                    # MULTI-PASS NAME VOTING: Run demographics extraction multiple times
+                    # to get consistent Arabic name reading
+                    name_candidates = []
+                    doctor_candidates = []
+                    best_patient_data = None
                     
-                    content = [
-                        {'type': 'text', 'text': patient_prompt},
-                        {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
-                    ]
+                    num_passes = 3 if idx == 1 else 1  # 3 passes on page 1, 1 on other pages
                     
-                    completion = ollama_client.chat.completions.create(
-                        model=Config.OLLAMA_MODEL,
-                        messages=[{'role': 'user', 'content': content}],
-                        temperature=0.1
-                    )
-                    patient_response = completion.choices[0].message.content.strip()
-                    
-                    # Parse patient info
-                    import re
-                    json_match = re.search(r'\{.*\}', patient_response, re.DOTALL)
-                    if json_match:
-                        patient_data = json.loads(json_match.group())
-                        # VLM reads directly from image — let it set all demographics
-                        for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names', 'report_name', 'report_type']:
-                            val = str(patient_data.get(key, "")).strip()
-                            if val and val.lower() not in ["unknown", "n/a", "none", "", "empty_specified"]:
-                                rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "social", "affairs", "insurance", "عيادة", "مختبر", "وزارة", "مديرية"]
-                                is_hallucination = (key in ['patient_name', 'doctor_names']) and any(s in val for s in rejection_terms)
-                                
-                                current_val = str(extracted_data.get(key, "")).strip()
-                                
-                                # VLM has authority — always set for names, use length check for others
-                                if not is_hallucination:
-                                    if key in ['patient_name', 'doctor_names']:
-                                        # Names: VLM ALWAYS overrides (reads from image)
-                                        extracted_data[key] = val
-                                        print(f"   📝 Demographics VLM set {key}: {val}")
-                                    elif not current_val or len(val) > len(current_val):
-                                        extracted_data[key] = val
-                                        print(f"   📝 Demographics VLM set {key}: {val}")
+                    for pass_num in range(num_passes):
+                        patient_prompt = get_robust_demographics_prompt()
                         
-                        print(f"   👤 Patient info enriched (Final name: {extracted_data.get('patient_name')})")
+                        # Vary temperature slightly between passes for diversity
+                        temp = 0.05 + (pass_num * 0.05)  # 0.05, 0.10, 0.15
+                        
+                        content = [
+                            {'type': 'text', 'text': patient_prompt},
+                            {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
+                        ]
+                        
+                        completion = ollama_client.chat.completions.create(
+                            model=Config.OLLAMA_MODEL,
+                            messages=[{'role': 'user', 'content': content}],
+                            temperature=temp
+                        )
+                        patient_response = completion.choices[0].message.content.strip()
+                        
+                        # Parse patient info
+                        import re
+                        json_match = re.search(r'\{.*\}', patient_response, re.DOTALL)
+                        if json_match:
+                            patient_data = json.loads(json_match.group())
+                            if best_patient_data is None:
+                                best_patient_data = patient_data
+                            
+                            # Collect name candidates
+                            pname = str(patient_data.get('patient_name', '')).strip()
+                            dname = str(patient_data.get('doctor_names', '')).strip()
+                            
+                            rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "social", "affairs", "insurance", "عيادة", "مختبر", "وزارة", "مديرية"]
+                            
+                            if pname and not any(s in pname for s in rejection_terms):
+                                name_candidates.append(pname)
+                                print(f"      Pass {pass_num+1} patient name: {pname}")
+                            if dname and not any(s in dname for s in rejection_terms):
+                                doctor_candidates.append(dname)
+                                print(f"      Pass {pass_num+1} doctor name: {dname}")
+                    
+                    # VOTING: Pick the most common name (normalized comparison)
+                    def _pick_best_name(candidates):
+                        """Pick the best name from candidates using normalized voting."""
+                        if not candidates:
+                            return ""
+                        if len(candidates) == 1:
+                            return candidates[0]
+                        
+                        # Normalize for comparison (remove diacritics, normalize confusable chars)
+                        def _normalize_for_compare(text):
+                            text = text.replace("\u0640", "")  # Remove tatweel
+                            # Remove diacritics
+                            for d in ['\u064B', '\u064C', '\u064D', '\u064E', '\u064F', '\u0650', '\u0651', '\u0652', '\u0670']:
+                                text = text.replace(d, '')
+                            # Normalize confusable chars
+                            for src, dst in [('\u0625', '\u0627'), ('\u0623', '\u0627'), ('\u0622', '\u0627'),
+                                             ('\u0624', '\u0648'), ('\u0626', '\u064a'), ('\u0629', '\u0647'),
+                                             ('\u06cc', '\u064a'), ('\u06a9', '\u0643')]:
+                                text = text.replace(src, dst)
+                            return text.strip()
+                        
+                        # Count normalized occurrences
+                        from collections import Counter
+                        normalized_map = {}
+                        for c in candidates:
+                            norm = _normalize_for_compare(c)
+                            if norm not in normalized_map:
+                                normalized_map[norm] = []
+                            normalized_map[norm].append(c)
+                        
+                        # Pick the group with the most votes
+                        best_group = max(normalized_map.values(), key=len)
+                        # Return the longest candidate in the winning group (most complete)
+                        return max(best_group, key=len)
+                    
+                    voted_patient_name = _pick_best_name(name_candidates)
+                    voted_doctor_name = _pick_best_name(doctor_candidates)
+                    
+                    if num_passes > 1:
+                        print(f"   🗳️ Name voting results ({len(name_candidates)} candidates): '{voted_patient_name}'")
+                        print(f"   🗳️ Doctor voting results ({len(doctor_candidates)} candidates): '{voted_doctor_name}'")
+                    
+                    # Apply the results
+                    if best_patient_data:
+                        for key in ['patient_age', 'patient_gender', 'report_date', 'report_name', 'report_type']:
+                            val = str(best_patient_data.get(key, "")).strip()
+                            if val and val.lower() not in ["unknown", "n/a", "none", "", "empty_specified"]:
+                                current_val = str(extracted_data.get(key, "")).strip()
+                                if not current_val or len(val) > len(current_val):
+                                    extracted_data[key] = val
+                                    print(f"   📝 Demographics VLM set {key}: {val}")
+                        
+                        # Set voted names
+                        if voted_patient_name:
+                            extracted_data['patient_name'] = voted_patient_name
+                            print(f"   📝 Demographics VLM set patient_name (voted): {voted_patient_name}")
+                        if voted_doctor_name:
+                            extracted_data['doctor_names'] = voted_doctor_name
+                            print(f"   📝 Demographics VLM set doctor_names (voted): {voted_doctor_name}")
+                    
+                    print(f"   👤 Patient info enriched (Final name: {extracted_data.get('patient_name')})")
                 except Exception as pe:
                     print(f"   ⚠️  Patient info extraction failed: {pe}")
             
@@ -1163,10 +1233,21 @@ class ChatResource(Resource):
             
             # Enrich patient_info with organized_data if available
             if organized_data:
-                for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names', 'report_name', 'report_type']:
+                for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names', 'report_type']:
                     if organized_data.get(key) and not patient_info.get(key):
                         patient_info[key] = organized_data[key]
                         print(f"   ✨ Enriched {key} from organized text: {organized_data[key]}")
+            
+            # MULTI-SECTION REPORT NAME: Accumulate section names across pages
+            new_report_name = extracted_data.get('report_name', '') or (organized_data.get('report_name', '') if organized_data else '')
+            if new_report_name:
+                existing_name = patient_info.get('report_name', '')
+                if existing_name and new_report_name.lower() not in existing_name.lower() and existing_name.lower() not in new_report_name.lower():
+                    # Different section name on this page — combine them
+                    patient_info['report_name'] = f"{existing_name} & {new_report_name}"
+                    print(f"   📋 Combined report name: {patient_info['report_name']}")
+                elif not existing_name:
+                    patient_info['report_name'] = new_report_name
             
             print(f"✅ Page {idx} Analysis Complete. Found {len(extracted_data.get('medical_data', []))} data points.")
 
