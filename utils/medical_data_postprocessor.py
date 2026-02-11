@@ -281,13 +281,6 @@ class MedicalDataPostProcessor:
             normal_range,
             notes
         )
-        
-        # Cross-check range against known medical reference bounds
-        normal_range, notes = MedicalDataPostProcessor._validate_range_against_known_bounds(
-            field_name,
-            normal_range,
-            notes
-        )
 
         # normal_range can be empty - that's OK
         # field_unit can be empty - that's OK
@@ -516,98 +509,6 @@ class MedicalDataPostProcessor:
 
         return range_str, notes
 
-    # Known plausible reference ranges for common tests.
-    # If VLM extracts a range that is WAY outside these bounds, it's likely hallucinated.
-    # Format: test_keyword -> (plausible_min_low, plausible_max_high) for the RANGE boundaries themselves.
-    KNOWN_RANGE_BOUNDS = {
-        # CBC
-        'wbc': {'min': (2.0, 6.0), 'max': (8.0, 15.0)},
-        'white blood cell': {'min': (2.0, 6.0), 'max': (8.0, 15.0)},
-        'rbc': {'min': (3.5, 4.5), 'max': (5.0, 6.5)},
-        'red blood cell': {'min': (3.5, 4.5), 'max': (5.0, 6.5)},
-        'hemoglobin': {'min': (10.0, 14.0), 'max': (15.0, 18.5)},
-        'haemoglobin': {'min': (10.0, 14.0), 'max': (15.0, 18.5)},
-        'hgb': {'min': (10.0, 14.0), 'max': (15.0, 18.5)},
-        'hematocrit': {'min': (30.0, 42.0), 'max': (44.0, 55.0)},
-        'hct': {'min': (30.0, 42.0), 'max': (44.0, 55.0)},
-        'mcv': {'min': (75.0, 82.0), 'max': (95.0, 102.0)},
-        'mean cell volume': {'min': (75.0, 82.0), 'max': (95.0, 102.0)},
-        'mch': {'min': (25.0, 28.0), 'max': (30.0, 34.0)},
-        'mean cell h': {'min': (25.0, 28.0), 'max': (30.0, 34.0)},
-        'mchc': {'min': (30.0, 33.0), 'max': (34.0, 37.0)},
-        'platelet': {'min': (100.0, 160.0), 'max': (380.0, 500.0)},
-        'plt': {'min': (100.0, 160.0), 'max': (380.0, 500.0)},
-        'neutrophils': {'min': (35.0, 45.0), 'max': (70.0, 92.0)},  # percentage
-        'lymphocytes': {'min': (15.0, 25.0), 'max': (45.0, 55.0)},  # percentage
-        'monocytes': {'min': (1.0, 4.0), 'max': (6.0, 12.0)},  # percentage
-        'eosinophils': {'min': (0.0, 1.0), 'max': (3.0, 7.0)},  # percentage
-        'basophils': {'min': (0.0, 0.0), 'max': (0.5, 2.0)},  # percentage
-        # Chemistry
-        'glucose': {'min': (60.0, 82.0), 'max': (100.0, 130.0)},
-        'fbs': {'min': (60.0, 82.0), 'max': (100.0, 130.0)},
-        'fasting blood sugar': {'min': (60.0, 82.0), 'max': (100.0, 130.0)},
-        'creatinine': {'min': (0.4, 0.7), 'max': (0.9, 1.5)},
-        'cholesterol': {'min': (0.0, 0.0), 'max': (180.0, 240.0)},
-        'alt': {'min': (0.0, 0.0), 'max': (25.0, 56.0)},
-        'gpt': {'min': (0.0, 0.0), 'max': (25.0, 56.0)},
-        'ast': {'min': (0.0, 0.0), 'max': (25.0, 48.0)},
-        'got': {'min': (0.0, 0.0), 'max': (25.0, 48.0)},
-        'hdl': {'min': (30.0, 45.0), 'max': (60.0, 90.0)},
-        'ldl': {'min': (0.0, 0.0), 'max': (100.0, 160.0)},
-        'triglyceride': {'min': (0.0, 0.0), 'max': (150.0, 250.0)},
-    }
-
-    @staticmethod
-    def _validate_range_against_known_bounds(field_name: str, normal_range: str, notes: str) -> tuple:
-        """
-        Cross-check extracted range against known plausible bounds for common tests.
-        If the extracted range is wildly different from all known references, flag it.
-        This catches VLM hallucinated ranges (e.g., reading (150-400) instead of (140-450) for platelets).
-        
-        Returns: (range, notes) - range is cleared if definitely wrong, flagged if suspicious.
-        """
-        if not normal_range or not field_name:
-            return normal_range, notes
-            
-        range_numbers = re.findall(r"[\d.]+", normal_range)
-        if len(range_numbers) < 2:
-            return normal_range, notes
-            
-        try:
-            extracted_min = float(range_numbers[0])
-            extracted_max = float(range_numbers[1])
-            if extracted_min > extracted_max:
-                extracted_min, extracted_max = extracted_max, extracted_min
-        except (ValueError, IndexError):
-            return normal_range, notes
-        
-        name_lower = field_name.lower().strip()
-        
-        # Find matching known range
-        for test_key, bounds in MedicalDataPostProcessor.KNOWN_RANGE_BOUNDS.items():
-            if test_key in name_lower:
-                known_min_range = bounds['min']  # (plausible_low, plausible_high) for the min boundary
-                known_max_range = bounds['max']  # (plausible_low, plausible_high) for the max boundary
-                
-                # Check if extracted min is WAY outside plausible range for min boundary
-                # Special handling: when known min upper bound is 0 ("Up to X" style ranges),
-                # don't flag the min as "way off" — there's no real lower bound.
-                if known_min_range[1] == 0:
-                    min_way_off = False  # "Up to X" ranges have no meaningful lower bound
-                else:
-                    min_way_off = extracted_min < known_min_range[0] * 0.3 or extracted_min > known_min_range[1] * 3
-                if known_max_range[0] == 0:
-                    max_way_off = extracted_max > known_max_range[1] * 3
-                else:
-                    max_way_off = extracted_max < known_max_range[0] * 0.3 or extracted_max > known_max_range[1] * 3
-                
-                if min_way_off or max_way_off:
-                    notes = MedicalDataPostProcessor._append_note(notes, "range_suspect")
-                
-                break
-        
-        return normal_range, notes
-
     @staticmethod
     def _strip_unit_from_range(normal_range: str, field_unit: str) -> str:
         """
@@ -696,8 +597,12 @@ class MedicalDataPostProcessor:
         # Reject facility/institution names
         rejection_terms = ["مختبر", "مرفق", "مستشفى", "تأمين", "وزارة", "مديرية",
                           "مستوصف", "رعاية", "شؤون", "شذون", "اجتماعية",
-                          "عيادة", "clinic", "hospital", "lab", "laboratory",
-                          "ministry", "directorate", "insurance"]
+                          "عيادة", "عباده", "عياده", "العام", "صحة", "صحه",
+                          "مديربه", "مديريه", "رام الله", "جهة الطلب",
+                          "الطب العام", "الصحة", "مركز",
+                          "clinic", "hospital", "lab", "laboratory",
+                          "ministry", "directorate", "insurance",
+                          "phc", "center", "centre", "health"]
         name_lower = name.lower()
         for term in rejection_terms:
             if term in name_lower:
