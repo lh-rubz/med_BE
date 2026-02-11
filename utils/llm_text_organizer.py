@@ -22,7 +22,7 @@ def get_text_organizer_prompt(focus_on_table: bool = False):
     demographics_section = "" if focus_on_table else """
 ===PATIENT INFORMATION===
 Patient Name: [Capture FULL name, 🚨 2+ words, NO TRUNCATION]
-Doctor Name: [🔍 SCAN WHOLE TEXT, logo area, stamps, etc.]
+Doctor Name: [\ud83d\udd0d Find the text next to \"\u0627\u0644\u0637\u0628\u064a\u0628\" label. This is a PERSON's name, NOT a clinic/facility. Also check stamps, signatures, \"\u0625\u0639\u062f\u0627\u062f\" labels.]
 Age: [Value]
 Gender: [Male/Female]
 Report Date: [DD/MM/YYYY or MM/DD/YYYY]
@@ -50,6 +50,8 @@ Test Name | Result | Unit | Normal Range
 
 - If a line is just a header (no numeric result), IGNORE it unless it's a sub-heading (prepend it to the tests below it).
 - If Result is missing, leave it blank between the pipes.
+- 🚨 **EXTRACT ALL ROWS**: Scan the ENTIRE text from top to bottom. Tables can have 20-30+ rows. Do NOT stop early.
+- Tests at the bottom (e.g., Eosinophils, Basophils, MPV, PDW, Platelet Distribution Width) are just as important as the ones at the top.
 
 ---
 RAW OCR TEXT TO ORGANIZE:
@@ -220,10 +222,17 @@ def parse_organized_text(organized_text):
         if date_match:
             result['report_date'] = normalize_date(clean_value(date_match.group(1)))
         
-        # Doctor Name
+        # Doctor Name (try multiple patterns)
         doctor_match = re.search(r'Doctor Name:\s*(.+?)(?:\n|$)', section_text)
         if doctor_match:
             result['doctor_names'] = clean_value(doctor_match.group(1))
+        
+        # If Doctor Name not found, try to search the entire organized text
+        # for Arabic doctor label pattern: الطبيب followed by a name
+        if not result['doctor_names']:
+            doctor_arabic = re.search(r'\u0627\u0644\u0637\u0628\u064a\u0628[:\s]*([\u0600-\u06FF\s]{3,}?)(?:\n|$|\|)', organized_text)
+            if doctor_arabic:
+                result['doctor_names'] = clean_value(doctor_arabic.group(1).strip())
         
         # Lab Name
         lab_match = re.search(r'Lab Name:\s*(.+?)(?:\n|$)', section_text)

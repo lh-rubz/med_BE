@@ -281,6 +281,11 @@ class MedicalDataPostProcessor:
             normal_range,
             notes
         )
+        
+        # If range sanity check detected value was grabbed from range boundary,
+        # clear the value — it's not a real measurement result
+        if 'value_from_range' in notes:
+            field_value = ""
 
         # normal_range can be empty - that's OK
         # field_unit can be empty - that's OK
@@ -504,11 +509,11 @@ class MedicalDataPostProcessor:
                     
                 # 1-OFF ERROR DETECTION: 
                 # If value EXACTLY matches min or max, it's highly suspicious for a row-shift 
-                # (extracting the range as the value)
+                # (extracting the range boundary as the value)
                 if abs(value_num - min_val) < 1e-9 or abs(value_num - max_val) < 1e-9:
                      # Only flag if there's no flag already from VLM
                      if "*" not in str(field_value) and "#" not in str(field_value):
-                        notes = MedicalDataPostProcessor._append_note(notes, "check_alignment")
+                        notes = MedicalDataPostProcessor._append_note(notes, "value_from_range")
             except ValueError:
                 return "", MedicalDataPostProcessor._append_note(notes, "range_invalid")
 

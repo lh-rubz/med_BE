@@ -882,7 +882,7 @@ class ChatResource(Resource):
                         model=Config.OLLAMA_MODEL,
                         messages=[{'role': 'user', 'content': organizer_prompt}],
                         temperature=0.1,
-                        max_tokens=800,
+                        max_tokens=2000,
                         timeout=30.0  # 30 second hard limit for organization
                     )
                     organized_text = organizer_completion.choices[0].message.content.strip()
@@ -897,6 +897,19 @@ class ChatResource(Resource):
                         print(f"   👤 Found patient: {organized_data['patient_name']}")
                     if organized_data.get('medical_data'):
                         print(f"   📊 Parsed {len(organized_data['medical_data'])} medical tests from organized text")
+                    
+                    # Fallback: extract doctor name directly from raw OCR text if organizer missed it
+                    if not organized_data.get('doctor_names') and ocr_text:
+                        import re as _re
+                        # Look for Arabic label "الطبيب" followed by a name
+                        doc_match = _re.search(r'الطبيب[:\s]*?([\u0600-\u06FF][\u0600-\u06FF\s]{2,}?)(?:\n|$)', ocr_text)
+                        if doc_match:
+                            raw_doc = doc_match.group(1).strip()
+                            # Reject facility words
+                            facility_words = ['عيادة', 'مختبر', 'وزارة', 'مديرية', 'مركز', 'صحة', 'العام']
+                            if not any(w in raw_doc for w in facility_words) and len(raw_doc) >= 3:
+                                organized_data['doctor_names'] = raw_doc
+                                print(f"   👨‍⚕️ Doctor name from raw OCR: {raw_doc}")
                 except Exception as org_err:
                     print(f"⚠️  Text organization failed: {org_err}, continuing with raw OCR")
             
@@ -1009,7 +1022,7 @@ class ChatResource(Resource):
                             {'type': 'image_url', 'image_url': {'url': f'data:image/{image_format};base64,{image_base64}'}}
                         ]
                         
-                        completion = ollama_client.chat.completions.create(model=Config.OLLAMA_MODEL, messages=[{'role': 'user', 'content': content}], temperature=0.1)
+                        completion = ollama_client.chat.completions.create(model=Config.OLLAMA_MODEL, messages=[{'role': 'user', 'content': content}], temperature=0.1, max_tokens=4096)
                         response_text = completion.choices[0].message.content.strip()
                         print(f"🔍 REFINEMENT RESPONSE For Page {idx}{seg_lbl}:\n{'-'*40}\n{response_text[:300]}...\n{'-'*40}")
                         
