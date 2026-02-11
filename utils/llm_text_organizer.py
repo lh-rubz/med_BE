@@ -14,12 +14,21 @@ Benefits:
 """
 
 
-def get_text_organizer_prompt():
+def get_text_organizer_prompt(focus_on_table: bool = False):
     """
     Prompt for Stage 1: Organize raw OCR text into structured sections.
     Focuses on creating high-quality "Anchors" for Stage 2 VLM refinement.
     """
-    return """You are an expert at organizing messy OCR text from medical lab reports.
+    demographics_section = "" if focus_on_table else """
+===PATIENT INFORMATION===
+Patient Name: [Capture FULL name, 🚨 2+ words, NO TRUNCATION]
+Doctor Name: [🔍 SCAN WHOLE TEXT, logo area, stamps, etc.]
+Age: [Value]
+Gender: [Male/Female]
+Report Date: [DD/MM/YYYY or MM/DD/YYYY]
+"""
+
+    return f"""You are an expert at organizing messy OCR text from medical lab reports.
 
 Your task: Take the raw OCR text below and organize it into clean "Anchors" that will be used for visual verification.
 
@@ -33,12 +42,7 @@ IMPORTANT RULES:
 5. 🚨 **PREFIX PROTECTION**: If a test starts with a letter and dash (e.g., "C - Reactive Proteins", "S - Albumin"), YOU MUST capture the "C -" as part of the Test Name. NEVER put "C" in the Result column.
 6. 🚨 **UNIT FIDELITY**: If the text says "%L" or "%G", **DO NOT** simplify it to "%". Capture every character of the unit exactly as written.
 
-===PATIENT INFORMATION===
-Patient Name: [Capture FULL name, 🚨 2+ words, NO TRUNCATION]
-Doctor Name: [🔍 SCAN WHOLE TEXT, logo area, stamps, etc.]
-Age: [Value]
-Gender: [Male/Female]
-Report Date: [DD/MM/YYYY or MM/DD/YYYY]
+{demographics_section}
 
 ===MEDICAL DATA TABLE===
 List every test found in this exact format:

@@ -859,13 +859,18 @@ class ChatResource(Resource):
                 yield f"data: {json.dumps({'percent': current_progress + 5, 'message': f'Organizing text from page {idx}...'})}\n\n"
                 
                 try:
-                    organizer_prompt = get_text_organizer_prompt() + ocr_text
+                    # OPTIMIZATION: On Page 2+, skip demographics extraction to save time
+                    focus_on_table = (idx > 1)
+                    organizer_prompt = get_text_organizer_prompt(focus_on_table=focus_on_table) + ocr_text
                     
                     # Text-only LLM call (no image, faster)
+                    # ADDED: explicit timeout and max_tokens to prevent stalls
                     organizer_completion = ollama_client.chat.completions.create(
                         model=Config.OLLAMA_MODEL,
                         messages=[{'role': 'user', 'content': organizer_prompt}],
-                        temperature=0.1
+                        temperature=0.1,
+                        max_tokens=800,
+                        timeout=30.0  # 30 second hard limit for organization
                     )
                     organized_text = organizer_completion.choices[0].message.content.strip()
                     print(f"✅ LLM organized text ({len(organized_text)} chars)")

@@ -74,11 +74,23 @@ def test_range_hygiene():
         if validated['field_name'] == "HbA1c":
             assert validated['is_normal'] is False # Prediabetes is False
 
+def test_name_override():
+    print("\n--- Testing Name Override ---")
+    mock_data = {
+        "patient_name": "رابعة خضر طالب خطيب",
+        "medical_data": []
+    }
+    cleaned = MedicalDataPostProcessor.clean_extracted_data(mock_data)
+    print(f"Original: {mock_data['patient_name']}")
+    print(f"Cleaned: {cleaned['patient_name']}")
+    assert cleaned['patient_name'] == "رئيسة خضر طالب خطيب"
+
 if __name__ == "__main__":
     try:
         test_empty_row_skipping()
         test_typo_fixes()
         test_range_hygiene()
+        test_name_override()
         print("\n✅ ALL TESTS PASSED!")
     except AssertionError as e:
         print(f"\n❌ TEST FAILED!")
