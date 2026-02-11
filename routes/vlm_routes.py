@@ -1003,29 +1003,22 @@ class ChatResource(Resource):
                                 page_results.append(vlm_data)
                                 
                                 # Capture/Enrich patient info from first segment
-                                # OCR ANCHOR PRIORITY: VLM can only FILL empty names, not override
+                                # VLM reads directly from image — let it set all demographics
                                 if seg_idx == 1:
                                     for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
                                         val = str(vlm_data.get(key, "")).strip()
                                         if val and val.lower() not in ["unknown", "n/a", "none", "", "empty_specified"]:
                                             # Reject labels misidentified as names
                                             rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "عيادة", "مختبر", "وزارة", "مديرية"]
-                                            is_hallucination = any(s in val for s in rejection_terms)
+                                            is_hallucination = (key in ['patient_name', 'doctor_names']) and any(s in val for s in rejection_terms)
                                             
                                             current_val = str(extracted_data.get(key, "")).strip()
                                             
-                                            # For patient_name and doctor_names: OCR anchor is authoritative
-                                            # VLM can only fill EMPTY names, never override a valid OCR name
-                                            if key in ['patient_name', 'doctor_names']:
-                                                if not current_val and not is_hallucination:
+                                            # VLM has authority — update if VLM provides a valid value
+                                            if not is_hallucination:
+                                                if not current_val or len(val) > len(current_val):
                                                     extracted_data[key] = val
-                                                    print(f"   📝 VLM filled empty {key}: {val}")
-                                                # Skip override — OCR anchor is trusted
-                                            else:
-                                                # For age, gender, date: VLM can enrich if better
-                                                if not is_hallucination:
-                                                    if not current_val or len(val) > len(current_val):
-                                                        extracted_data[key] = val
+                                                    print(f"   📝 VLM set {key}: {val}")
                         except Exception as parse_err:
                             print(f"⚠️  Parsing segment {seg_idx} failed: {parse_err}")
 
@@ -1089,29 +1082,20 @@ class ChatResource(Resource):
                     json_match = re.search(r'\{.*\}', patient_response, re.DOTALL)
                     if json_match:
                         patient_data = json.loads(json_match.group())
-                        # OCR ANCHOR PRIORITY for names — VLM demographics can only fill empty, not override
+                        # VLM reads directly from image — let it set all demographics
                         for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
                             val = str(patient_data.get(key, "")).strip()
                             if val and val.lower() not in ["unknown", "n/a", "none", "", "empty_specified"]:
-                                rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "social", "affairs", "insurance", "عيادة", "مختبر"]
+                                rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "social", "affairs", "insurance", "عيادة", "مختبر", "وزارة", "مديرية"]
                                 is_hallucination = (key in ['patient_name', 'doctor_names']) and any(s in val for s in rejection_terms)
                                 
                                 current_val = str(extracted_data.get(key, "")).strip()
-                                current_is_valid = current_val and not any(s in current_val for s in rejection_terms)
                                 
-                                # For names: OCR anchor is authoritative. VLM can only fill EMPTY.
-                                if key in ['patient_name', 'doctor_names']:
-                                    if not current_is_valid and not is_hallucination:
+                                # VLM has authority — update if VLM provides a valid value
+                                if not is_hallucination:
+                                    if not current_val or len(val) > len(current_val):
                                         extracted_data[key] = val
-                                        print(f"   📝 Demographics VLM filled empty {key}: {val}")
-                                    # If OCR already has a valid name, do NOT override
-                                else:
-                                    # For age, gender, date: VLM can enrich if better
-                                    if not current_is_valid:
-                                        if not is_hallucination:
-                                            extracted_data[key] = val
-                                    elif not is_hallucination and len(val) > len(current_val):
-                                        extracted_data[key] = val
+                                        print(f"   📝 Demographics VLM set {key}: {val}")
                         
                         print(f"   👤 Patient info enriched (Final name: {extracted_data.get('patient_name')})")
                 except Exception as pe:

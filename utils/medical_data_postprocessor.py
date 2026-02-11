@@ -219,38 +219,49 @@ class MedicalDataPostProcessor:
         # Fix common OCR/VLM typos in field names
         typo_fixes = {
             "Platelel": "Platelet",
+            "Platelat": "Platelet",
             "Distrubtion": "Distribution",
-            "Coun": "Count",
-            "widt": "width",
-            "Lymphocyle": "Lymphocyte",
-            "Basohil8": "Basophils",
             "disinbution": "distribution",
+            "Coun": "Count",
+            "Countt": "Count",
+            "widt": "width",
             "widht": "width",
-            "granulocs": "granulocytes",
             "distribution widthh": "distribution width",
+            "Lymphocyle": "Lymphocyte",
+            "Lymphocytes9": "Lymphocytes",
+            "Basohil8": "Basophils",
+            "granulocs": "granulocytes",
+            "Monocyle": "Monocytes",
+            "Monocyles": "Monocytes",
+            "Monocytess": "Monocytes",
             "(HGB": "(HGB)",
             "(RBC": "(RBC)",
             "(HC": "(HCT)",
             "(MCV": "(MCV)",
             "(MCH": "(MCH)",
             "(MCHC": "(MCHC)",
-            "Platelat": "Platelet",
-            "Monocyle": "Monocytes",
-            "Monocyles": "Monocytes",
             "White blood cellsI": "White blood cells",
-            "Lymphocytes9": "Lymphocytes",
-            "Monocytess": "Monocytes",
             "Neutrophils granuloc%": "Neutrophils granulocytes",
-            "Mean cell haemoglobin concentration (MCH)C": "Mean cell haemoglobin concentration (MCHC)"
+            "Neutrophils Granuloc": "Neutrophils Granulocytes",
+            "Mean cell haemoglobin concentration (MCH)C": "Mean cell haemoglobin concentration (MCHC)",
+            "Cholesterol, Tota": "Cholesterol, Total",
+            "Cholesterol,Tota": "Cholesterol,Total",
+            "(GPTI": "(GPT)",
+            "(GOTI": "(GOT)",
+            "(ALTI": "(ALT)",
+            "(ASTI": "(AST)",
+            "HCT)T)": "HCT)",
+            "))": ")",
         }
         for typo, fix in typo_fixes.items():
             if typo in field_name:
                 field_name = field_name.replace(typo, fix)
         
-        # Strip trailing punctuation/garbage numbers (common OCR artifacts)
-        # e.g. "Lymphocytes9" or "ResultI" or "HGB))"
-        field_name = re.sub(r"[I19%)]$]+$", "", field_name)
-        # Fix double opening parens too
+        # Strip trailing garbage characters from OCR (e.g. "Lymphocytes9", "ResultI")
+        # But preserve valid endings like "(MCH)", "(HCT)", parenthesized abbreviations
+        if not field_name.endswith(')'):
+            field_name = re.sub(r"[I19]+$", "", field_name)
+        # Fix double opening parens
         field_name = field_name.replace("((", "(").strip()
 
         cleaned_entry = {

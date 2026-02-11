@@ -177,28 +177,28 @@ def get_robust_demographics_prompt():
     """
     Consolidated high-precision demographic extraction prompt.
     Targets grid layouts, labels-to-right, and specific Arabic medical terminology.
+    VLM reads directly from the image — no OCR anchor priority.
     """
     return """Extract patient and report information from this laboratory document.
 
 🚨 DEMOGRAPHIC GRID MAP (STRICT) 🚨
 This report uses a 2-column grid layout for demographics. Labels are on the RIGHT, values are on the LEFT.
 
-🚨🚨 OCR ANCHOR PRIORITY 🚨🚨
-The OCR system has already captured the patient and doctor names. Your job is to VERIFY they match the image, NOT to REPLACE them.
-If the OCR already has a name, KEEP IT unless the image CLEARLY and UNAMBIGUOUSLY shows DIFFERENT characters.
-Do NOT "correct" names based on guessing — OCR typed text is more reliable than your visual reading of Arabic.
+🚨🚨 READ DIRECTLY FROM IMAGE — DO NOT GUESS 🚨🚨
+You must read every name character-by-character from the image. Do NOT rely on any previously extracted text.
+Arabic characters must be read carefully — each dot and letter matters.
 
 1. **PATIENT NAME (اسم المريض)**:
    - Location: Top demographics table, next to label "اسم المريض".
-   - 🚨 **MIRROR PERFECT SPELLING**: Copy the exact characters from the report. Do NOT hallucinate or change letters.
+   - 🚨 **READ CHARACTER BY CHARACTER**: Look at each Arabic letter in the image individually. Copy EXACTLY what is printed.
    - 🚨 **SPACING**: "ابو" (Abu) is always separate (e.g., "أبو الرب" NOT "ابوراب").
-   - If OCR already captured a name, KEEP IT unless image clearly shows different text.
+   - 🚫 Do NOT guess or "correct" the name. If the image says "رنيسة" then write "رنيسة", not "دنيسة".
 
 2. **DOCTOR NAME (الطبيب)**:
    - 🔍 Look at the cell next to the label "الطبيب" (Doctor) in the header grid.
-   - 🚨 **VOID REJECTION**: "عيادة" (Clinic), "مختبر" (Lab), "وزارة" (Ministry) are NOT doctor names. 
-   - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change letters. Copy exactly what is written.
-   - If OCR already captured a doctor name, KEEP IT — do not replace with a different reading.
+   - 🚨 **READ CHARACTER BY CHARACTER**: The doctor is a PERSON's name (e.g., "جهاد العملة").
+   - 🚨 **VOID REJECTION**: "عيادة" (Clinic), "مختبر" (Lab), "وزارة" (Ministry), "مديرية" (Directorate) are NOT doctor names. 
+   - 🚫 Do NOT confuse the clinic/facility name with the doctor's personal name.
 
 3. **GENDER (الجنس)**:
    - Find "الجنس" on the right. Value is to the LEFT. (أنثى/انثى -> Female, ذكر -> Male).
@@ -212,9 +212,9 @@ Do NOT "correct" names based on guessing — OCR typed text is more reliable tha
 
 Return JSON only:
 {
-    "patient_name": "Exact name from report. Do NOT change OCR-captured name unless image clearly differs.",
+    "patient_name": "Read EXACT characters from image next to اسم المريض. Letter by letter.",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
-    "doctor_names": "Exact doctor name from report. Do NOT change OCR-captured name unless its wrong."
+    "doctor_names": "Read EXACT person name from image next to الطبيب. Not a clinic or facility."
 }"""

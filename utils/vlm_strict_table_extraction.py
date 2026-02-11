@@ -52,7 +52,7 @@ def get_ocr_refinement_prompt(idx: int, total_pages: int, organized_text: str) -
     """
     Enhanced VLM prompt featuring Chain-of-Thought reasoning, explicit RTL rules, 
     and one-shot examples for high-precision medical data extraction.
-    Enforces exact row count alignment with OCR anchors.
+    Enforces exact row count alignment with OCR anchors but reads names from the image.
     """
     return f"""
 🔬 MEDICAL REPORT DIGITIZATION - PHASE 2 (VISUAL VERIFICATION)
@@ -61,8 +61,8 @@ Page {idx}/{total_pages}
 ### 🧠 STEP-BY-STEP REASONING (DO THIS FIRST)
 1. **Analyze Layout**: Identify if the report is a Grid, a List, or a Tabular structure.
 2. **Identify Column Order**: Look for Arabic labels (الفحص, النتيجة). If present, columns scan RIGHT-TO-LEFT.
-3. **Anchor Matching**: Locate the Test Names provided in the 'OCR REFERENCE' on the physical image.
-4. **Visual Alignment**: For each Test Name, trace a horizontal line ➔ capture ONLY the value, unit, and range that sits on that exact line.
+3. **Row Counting**: Count the rows in the OCR REFERENCE below — your output MUST have the SAME number of rows.
+4. **Visual Reading**: For each row, READ the test name, value, unit, and range DIRECTLY FROM THE IMAGE.
 
 ### 🚨🚨🚨 ROW COUNT ENFORCEMENT (MOST CRITICAL RULE) 🚨🚨🚨
 - The OCR REFERENCE below lists EXACTLY the rows found in the report.
@@ -71,6 +71,14 @@ Page {idx}/{total_pages}
 - 🚫 NEVER SKIP A ROW. 🚫 NEVER MERGE TWO ROWS. 🚫 NEVER ADD EXTRA ROWS.
 - If a row has only a "*" or "-" or dot as the result, set `field_value` to "" (empty string).
 - After you finish extraction, COUNT your output rows. If count does NOT match the OCR REFERENCE row count, RE-CHECK and fix it.
+
+### 🚨🚨 FIELD NAME RULE (READ FROM IMAGE, NOT OCR) 🚨🚨
+- The OCR list below is for **ROW COUNT and ORDER reference ONLY**.
+- 🚫 Do **NOT** copy the field names from the OCR list. OCR often mangles names (truncates, adds extra characters, wrong letters).
+- ✅ You MUST **read every test name character-by-character directly from the image**.
+- ✅ Copy the EXACT spelling as printed in the report image — including parentheses, abbreviations, and punctuation.
+- Example: If OCR says "Cholesterol, Tota" but the image clearly shows "Cholesterol,Total", you MUST write "Cholesterol,Total".
+- Example: If OCR says "hematocrit (HCT)T)" but image shows "hematocrit (HCT)", you MUST write "hematocrit (HCT)".
 
 ### 🚨 EXTRACTION RULES
 - 🚨 **UNIT FIDELITY (ULTRA-STRICT)**: Capture units **EXACTLY** as they appear in the ink. If the image says "%L" or "%G", DO NOT simplify it to "%". **DO NOT "HELP" BY CLEANING THE UNIT**. Extract exactly what is written, character-for-character.
@@ -81,35 +89,35 @@ Page {idx}/{total_pages}
    - Bad: "Monocytes (% (1.0-3.0)"
    - Good: Name="Monocytes (%)", Range="(1.0-3.0)"
 - 🔬 **PREFIX PROTECTION**: If a test starts with a letter and dash (e.g., "C - Reactive Proteins", "S - Albumin"), YOU MUST capture the "C -" as part of the Test Name. NEVER put "C" in the Result column.
+- 🚨 **EMPTY RANGE RULE**: If the Normal Range column shows only `(-)`, `(—)`, `(-)` or a single dash, that means NO reference range exists. Return `normal_range`: "" (empty string). Do NOT return "(-)".
 
 ### ⬅️ ARABIC TABLE FLOW (RIGHT-TO-LEFT)
 [RIGHTMOST] Test Name (الفحص) ➔ Result (النتيجة) ➔ Range (النتيجة الطبيعية) ➔ Unit (الوحدة) [LEFTMOST]
 
-### 👤 DEMOGRAPHICS (STRICT OCR ANCHOR MODE)
-The OCR has already captured the patient and doctor names below. Your job is to VERIFY they match the image, NOT to replace them.
-1. **Patient Name**: Use the OCR REFERENCE name below. Only change it if the image CLEARLY shows different characters. Mirror the spelling exactly — do NOT hallucinate letters.
+### 👤 DEMOGRAPHICS (READ FROM IMAGE)
+1. **Patient Name**: Look at the cell next to "اسم المريض" in the header. **Read the EXACT characters from the image**, letter by letter. Do NOT copy the OCR name below — OCR may have wrong letters.
    - 🚨 **SPACING RULE**: The word "ابو" (Abu) is ALWAYS a separate word. NEVER merge it with the next word.
-2. **Doctor Name**: Use the OCR REFERENCE doctor name below. The doctor name is found near the label "الطبيب" in the header.
-   - 🚫 Do NOT confuse "عيادة" (Clinic) or "مختبر" (Lab) with a doctor name.
-   - If the OCR Anchor already has a doctor name, KEEP IT unless the image clearly shows completely different letters.
+2. **Doctor Name**: Look at the cell next to "الطبيب" in the header. **Read the EXACT characters from the image**.
+   - 🚫 Do NOT confuse "عيادة" (Clinic) or "مختبر" (Lab) or "وزارة" (Ministry) with a doctor name.
+   - The doctor name is a PERSON's name (e.g., "جهاد العملة"), NOT a facility or department.
 
 ---
-### 📋 OCR REFERENCE (STRICT ANCHORS — YOU MUST MATCH ROW COUNT)
+### 📋 OCR REFERENCE (ROW COUNT ONLY — do NOT copy names or spelling from here)
 {organized_text}
 
 JSON RETURN ONLY:
 {{
-    "patient_name": "Use OCR anchor name. Only correct if image clearly shows different characters.",
+    "patient_name": "Read EXACT name from image next to اسم المريض. Letter by letter.",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD (Arabic: DD/MM/YYYY, English: MM/DD/YYYY)",
-    "doctor_names": "Use OCR anchor doctor name. Only correct if image clearly shows different characters.",
+    "doctor_names": "Read EXACT doctor name from image next to الطبيب. Person name only.",
     "medical_data": [
         {{
-            "field_name": "Test Name (MUST match OCR anchor row)",
-            "field_value": "Numeric Value from SAME row ONLY (empty string if no value visible)",
+            "field_name": "Read EXACT test name from image (NOT from OCR list). Character by character.",
+            "field_value": "Numeric Value from SAME row ONLY (empty string if no value visible or shows * only)",
             "field_unit": "Unit (🚨 MIRROR PRECISELY: e.g. '%L', '%G', 'mg/dL'). No simplification.",
-            "normal_range": "Literal Range (🚨 CAPTURE EVERY WORD: e.g. 'Normal: less than...', 'Diabetes: >...'). Do NOT truncate.",
+            "normal_range": "Literal Range from image. If column shows (-) or dash only, return empty string.",
             "notes": "Any visual flags (handwritten, signature, etc)"
         }}
     ]
