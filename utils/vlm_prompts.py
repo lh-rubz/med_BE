@@ -210,11 +210,17 @@ Arabic characters must be read carefully — each dot and letter matters.
      - If the report is in English, interpret "XX/XX/YYYY" as **MM/DD/YYYY**.
    - Convert to standard **YYYY-MM-DD** for the JSON output.
 
+5. **REPORT NAME & TYPE**:
+   - Identify the specific title of the report (e.g., "Complete Blood Count", "Biochemistry Report").
+   - Identify the type (e.g., "Haematology", "Chemistry").
+
 Return JSON only:
 {
     "patient_name": "Read EXACT characters from image next to اسم المريض. Letter by letter.",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
+    "report_name": "Full title of the report as written (e.g. CBC)",
+    "report_type": "Category of report (e.g. Haematology)",
     "doctor_names": "Read EXACT person name from image next to الطبيب. Not a clinic or facility."
 }"""

@@ -195,13 +195,9 @@ class MedicalDataPostProcessor:
         is_unit_empty = not field_unit or field_unit.upper() in sentinels or field_unit in sentinels
         is_range_empty = not normal_range or normal_range.upper() in sentinels or normal_range in sentinels
 
-        if is_val_empty and is_unit_empty and not is_range_empty:
-             # Header-like row or spacer with range but no result, skip it
+        if is_val_empty:
+             # USER REQUEST: Skip ALL rows that don't have a value.
              return None
-        
-        if is_val_empty and is_range_empty:
-            # Truly empty/spacer row, skip it
-            return None
         
         # Sanitize normal range if it looks malformed or wildly mismatched
         normal_range, notes = MedicalDataPostProcessor._sanitize_normal_range(
@@ -257,6 +253,16 @@ class MedicalDataPostProcessor:
             "Monocytes(%": "Monocytes(%)",
             "Lymphocytes%": "Lymphocytes(%)",
             "Lymphocytes/": "Lymphocytes",
+            "M.C.V": "MCV",
+            "M.C.H": "MCH",
+            "M.C.H.C": "MCHC",
+            "R.B.C": "RBC",
+            "W.B.C": "WBC",
+            "H.G.B": "HGB",
+            "H.C.T": "HCT",
+            "P.L.T": "PLT",
+            "(ALPI": "(ALP)",
+            "(GGT": "(GGT)",
         }
         for typo, fix in typo_fixes.items():
             if typo in field_name:

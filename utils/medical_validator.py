@@ -436,13 +436,17 @@ class MedicalValidator:
         unit = str(validated.get('field_unit', ''))
         
         # aggressively strip unit from normal_range if present
-        if unit and normal_range:
-            # Escape unit for regex
-            unit_esc = re.escape(unit)
-            # Remove unit if it appears in the range string
-            # Case insensitive remove
-            normal_range = re.sub(rf'\s*{unit_esc}\s*', '', normal_range, flags=re.IGNORECASE)
-            validated['normal_range'] = normal_range.strip()
+        if normal_range:
+            # Strip common units even if 'unit' is not provided/wrong
+            common_units = ["g/dl", "mg/dl", "mmol/l", "iu/l", "k/ul", "m/ul", "cells/l", "mm/h", "μl", "%", "percent", "u/l", "pg", "fl"]
+            if unit:
+                common_units.append(unit.lower())
+            
+            for u in common_units:
+                u_esc = re.escape(u)
+                normal_range = re.sub(rf'\s*{u_esc}\b', '', normal_range, flags=re.IGNORECASE).strip()
+            
+            validated['normal_range'] = normal_range
         
         # Recalculate is_normal deterministically
         normal_range = validated.get('normal_range', '')

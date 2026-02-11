@@ -64,12 +64,13 @@ Page {idx}/{total_pages}
 3. **Row Counting**: Count the rows in the OCR REFERENCE below — your output MUST have the SAME number of rows.
 4. **Visual Reading**: For each row, READ the test name, value, unit, and range DIRECTLY FROM THE IMAGE.
 
-### 🚨🚨🚨 ROW COUNT GUIDANCE (IMPORTANT) 🚨🚨🚨
-- The OCR REFERENCE below lists the rows found in the report.
-- Your output should include ONLY rows that have a VISIBLE NUMERIC RESULT in the image.
-- 🚫 **SKIP any row** that has NO visible numeric value, or shows only "*", "-", ".", or is blank in the Result column.
-- 🚫 NEVER MERGE TWO ROWS. 🚫 NEVER ADD EXTRA ROWS not in the report.
-- 🚫 **ZERO HALLUCINATION**: If you cannot see a clear numeric result for a row in the image, DO NOT INCLUDE THAT ROW. Do NOT guess or invent a number.
+### 🚨🚨🚨 ROW EXTRACTION GUIDANCE (STRICT) 🚨🚨🚨
+- The OCR REFERENCE below lists the rows found in the report. Use it ONLY to identify test names and their search areas.
+- 🚨 **ONLY output rows** that have a VISIBLE NUMERIC or TEXT RESULT in the image on the same horizontal baseline as the test name.
+- 🚫 **SKIP any row** that has NO visible result, or shows only "*", "-", ".", or is blank in the Result column.
+- 🚫 **DO NOT force row count**: If OCR lists 10 rows but only 5 have visible results, you MUST only output 5 rows.
+- 🚫 **NEVER MERGE TWO ROWS**. 🚫 NEVER ADD EXTRA ROWS not in the report.
+- 🚫 **ZERO HALLUCINATION**: If you cannot see a clear numeric result for a row in the image, DO NOT INCLUDE THAT ROW.
 
 ### 🚨🚨 FIELD NAME RULE (READ FROM IMAGE, NOT OCR) 🚨🚨
 - The OCR list below is for **ROW COUNT and ORDER reference ONLY**.
@@ -82,8 +83,9 @@ Page {idx}/{total_pages}
 ### 🚨 EXTRACTION RULES
 - 🚨 **UNIT FIDELITY (ULTRA-STRICT)**: Capture units **EXACTLY** as they appear in the ink. If the image says "%L" or "%G", DO NOT simplify it to "%". **DO NOT "HELP" BY CLEANING THE UNIT**. Extract exactly what is written, character-for-character.
 - 🚫 **NO SHIFTING**: Do NOT pull a result from the row above or below. 
-- 🚨 **PIXEL-LOCKED ALIGNMENT**: For each Test Name, trace a direct horizontal path (baseline). Capture ONLY the numeric value and unit that sits on that exact vertical level. If you hit a different row's pixels, STOP.
-- 🚫 **ZERO HALLUCINATION (VALUES)**: If there is NO visible numeric ink for a row, **DO NOT INCLUDE THAT ROW**. Skip it entirely. NEVER guess a number from the range, unit, or a different row.
+- 🚨 **PIXEL-LOCKED ALIGNMENT**: For each Test Name, trace a direct horizontal path (baseline). Capture ONLY the numeric value and unit that sits on that exact vertical level. If you hit a different row's pixels or a vertical space, STOP. Do NOT borrow values from above or below.
+- 🚫 **SECTION HEADER SKIP**: Do NOT extract headers like "Biochemistry", "Haematology", "Main Report", or "Clinical Chemistry" as test rows. Only extract actual medical parameters.
+- 🚫 **ZERO HALLUCINATION (VALUES)**: If there is NO visible numeric ink for a row, **DO NOT INCLUDE THAT ROW**. Skip it entirely.
 - 🚫 **NO RANGE BLEEDING**: Strictly keep "Normal Range" separate from "Test Name".
    - Bad: "Monocytes (% (1.0-3.0)"
    - Good: Name="Monocytes (%)", Range="(1.0-3.0)"
@@ -110,6 +112,8 @@ JSON RETURN ONLY:
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD (Arabic: DD/MM/YYYY, English: MM/DD/YYYY)",
+    "report_name": "Full title of the report (e.g. CBC, Biochemistry)",
+    "report_type": "Category of report (e.g. Haematology, Chemistry)",
     "doctor_names": "Read EXACT doctor name from image next to الطبيب. Person name only.",
     "medical_data": [
         {{

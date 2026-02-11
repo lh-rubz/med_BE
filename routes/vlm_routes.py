@@ -1006,7 +1006,7 @@ class ChatResource(Resource):
                                 # Capture/Enrich patient info from first segment
                                 # VLM reads directly from image — let it set all demographics
                                 if seg_idx == 1:
-                                    for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
+                                    for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names', 'report_name', 'report_type']:
                                         val = str(vlm_data.get(key, "")).strip()
                                         if val and val.lower() not in ["unknown", "n/a", "none", "", "empty_specified"]:
                                             # Reject labels misidentified as names
@@ -1059,10 +1059,10 @@ class ChatResource(Resource):
                     print(f"⚠️  VLM extraction failed: {vlm_err}")
             # Step 3: Always try VLM for patient info (it reads headers better than OCR)
             # FORCE demographic extraction on Page 1 to ensure highest quality
-            should_run_demographics = (idx == 1) or any(not extracted_data.get(f) for f in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names'])
+            should_run_demographics = (idx == 1) or any(not extracted_data.get(f) for f in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names', 'report_name', 'report_type'])
             
             if should_run_demographics:
-                missing_fields = [f for f in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names'] if not extracted_data.get(f)]
+                missing_fields = [f for f in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names', 'report_name', 'report_type'] if not extracted_data.get(f)]
                 print(f"   🔍 Using VLM to extract patient info (Page {idx})...")
                 try:
                     image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
@@ -1088,7 +1088,7 @@ class ChatResource(Resource):
                     if json_match:
                         patient_data = json.loads(json_match.group())
                         # VLM reads directly from image — let it set all demographics
-                        for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names']:
+                        for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names', 'report_name', 'report_type']:
                             val = str(patient_data.get(key, "")).strip()
                             if val and val.lower() not in ["unknown", "n/a", "none", "", "empty_specified"]:
                                 rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "social", "affairs", "insurance", "عيادة", "مختبر", "وزارة", "مديرية"]
@@ -1158,7 +1158,7 @@ class ChatResource(Resource):
             
             # Enrich patient_info with organized_data if available
             if organized_data:
-                for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
+                for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names', 'report_name', 'report_type']:
                     if organized_data.get(key) and not patient_info.get(key):
                         patient_info[key] = organized_data[key]
                         print(f"   ✨ Enriched {key} from organized text: {organized_data[key]}")
