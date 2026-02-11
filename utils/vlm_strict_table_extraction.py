@@ -52,6 +52,7 @@ def get_ocr_refinement_prompt(idx: int, total_pages: int, organized_text: str) -
     """
     Enhanced VLM prompt featuring Chain-of-Thought reasoning, explicit RTL rules, 
     and one-shot examples for high-precision medical data extraction.
+    Enforces exact row count alignment with OCR anchors.
     """
     return f"""
 🔬 MEDICAL REPORT DIGITIZATION - PHASE 2 (VISUAL VERIFICATION)
@@ -62,52 +63,59 @@ Page {idx}/{total_pages}
 2. **Identify Column Order**: Look for Arabic labels (الفحص, النتيجة). If present, columns scan RIGHT-TO-LEFT.
 3. **Anchor Matching**: Locate the Test Names provided in the 'OCR REFERENCE' on the physical image.
 4. **Visual Alignment**: For each Test Name, trace a horizontal line ➔ capture ONLY the value, unit, and range that sits on that exact line.
+
+### 🚨🚨🚨 ROW COUNT ENFORCEMENT (MOST CRITICAL RULE) 🚨🚨🚨
+- The OCR REFERENCE below lists EXACTLY the rows found in the report.
+- You MUST produce EXACTLY the same number of rows in your output, in the SAME order.
+- If a row is marked "(EMPTY - no visible result)" or has no value in the image, you MUST STILL include it with `field_value`: "".
+- 🚫 NEVER SKIP A ROW. 🚫 NEVER MERGE TWO ROWS. 🚫 NEVER ADD EXTRA ROWS.
+- If a row has only a "*" or "-" or dot as the result, set `field_value` to "" (empty string).
+- After you finish extraction, COUNT your output rows. If count does NOT match the OCR REFERENCE row count, RE-CHECK and fix it.
+
+### 🚨 EXTRACTION RULES
 - 🚨 **UNIT FIDELITY (ULTRA-STRICT)**: Capture units **EXACTLY** as they appear in the ink. If the image says "%L" or "%G", DO NOT simplify it to "%". **DO NOT "HELP" BY CLEANING THE UNIT**. Extract exactly what is written, character-for-character.
 - 🚫 **NO SHIFTING**: Do NOT pull a result from the row above or below. 
 - 🚨 **PIXEL-LOCKED ALIGNMENT**: For each Test Name, trace a direct horizontal path (baseline). Capture ONLY the numeric value and unit that sits on that exact vertical level. If you hit a different row's pixels, STOP.
-- 🚨 **UNIT FIDELITY**: If the text says "%L" or "%G", DO NOT simplify it to "%".
-- 🚫 **ZERO HALLUCINATION (VALUES)**: If there is NO visible numeric ink for a row, set `field_value` to "EMPTY_SPECIFIED". **NEVER** guess a number from the range or a separate row.
+- 🚫 **ZERO HALLUCINATION (VALUES)**: If there is NO visible numeric ink for a row, set `field_value` to "". **NEVER** guess a number from the range or a separate row.
+- 🚫 **NO RANGE BLEEDING**: Strictly keep "Normal Range" separate from "Test Name".
+   - Bad: "Monocytes (% (1.0-3.0)"
+   - Good: Name="Monocytes (%)", Range="(1.0-3.0)"
+- 🔬 **PREFIX PROTECTION**: If a test starts with a letter and dash (e.g., "C - Reactive Proteins", "S - Albumin"), YOU MUST capture the "C -" as part of the Test Name. NEVER put "C" in the Result column.
 
 ### ⬅️ ARABIC TABLE FLOW (RIGHT-TO-LEFT)
 [RIGHTMOST] Test Name (الفحص) ➔ Result (النتيجة) ➔ Range (النتيجة الطبيعية) ➔ Unit (الوحدة) [LEFTMOST]
 
-### 🚨 PREFIX3. **DO NOT GUESS VALUES**: Only organize what is in the text. If a value looks misaligned, keep it as is; Stage 2 will fix it visually.
-4. **NO RANGE BLEEDING**: Strictly keep "Normal Range" separate from "Test Name".
-   - Bad: "Monocytes (% (1.0-3.0)"
-   - Good: Name="Monocytes (%)", Range="(1.0-3.0)"
-5. � **PREFIX PROTECTION**: If a test starts with a letter and dash (e.g., "C - Reactive Proteins", "S - Albumin"), YOU MUST capture the "C -" as part of the Test Name. NEVER put "C" in the Result column.
-
-### 👤 DEMOGRAPHICS (ULTRA-SEARCH MODE)
-1. **Patient Name**: Find "اسم المريض". Capture the FULL person's name (at least 3-4 words). 
-   - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change the letters. If it says "الرب" (Al-Rub), capture it as "الرب". DO NOT add letters like "الروب".
-   - 🚨 **SPACING RULE**: The word "ابو" (Abu) is ALWAYS a separate word. NEVER merge it with the next word (e.g. 'أبو الرب' NOT 'أبورب').
-   - ⚠️ Fix disjointed characters (e.g. 'أحمد نعی رات' -> 'أحمد نعيرات').
-2. **Doctor**: 🔍 **MANDATORY ANCHOR RESPECT**. 
-   - Look at the `OCR REFERENCE` doctor name below. 
-   - You MUST locate this name in the IMAGE (check top-left red/blue header area, background logos, and stamps).
-   - If the Anchor says "أحمد نعيرات", and you see ink that says "أحمد نعيرات", YOU MUST EXTRACT IT. DO NOT return "Not found".
+### 👤 DEMOGRAPHICS (STRICT OCR ANCHOR MODE)
+The OCR has already captured the patient and doctor names below. Your job is to VERIFY they match the image, NOT to replace them.
+1. **Patient Name**: Use the OCR REFERENCE name below. Only change it if the image CLEARLY shows different characters. Mirror the spelling exactly — do NOT hallucinate letters.
+   - 🚨 **SPACING RULE**: The word "ابو" (Abu) is ALWAYS a separate word. NEVER merge it with the next word.
+2. **Doctor Name**: Use the OCR REFERENCE doctor name below. The doctor name is found near the label "الطبيب" in the header.
+   - 🚫 Do NOT confuse "عيادة" (Clinic) or "مختبر" (Lab) with a doctor name.
+   - If the OCR Anchor already has a doctor name, KEEP IT unless the image clearly shows completely different letters.
 
 ---
-### 📋 OCR REFERENCE (STRICT ANCHORS)
+### 📋 OCR REFERENCE (STRICT ANCHORS — YOU MUST MATCH ROW COUNT)
 {organized_text}
 
 JSON RETURN ONLY:
 {{
-    "patient_name": "Literal full name (🚫 NEVER merge 'أبو' with following word)",
+    "patient_name": "Use OCR anchor name. Only correct if image clearly shows different characters.",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD (Arabic: DD/MM/YYYY, English: MM/DD/YYYY)",
-    "doctor_names": "Literal doctor name (🔍 Cross-check OCR Anchor with Header Ink/Stamps)",
+    "doctor_names": "Use OCR anchor doctor name. Only correct if image clearly shows different characters.",
     "medical_data": [
         {{
-            "field_name": "Test Name (⚠️ EXACT mapping to one OCR anchor)",
-            "field_value": "Numeric Value (⚠️ ONLY if visible in this specific line)",
+            "field_name": "Test Name (MUST match OCR anchor row)",
+            "field_value": "Numeric Value from SAME row ONLY (empty string if no value visible)",
             "field_unit": "Unit (🚨 MIRROR PRECISELY: e.g. '%L', '%G', 'mg/dL'). No simplification.",
             "normal_range": "Literal Range (🚨 CAPTURE EVERY WORD: e.g. 'Normal: less than...', 'Diabetes: >...'). Do NOT truncate.",
             "notes": "Any visual flags (handwritten, signature, etc)"
         }}
     ]
 }}
+
+🚨 FINAL CHECK: Count your medical_data rows. Does it match the number of anchor rows above? If not, fix it before returning.
 """
 
 

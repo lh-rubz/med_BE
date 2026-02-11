@@ -68,14 +68,20 @@ class MedicalValidator:
         return value_str
     
     @staticmethod
-    def parse_range(range_str: str) -> Optional[Tuple[float, float]]:
+    def parse_range(range_str: str, skip_label_strip: bool = False) -> Optional[Tuple[float, float]]:
         """
         Parse normal range string into min/max tuple.
         Handles: "13.5-17.5", "< 200", "> 50", "up to 40", "below 10", "above 100".
+        
+        Args:
+            range_str: The range string to parse
+            skip_label_strip: If True, skip stripping leading "label:" prefix.
+                              Used when the string has already been category-isolated.
         """
         # Clean the string and remove leading labels like "Normal: " or "Results: "
         range_str = str(range_str).strip().lower()
-        range_str = re.sub(r'^[a-z\s]+[:]\s*', '', range_str)
+        if not skip_label_strip:
+            range_str = re.sub(r'^[a-z\s]+[:]\s*', '', range_str)
         
         # Pattern: number-number or number to number
         match = re.search(r'([-+]?\d*\.?\d+)\s*[-to]+\s*([-+]?\d*\.?\d+)', range_str)
@@ -183,22 +189,58 @@ class MedicalValidator:
                     break
 
         # 2. Handle Categorical Ranges
+        # Pattern: "Normal: less than 5.7 % Prediabetes: 5.7 - 6.4 % Diabetes: > 6.5 %"
         # Pattern: "Deficient: <10, Insufficient: 11-30, Sufficient: 31-100"
         if ":" in range_raw and value is not None:
-            # Check all categories
-            category_pattern = r'([a-z\s]+?)\s*:\s*([^,;]+)'
-            for cat_match in re.finditer(category_pattern, range_raw):
+            # Detect if comma-separated (e.g., "Deficient: <10, Insufficient: 10-30")
+            # vs space-separated (e.g., "Normal: less than 5.7 % Prediabetes: 5.7 - 6.4 %")
+            simple_pattern = r'([a-z\s]+?)\s*:\s*([^,;]+)'
+            # Space-separated: category names separated by lookahead to next "word:"
+            complex_pattern = r'([a-z][a-z\s\-]*?)\s*:\s*(.*?)(?=\s+[a-z][a-z\s\-]*?\s*:|$)'
+            
+            simple_matches = list(re.finditer(simple_pattern, range_raw))
+            complex_matches = list(re.finditer(complex_pattern, range_raw))
+            
+            # Use whichever finds more categories (more complete parse)
+            cat_matches = complex_matches if len(complex_matches) > len(simple_matches) else simple_matches
+            
+            for cat_match in cat_matches:
                 cat_name = cat_match.group(1).strip()
                 cat_range = cat_match.group(2).strip()
                 
+                # Remove stray unit symbols (%, mg/dL, etc.) from the range text
+                cat_range = re.sub(r'\s*%\s*$', '', cat_range).strip()
+                
                 # Check if value fits this category's range
-                r_tuple = MedicalValidator.parse_range(cat_range)
+                # skip_label_strip=True because cat_range is already isolated from that category
+                r_tuple = MedicalValidator.parse_range(cat_range, skip_label_strip=True)
                 if r_tuple:
                     min_v, max_v = r_tuple
-                    if min_v <= value <= max_v:
+                    
+                    # Determine if the range implies strict inequality
+                    cat_range_lower = cat_range.lower()
+                    is_strict_upper = any(kw in cat_range_lower for kw in ['less than', '<']) and '<=' not in cat_range_lower
+                    is_strict_lower = any(kw in cat_range_lower for kw in ['greater than', 'more than', '>']) and '>=' not in cat_range_lower
+                    
+                    # Apply appropriate boundary check
+                    upper_ok = (value < max_v) if is_strict_upper else (value <= max_v)
+                    lower_ok = (value > min_v) if is_strict_lower else (value >= min_v)
+                    
+                    if lower_ok and upper_ok:
                         # Value is in this category. Is the category normal?
-                        abnormal_keywords = ['deficient', 'insufficient', 'high', 'low', 'abnormal', 'toxic', 'positive']
-                        return not any(kw in cat_name for kw in abnormal_keywords)
+                        abnormal_keywords = ['deficient', 'insufficient', 'high', 'low', 'abnormal', 
+                                           'toxic', 'positive', 'prediabetes', 'pre-diabetes', 
+                                           'diabetes', 'borderline', 'elevated', 'critical']
+                        normal_keywords = ['normal', 'sufficient', 'optimal', 'desirable', 'negative', 'non-reactive']
+                        
+                        # Check abnormal FIRST (since 'insufficient' contains 'sufficient')
+                        if any(kw in cat_name for kw in abnormal_keywords):
+                            return False
+                        # Then check normal
+                        if any(kw in cat_name for kw in normal_keywords):
+                            return True
+                        # Default: if category name is unknown, assume abnormal (conservative)
+                        return False
 
         # 3. Handle Simple/Split Ranges
         if value is not None:

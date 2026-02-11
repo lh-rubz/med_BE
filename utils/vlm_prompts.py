@@ -183,19 +183,22 @@ def get_robust_demographics_prompt():
 🚨 DEMOGRAPHIC GRID MAP (STRICT) 🚨
 This report uses a 2-column grid layout for demographics. Labels are on the RIGHT, values are on the LEFT.
 
+🚨🚨 OCR ANCHOR PRIORITY 🚨🚨
+The OCR system has already captured the patient and doctor names. Your job is to VERIFY they match the image, NOT to REPLACE them.
+If the OCR already has a name, KEEP IT unless the image CLEARLY and UNAMBIGUOUSLY shows DIFFERENT characters.
+Do NOT "correct" names based on guessing — OCR typed text is more reliable than your visual reading of Arabic.
+
 1. **PATIENT NAME (اسم المريض)**:
-   - Location: Top demographics table.
-   - Location: 🚨 **WHOLE PAGE SEARCH**. Scan the top tables, stamps, and footer text.
-   - 🚨 **ARABIC CHARACTER FIDELITY**: If the ink is ambiguous (e.g., looks like دنيسة vs رئيسة), and the OCR Anchor below says "رئيسة", YOU MUST USE "رئيسة". Typed Arabic in medical reports is very structured; do not let visual "noise" change common names.
-   - 🚨 **MIRROR PERFECT SPELLING**: Mirror the OCR characters exactly for typed text.
+   - Location: Top demographics table, next to label "اسم المريض".
+   - 🚨 **MIRROR PERFECT SPELLING**: Copy the exact characters from the report. Do NOT hallucinate or change letters.
    - 🚨 **SPACING**: "ابو" (Abu) is always separate (e.g., "أبو الرب" NOT "ابوراب").
+   - If OCR already captured a name, KEEP IT unless image clearly shows different text.
 
 2. **DOCTOR NAME (الطبيب)**:
-   - 🔍 **PRIMARY SEARCH**: Look at the cell immediately to the LEFT or below the label "الطبيب" (Doctor). In this report, check the bottom-left of the demographic grid.
-   - 🔍 **SECONDARY**: Check background logo boxes (top-left) for proprietary names like "أحمد نعيرات".
-   - 🚨 **VOID REJECTION**: Discard titles like "عيادة" (Clinic) or "مختبر" (Lab). **"عيادة" IS NOT A NAME**. If only a clinic name is found, doctor name must be "EMPTY_SPECIFIED".
-   - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change letters. 🚫 NO Hallucinations.
-   - 🎨 **INK-CAPTURE**: Mirror handwriting, stamps, and signatures exactly as they appear in ink.
+   - 🔍 Look at the cell next to the label "الطبيب" (Doctor) in the header grid.
+   - 🚨 **VOID REJECTION**: "عيادة" (Clinic), "مختبر" (Lab), "وزارة" (Ministry) are NOT doctor names. 
+   - 🚨 **MIRROR PERFECT SPELLING**: Do NOT change letters. Copy exactly what is written.
+   - If OCR already captured a doctor name, KEEP IT — do not replace with a different reading.
 
 3. **GENDER (الجنس)**:
    - Find "الجنس" on the right. Value is to the LEFT. (أنثى/انثى -> Female, ذكر -> Male).
@@ -209,9 +212,9 @@ This report uses a 2-column grid layout for demographics. Labels are on the RIGH
 
 Return JSON only:
 {
-    "patient_name": "Literal full name ONLY. 🚫 NO HINTS: Capture at least 4 words if available.",
+    "patient_name": "Exact name from report. Do NOT change OCR-captured name unless image clearly differs.",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
-    "doctor_names": "Literal personal name of the doctor. Join disjointed letters if present."
+    "doctor_names": "Exact doctor name from report. Do NOT change OCR-captured name unless its wrong."
 }"""
