@@ -243,3 +243,62 @@ Return JSON only:
     "report_type": "Category of report (e.g. Haematology)",
     "doctor_names": "Read EXACT person name from image next to الطبيب. Not a clinic or facility."
 }"""
+
+
+def get_name_verification_demographics_prompt(ocr_patient_name: str, ocr_doctor_name: str = "") -> str:
+    """
+    Demographics prompt that uses OCR-extracted name as anchor for VLM verification.
+    Instead of reading from scratch (which causes inconsistency for Arabic),
+    the VLM verifies/corrects the OCR-extracted name letter by letter.
+    """
+    return f"""Extract patient and report information from this laboratory document.
+
+🚨 NAME VERIFICATION MODE (CRITICAL) 🚨
+OCR has already extracted the patient name as: **"{ocr_patient_name}"**
+{"OCR has extracted the doctor name as: **" + chr(34) + ocr_doctor_name + chr(34) + "**" if ocr_doctor_name else ""}
+
+Your task is to VERIFY this name against the image:
+
+1. **PATIENT NAME (اسم المريض)**:
+   - Find the cell next to "اسم المريض" in the header.
+   - Read each character of the name in the image, one by one.
+   - Compare with the OCR name "{ocr_patient_name}" character by character.
+   - If the OCR name matches what you see in the image → USE IT EXACTLY.
+   - If there are minor differences (1-2 characters) → CORRECT only the wrong characters.
+   - If the OCR name is completely wrong → Read the name fresh from the image.
+   - 🚨 **ARABIC LETTER DISCRIMINATION** (CRITICAL):
+     * Count dots carefully: ب (1 dot below) vs ت (2 dots above) vs ث (3 dots above)
+     * خ (dot above) vs ح (no dot) vs ج (dot below)
+     * ذ (dot above) vs د (no dot)
+     * ض (dot above) vs ص (no dot)
+     * ظ (dot above) vs ط (no dot)
+     * غ (dot above) vs ع (no dot)
+     * ر (no dot) vs ز (dot above)
+     * ن (dot above) vs ب (dot below)
+   - 🚫 Do NOT guess or invent a name. If you cannot read it clearly, use the OCR version.
+
+2. **DOCTOR NAME (الطبيب)**:
+   - Find the cell next to "الطبيب" in the header.
+   {"- OCR read it as: " + chr(34) + ocr_doctor_name + chr(34) + ". Verify against the image." if ocr_doctor_name else "- Read the name directly from the image."}
+   - 🚫 "عيادة" (Clinic), "مختبر" (Lab), "وزارة" (Ministry), "مديرية" (Directorate) are NOT doctor names.
+
+3. **GENDER (الجنس)**:
+   - Find "الجنس". (أنثى/انثى → Female, ذكر → Male).
+
+4. **REPORT DATE**:
+   - Arabic reports: "XX/XX/YYYY" = DD/MM/YYYY. Convert to YYYY-MM-DD.
+
+5. **REPORT NAME & TYPE**:
+   - Report type: EXACTLY ONE of [`Lab results`, `Prescriptions`, `Imaging`, `Cardiology`, `Neurology`, `Orthopedic`].
+   - If multiple sections exist (e.g., both "HEMATOLOGY" and "CLINICAL CHEMISTRY"), combine with " & ".
+
+Return JSON only:
+{{
+    "patient_name": "Verified/corrected name from image",
+    "patient_age": "Literal age or DOB",
+    "patient_gender": "Male or Female",
+    "report_date": "YYYY-MM-DD",
+    "report_name": "Full title of the report",
+    "report_type": "Lab results",
+    "doctor_names": "Verified/corrected doctor name"
+}}"""

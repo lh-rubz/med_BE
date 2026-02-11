@@ -21,7 +21,7 @@ from config import ollama_client, Config
 from utils.medical_validator import validate_medical_data, MedicalValidator
 from utils.medical_mappings import add_new_alias
 from utils.ocr_extractor import get_ocr_instance
-from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_personal_info_prompt, get_robust_demographics_prompt
+from utils.vlm_prompts import get_main_vlm_prompt, get_table_retry_prompt, get_personal_info_prompt, get_robust_demographics_prompt, get_name_verification_demographics_prompt
 from utils.vlm_correction import analyze_extraction_issues, generate_corrective_prompt, generate_prompt_enhancement_request
 from utils.vlm_self_extraction_prompt import get_self_prompting_analysis_prompt, get_self_directed_extraction_prompt, get_simplified_extraction_prompt
 from utils.vlm_line_by_line_verifier import verify_extracted_fields_against_image_openai
@@ -1009,26 +1009,26 @@ class ChatResource(Resource):
                                 page_results.append(vlm_data)
                                 
                                 # Capture/Enrich patient info from first segment
-                                # VLM reads directly from image — let it set all demographics
+                                # Names are handled by dedicated demographics step (Step 3)
+                                # This step only collects non-name fields + stores VLM name as candidate
                                 if seg_idx == 1:
-                                    for key in ['patient_name', 'patient_age', 'patient_gender', 'report_date', 'doctor_names', 'report_name', 'report_type']:
+                                    for key in ['patient_age', 'patient_gender', 'report_date', 'report_name', 'report_type']:
                                         val = str(vlm_data.get(key, "")).strip()
                                         if val and val.lower() not in ["unknown", "n/a", "none", "", "empty_specified"]:
-                                            # Reject labels misidentified as names
-                                            rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "عيادة", "مختبر", "وزارة", "مديرية"]
-                                            is_hallucination = (key in ['patient_name', 'doctor_names']) and any(s in val for s in rejection_terms)
-                                            
                                             current_val = str(extracted_data.get(key, "")).strip()
-                                            
-                                            # VLM has authority — always set for names, use length check for others
-                                            if not is_hallucination:
-                                                if key in ['patient_name', 'doctor_names']:
-                                                    # Names: VLM ALWAYS overrides (reads from image)
-                                                    extracted_data[key] = val
-                                                    print(f"   📝 VLM set {key}: {val}")
-                                                elif not current_val or len(val) > len(current_val):
-                                                    extracted_data[key] = val
-                                                    print(f"   📝 VLM set {key}: {val}")
+                                            if not current_val or len(val) > len(current_val):
+                                                extracted_data[key] = val
+                                                print(f"   📝 VLM set {key}: {val}")
+                                    
+                                    # Store VLM-extracted names as candidates (NOT as final values)
+                                    # They'll participate in the voting in Step 3
+                                    for key in ['patient_name', 'doctor_names']:
+                                        val = str(vlm_data.get(key, "")).strip()
+                                        if val and val.lower() not in ["unknown", "n/a", "none", "", "empty_specified"]:
+                                            rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "عيادة", "مختبر", "وزارة", "مديرية"]
+                                            if not any(s in val for s in rejection_terms):
+                                                extracted_data[f'_vlm_table_{key}'] = val
+                                                print(f"   📝 VLM table candidate {key}: {val}")
                         except Exception as parse_err:
                             print(f"⚠️  Parsing segment {seg_idx} failed: {parse_err}")
 
@@ -1064,29 +1064,74 @@ class ChatResource(Resource):
                     print(f"⚠️  VLM extraction failed: {vlm_err}")
             # Step 3: Always try VLM for patient info (it reads headers better than OCR)
             # FORCE demographic extraction on Page 1 to ensure highest quality
-            # Use MULTI-PASS VOTING for Arabic names to ensure consistency
+            # STRATEGY: For Arabic names, OCR is more deterministic — use OCR as primary,
+            # VLM as verifier. For non-Arabic names, VLM reads directly.
             should_run_demographics = (idx == 1) or any(not extracted_data.get(f) for f in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names', 'report_name', 'report_type'])
             
             if should_run_demographics:
-                missing_fields = [f for f in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names', 'report_name', 'report_type'] if not extracted_data.get(f)]
-                print(f"   🔍 Using VLM to extract patient info (Page {idx}) with name voting...")
+                print(f"   🔍 Extracting patient info (Page {idx})...")
                 try:
                     image_base64 = base64.b64encode(image_info['data']).decode('utf-8')
                     image_format = image_info['format']
                     
-                    # MULTI-PASS NAME VOTING: Run demographics extraction multiple times
-                    # to get consistent Arabic name reading
+                    # Get OCR-extracted name as baseline (more deterministic for Arabic)
+                    ocr_patient_name = ""
+                    ocr_doctor_name = ""
+                    if organized_data:
+                        ocr_patient_name = str(organized_data.get('patient_name', '')).strip()
+                        ocr_doctor_name = str(organized_data.get('doctor_names', '')).strip()
+                    
+                    # Check if name contains Arabic characters
+                    def _has_arabic(text):
+                        return any('\u0600' <= c <= '\u06FF' for c in str(text))
+                    
+                    is_arabic_name = _has_arabic(ocr_patient_name)
+                    
+                    # Collect all name candidates with weights
                     name_candidates = []
                     doctor_candidates = []
+                    
+                    # Add OCR names as strong candidates (counted twice for Arabic names)
+                    if ocr_patient_name:
+                        rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "عيادة", "مختبر", "وزارة", "مديرية"]
+                        if not any(s in ocr_patient_name for s in rejection_terms):
+                            # OCR gets extra weight for Arabic names
+                            ocr_weight = 3 if is_arabic_name else 1
+                            for _ in range(ocr_weight):
+                                name_candidates.append(ocr_patient_name)
+                            print(f"      OCR patient name (weight {ocr_weight}): {ocr_patient_name}")
+                    
+                    if ocr_doctor_name:
+                        rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "عيادة", "مختبر", "وزارة", "مديرية"]
+                        if not any(s in ocr_doctor_name for s in rejection_terms):
+                            ocr_weight = 3 if _has_arabic(ocr_doctor_name) else 1
+                            for _ in range(ocr_weight):
+                                doctor_candidates.append(ocr_doctor_name)
+                            print(f"      OCR doctor name (weight {ocr_weight}): {ocr_doctor_name}")
+                    
+                    # Also collect name from VLM refinement pass (already ran for table data)
+                    vlm_table_name = str(extracted_data.get('_vlm_table_patient_name', '')).strip()
+                    vlm_table_doctor = str(extracted_data.get('_vlm_table_doctor_names', '')).strip()
+                    if vlm_table_name and vlm_table_name not in name_candidates:
+                        rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "عيادة", "مختبر", "وزارة", "مديرية"]
+                        if not any(s in vlm_table_name for s in rejection_terms):
+                            name_candidates.append(vlm_table_name)
+                            print(f"      VLM table-pass name: {vlm_table_name}")
+                    if vlm_table_doctor and vlm_table_doctor not in doctor_candidates:
+                        rejection_terms = ["شؤون", "اجتماعية", "شذون", "تأمين", "عيادة", "مختبر", "وزارة", "مديرية"]
+                        if not any(s in vlm_table_doctor for s in rejection_terms):
+                            doctor_candidates.append(vlm_table_doctor)
+                    
+                    # Run VLM demographics extraction with name VERIFICATION prompt
                     best_patient_data = None
+                    num_vlm_passes = 2 if idx == 1 else 1
                     
-                    num_passes = 3 if idx == 1 else 1  # 3 passes on page 1, 1 on other pages
-                    
-                    for pass_num in range(num_passes):
-                        patient_prompt = get_robust_demographics_prompt()
-                        
-                        # Vary temperature slightly between passes for diversity
-                        temp = 0.05 + (pass_num * 0.05)  # 0.05, 0.10, 0.15
+                    for pass_num in range(num_vlm_passes):
+                        # Build a verification-style prompt when we have OCR name
+                        if ocr_patient_name and is_arabic_name:
+                            patient_prompt = get_name_verification_demographics_prompt(ocr_patient_name, ocr_doctor_name)
+                        else:
+                            patient_prompt = get_robust_demographics_prompt()
                         
                         content = [
                             {'type': 'text', 'text': patient_prompt},
@@ -1096,11 +1141,10 @@ class ChatResource(Resource):
                         completion = ollama_client.chat.completions.create(
                             model=Config.OLLAMA_MODEL,
                             messages=[{'role': 'user', 'content': content}],
-                            temperature=temp
+                            temperature=0.0  # Maximum determinism for names
                         )
                         patient_response = completion.choices[0].message.content.strip()
                         
-                        # Parse patient info
                         import re
                         json_match = re.search(r'\{.*\}', patient_response, re.DOTALL)
                         if json_match:
@@ -1108,7 +1152,6 @@ class ChatResource(Resource):
                             if best_patient_data is None:
                                 best_patient_data = patient_data
                             
-                            # Collect name candidates
                             pname = str(patient_data.get('patient_name', '')).strip()
                             dname = str(patient_data.get('doctor_names', '')).strip()
                             
@@ -1116,12 +1159,23 @@ class ChatResource(Resource):
                             
                             if pname and not any(s in pname for s in rejection_terms):
                                 name_candidates.append(pname)
-                                print(f"      Pass {pass_num+1} patient name: {pname}")
+                                print(f"      VLM demographics pass {pass_num+1} name: {pname}")
                             if dname and not any(s in dname for s in rejection_terms):
                                 doctor_candidates.append(dname)
-                                print(f"      Pass {pass_num+1} doctor name: {dname}")
+                                print(f"      VLM demographics pass {pass_num+1} doctor: {dname}")
                     
-                    # VOTING: Pick the most common name (normalized comparison)
+                    # VOTING: Pick the best name using normalized comparison
+                    def _normalize_arabic_for_compare(text):
+                        """Normalize Arabic text for comparison."""
+                        text = text.replace("\u0640", "")
+                        for d in ['\u064B', '\u064C', '\u064D', '\u064E', '\u064F', '\u0650', '\u0651', '\u0652', '\u0670']:
+                            text = text.replace(d, '')
+                        for src, dst in [('\u0625', '\u0627'), ('\u0623', '\u0627'), ('\u0622', '\u0627'),
+                                         ('\u0624', '\u0648'), ('\u0626', '\u064a'), ('\u0629', '\u0647'),
+                                         ('\u06cc', '\u064a'), ('\u06a9', '\u0643')]:
+                            text = text.replace(src, dst)
+                        return text.strip()
+                    
                     def _pick_best_name(candidates):
                         """Pick the best name from candidates using normalized voting."""
                         if not candidates:
@@ -1129,41 +1183,24 @@ class ChatResource(Resource):
                         if len(candidates) == 1:
                             return candidates[0]
                         
-                        # Normalize for comparison (remove diacritics, normalize confusable chars)
-                        def _normalize_for_compare(text):
-                            text = text.replace("\u0640", "")  # Remove tatweel
-                            # Remove diacritics
-                            for d in ['\u064B', '\u064C', '\u064D', '\u064E', '\u064F', '\u0650', '\u0651', '\u0652', '\u0670']:
-                                text = text.replace(d, '')
-                            # Normalize confusable chars
-                            for src, dst in [('\u0625', '\u0627'), ('\u0623', '\u0627'), ('\u0622', '\u0627'),
-                                             ('\u0624', '\u0648'), ('\u0626', '\u064a'), ('\u0629', '\u0647'),
-                                             ('\u06cc', '\u064a'), ('\u06a9', '\u0643')]:
-                                text = text.replace(src, dst)
-                            return text.strip()
-                        
-                        # Count normalized occurrences
                         from collections import Counter
                         normalized_map = {}
                         for c in candidates:
-                            norm = _normalize_for_compare(c)
+                            norm = _normalize_arabic_for_compare(c)
                             if norm not in normalized_map:
                                 normalized_map[norm] = []
                             normalized_map[norm].append(c)
                         
-                        # Pick the group with the most votes
                         best_group = max(normalized_map.values(), key=len)
-                        # Return the longest candidate in the winning group (most complete)
                         return max(best_group, key=len)
                     
                     voted_patient_name = _pick_best_name(name_candidates)
                     voted_doctor_name = _pick_best_name(doctor_candidates)
                     
-                    if num_passes > 1:
-                        print(f"   🗳️ Name voting results ({len(name_candidates)} candidates): '{voted_patient_name}'")
-                        print(f"   🗳️ Doctor voting results ({len(doctor_candidates)} candidates): '{voted_doctor_name}'")
+                    print(f"   🗳️ Name voting ({len(name_candidates)} candidates): '{voted_patient_name}'")
+                    print(f"   🗳️ Doctor voting ({len(doctor_candidates)} candidates): '{voted_doctor_name}'")
                     
-                    # Apply the results
+                    # Apply results
                     if best_patient_data:
                         for key in ['patient_age', 'patient_gender', 'report_date', 'report_name', 'report_type']:
                             val = str(best_patient_data.get(key, "")).strip()
@@ -1171,19 +1208,20 @@ class ChatResource(Resource):
                                 current_val = str(extracted_data.get(key, "")).strip()
                                 if not current_val or len(val) > len(current_val):
                                     extracted_data[key] = val
-                                    print(f"   📝 Demographics VLM set {key}: {val}")
-                        
-                        # Set voted names
-                        if voted_patient_name:
-                            extracted_data['patient_name'] = voted_patient_name
-                            print(f"   📝 Demographics VLM set patient_name (voted): {voted_patient_name}")
-                        if voted_doctor_name:
-                            extracted_data['doctor_names'] = voted_doctor_name
-                            print(f"   📝 Demographics VLM set doctor_names (voted): {voted_doctor_name}")
+                                    print(f"   📝 Demographics set {key}: {val}")
+                    
+                    if voted_patient_name:
+                        extracted_data['patient_name'] = voted_patient_name
+                        print(f"   📝 Final patient_name (voted): {voted_patient_name}")
+                    if voted_doctor_name:
+                        extracted_data['doctor_names'] = voted_doctor_name
+                        print(f"   📝 Final doctor_names (voted): {voted_doctor_name}")
                     
                     print(f"   👤 Patient info enriched (Final name: {extracted_data.get('patient_name')})")
                 except Exception as pe:
                     print(f"   ⚠️  Patient info extraction failed: {pe}")
+                    import traceback
+                    traceback.print_exc()
             
             # Continue with validation and processing
             print(f"📊 Final extraction method: {extraction_method}")
@@ -1232,8 +1270,9 @@ class ChatResource(Resource):
                     patient_info = extracted_data
             
             # Enrich patient_info with organized_data if available
+            # Do NOT overwrite patient_name or doctor_names — those were set by voting
             if organized_data:
-                for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names', 'report_type']:
+                for key in ['patient_gender', 'patient_age', 'report_date', 'report_type']:
                     if organized_data.get(key) and not patient_info.get(key):
                         patient_info[key] = organized_data[key]
                         print(f"   ✨ Enriched {key} from organized text: {organized_data[key]}")

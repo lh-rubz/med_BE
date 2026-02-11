@@ -367,7 +367,7 @@ class MedicalDataPostProcessor:
         field_unit: str,
         normal_range: str,
         notes: str
-    ) -> (str, str):
+    ) -> tuple:
         """
         Sanitize normal_range when it looks malformed or severely mismatched.
         Returns (cleaned_range, updated_notes).
@@ -481,7 +481,7 @@ class MedicalDataPostProcessor:
     }
 
     @staticmethod
-    def _validate_range_against_known_bounds(field_name: str, normal_range: str, notes: str) -> (str, str):
+    def _validate_range_against_known_bounds(field_name: str, normal_range: str, notes: str) -> tuple:
         """
         Cross-check extracted range against known plausible bounds for common tests.
         If the extracted range is wildly different from all known references, flag it.
