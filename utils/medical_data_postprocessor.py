@@ -252,6 +252,11 @@ class MedicalDataPostProcessor:
             "(ASTI": "(AST)",
             "HCT)T)": "HCT)",
             "))": ")",
+            "Cholesterol,Totall": "Cholesterol,Total",
+            "Cholesterol, Totall": "Cholesterol, Total",
+            "Monocytes(%": "Monocytes(%)",
+            "Lymphocytes%": "Lymphocytes(%)",
+            "Lymphocytes/": "Lymphocytes",
         }
         for typo, fix in typo_fixes.items():
             if typo in field_name:

@@ -64,13 +64,12 @@ Page {idx}/{total_pages}
 3. **Row Counting**: Count the rows in the OCR REFERENCE below — your output MUST have the SAME number of rows.
 4. **Visual Reading**: For each row, READ the test name, value, unit, and range DIRECTLY FROM THE IMAGE.
 
-### 🚨🚨🚨 ROW COUNT ENFORCEMENT (MOST CRITICAL RULE) 🚨🚨🚨
-- The OCR REFERENCE below lists EXACTLY the rows found in the report.
-- You MUST produce EXACTLY the same number of rows in your output, in the SAME order.
-- If a row is marked "(EMPTY - no visible result)" or has no value in the image, you MUST STILL include it with `field_value`: "".
-- 🚫 NEVER SKIP A ROW. 🚫 NEVER MERGE TWO ROWS. 🚫 NEVER ADD EXTRA ROWS.
-- If a row has only a "*" or "-" or dot as the result, set `field_value` to "" (empty string).
-- After you finish extraction, COUNT your output rows. If count does NOT match the OCR REFERENCE row count, RE-CHECK and fix it.
+### 🚨🚨🚨 ROW COUNT GUIDANCE (IMPORTANT) 🚨🚨🚨
+- The OCR REFERENCE below lists the rows found in the report.
+- Your output should include ONLY rows that have a VISIBLE NUMERIC RESULT in the image.
+- 🚫 **SKIP any row** that has NO visible numeric value, or shows only "*", "-", ".", or is blank in the Result column.
+- 🚫 NEVER MERGE TWO ROWS. 🚫 NEVER ADD EXTRA ROWS not in the report.
+- 🚫 **ZERO HALLUCINATION**: If you cannot see a clear numeric result for a row in the image, DO NOT INCLUDE THAT ROW. Do NOT guess or invent a number.
 
 ### 🚨🚨 FIELD NAME RULE (READ FROM IMAGE, NOT OCR) 🚨🚨
 - The OCR list below is for **ROW COUNT and ORDER reference ONLY**.
@@ -84,7 +83,7 @@ Page {idx}/{total_pages}
 - 🚨 **UNIT FIDELITY (ULTRA-STRICT)**: Capture units **EXACTLY** as they appear in the ink. If the image says "%L" or "%G", DO NOT simplify it to "%". **DO NOT "HELP" BY CLEANING THE UNIT**. Extract exactly what is written, character-for-character.
 - 🚫 **NO SHIFTING**: Do NOT pull a result from the row above or below. 
 - 🚨 **PIXEL-LOCKED ALIGNMENT**: For each Test Name, trace a direct horizontal path (baseline). Capture ONLY the numeric value and unit that sits on that exact vertical level. If you hit a different row's pixels, STOP.
-- 🚫 **ZERO HALLUCINATION (VALUES)**: If there is NO visible numeric ink for a row, set `field_value` to "". **NEVER** guess a number from the range or a separate row.
+- 🚫 **ZERO HALLUCINATION (VALUES)**: If there is NO visible numeric ink for a row, **DO NOT INCLUDE THAT ROW**. Skip it entirely. NEVER guess a number from the range, unit, or a different row.
 - 🚫 **NO RANGE BLEEDING**: Strictly keep "Normal Range" separate from "Test Name".
    - Bad: "Monocytes (% (1.0-3.0)"
    - Good: Name="Monocytes (%)", Range="(1.0-3.0)"
@@ -123,7 +122,7 @@ JSON RETURN ONLY:
     ]
 }}
 
-🚨 FINAL CHECK: Count your medical_data rows. Does it match the number of anchor rows above? If not, fix it before returning.
+🚨 FINAL CHECK: Verify that every row in your output has a REAL numeric value that you can see in the image. If any row has a value you are not confident about, REMOVE that row.
 """
 
 

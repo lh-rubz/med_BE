@@ -926,8 +926,8 @@ class ChatResource(Resource):
                 print(f"✅ Using organized OCR data as PRIMARY source ({len(organized_data['medical_data'])} fields)")
                 extracted_data['medical_data'] = organized_data['medical_data']
                 
-                # Also use patient info from organized data
-                for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
+                # Also use patient info from organized data (NOT names — VLM will set those)
+                for key in ['patient_gender', 'patient_age', 'report_date']:
                     if organized_data.get(key):
                         extracted_data[key] = organized_data[key]
                 
@@ -938,12 +938,13 @@ class ChatResource(Resource):
                 yield f"data: {json.dumps({'percent': current_progress + 10, 'message': f'Reading table data carefully on page {idx}...'})}\n\n"
                 extraction_method = "vlm_primary"
 
-            # PRE-LOAD Demographics from organized OCR (Serves as a spelling baseline for VLM verification)
+            # PRE-LOAD Demographics from organized OCR (age, gender, date only — NOT names)
+            # Names are set by VLM which reads directly from the image for better accuracy
             if organized_data:
-                for key in ['patient_name', 'patient_gender', 'patient_age', 'report_date', 'doctor_names']:
+                for key in ['patient_gender', 'patient_age', 'report_date']:
                     if organized_data.get(key) and not any(s in str(organized_data[key]) for s in ["شؤون", "اجتماعية"]):
                         extracted_data[key] = organized_data[key]
-                print(f"   👤 Patient demographics pre-loaded from OCR baseline")
+                print(f"   👤 Patient demographics (age/gender/date) pre-loaded from OCR baseline")
 
             # Only call VLM if we're using vlm_primary method
             if extraction_method == "vlm_primary":
@@ -1014,9 +1015,13 @@ class ChatResource(Resource):
                                             
                                             current_val = str(extracted_data.get(key, "")).strip()
                                             
-                                            # VLM has authority — update if VLM provides a valid value
+                                            # VLM has authority — always set for names, use length check for others
                                             if not is_hallucination:
-                                                if not current_val or len(val) > len(current_val):
+                                                if key in ['patient_name', 'doctor_names']:
+                                                    # Names: VLM ALWAYS overrides (reads from image)
+                                                    extracted_data[key] = val
+                                                    print(f"   📝 VLM set {key}: {val}")
+                                                elif not current_val or len(val) > len(current_val):
                                                     extracted_data[key] = val
                                                     print(f"   📝 VLM set {key}: {val}")
                         except Exception as parse_err:
@@ -1091,9 +1096,13 @@ class ChatResource(Resource):
                                 
                                 current_val = str(extracted_data.get(key, "")).strip()
                                 
-                                # VLM has authority — update if VLM provides a valid value
+                                # VLM has authority — always set for names, use length check for others
                                 if not is_hallucination:
-                                    if not current_val or len(val) > len(current_val):
+                                    if key in ['patient_name', 'doctor_names']:
+                                        # Names: VLM ALWAYS overrides (reads from image)
+                                        extracted_data[key] = val
+                                        print(f"   📝 Demographics VLM set {key}: {val}")
+                                    elif not current_val or len(val) > len(current_val):
                                         extracted_data[key] = val
                                         print(f"   📝 Demographics VLM set {key}: {val}")
                         
