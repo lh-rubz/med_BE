@@ -93,44 +93,65 @@ class MedicalDataPostProcessor:
     @staticmethod
     def _merge_esr_rows(medical_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Rename E.S.R sub-rows (I Hour, II Hour) to include the parent name.
-        e.g., "I Hour" → "E.S.R - I Hour", "II Hour" → "E.S.R - II Hour".
-        If a standalone E.S.R row exists with the same value as I Hour, remove the duplicate.
+        Handle E.S.R sub-rows (I Hour, II Hour):
+        - Rename them to "E.S.R - I Hour", "E.S.R - II Hour"
+        - If parent E.S.R has the value but I Hour is empty, move value to I Hour
+        - Remove hour rows that have no value (empty II Hour)
+        - Remove the standalone E.S.R parent row (it's just a section header)
         """
         if not medical_data:
             return medical_data
         
         esr_idx = None
-        hour_indices = []
+        hour_entries = []  # list of (index, name_lower)
         
         for i, entry in enumerate(medical_data):
             name = entry.get('field_name', '').strip().lower()
             if name in ('e.s.r', 'esr', 'e.s.r.', 'erythrocyte sedimentation rate'):
                 esr_idx = i
             elif name in ('i hour', 'ii hour', '1 hour', '2 hour', 'i hour (esr)', 'ii hour (esr)'):
-                hour_indices.append(i)
+                hour_entries.append((i, name))
         
-        if hour_indices:
-            # Rename hour rows to include parent name: "I Hour" → "E.S.R - I Hour"
-            for hi in hour_indices:
-                original_name = medical_data[hi].get('field_name', '').strip()
-                if not original_name.upper().startswith('E.S.R'):
-                    medical_data[hi]['field_name'] = f"E.S.R - {original_name}"
+        if not hour_entries:
+            return medical_data
+        
+        indices_to_remove = set()
+        
+        # Rename hour rows: "I Hour" → "E.S.R - I Hour"
+        for hi, _ in hour_entries:
+            original_name = medical_data[hi].get('field_name', '').strip()
+            if not original_name.upper().startswith('E.S.R'):
+                medical_data[hi]['field_name'] = f"E.S.R - {original_name}"
+        
+        # If parent E.S.R row exists, transfer its data to I Hour if needed
+        if esr_idx is not None:
+            esr_entry = medical_data[esr_idx]
+            esr_value = str(esr_entry.get('field_value', '')).strip()
             
-            # If a standalone E.S.R row exists, check if it's a duplicate of I Hour
-            if esr_idx is not None:
-                esr_value = str(medical_data[esr_idx].get('field_value', '')).strip()
-                # If E.S.R row has a value that matches one of the hour rows, remove the standalone
-                for hi in hour_indices:
-                    hval = str(medical_data[hi].get('field_value', '')).strip()
-                    if esr_value and hval and esr_value == hval:
-                        # Duplicate — remove the standalone E.S.R row, keep the named hour row
-                        medical_data = [e for i, e in enumerate(medical_data) if i != esr_idx]
+            if esr_value:
+                # Find the first hour row (I Hour) and give it the value if it's empty
+                for hi, hname in hour_entries:
+                    if 'i hour' in hname or '1 hour' in hname:
+                        hval = str(medical_data[hi].get('field_value', '')).strip()
+                        if not hval:
+                            medical_data[hi]['field_value'] = esr_value
+                            if not str(medical_data[hi].get('field_unit', '')).strip():
+                                medical_data[hi]['field_unit'] = esr_entry.get('field_unit', '')
+                            if not str(medical_data[hi].get('normal_range', '')).strip():
+                                medical_data[hi]['normal_range'] = esr_entry.get('normal_range', '')
                         break
-                else:
-                    # No duplicate — if E.S.R has no value, remove it (empty parent header)
-                    if not esr_value:
-                        medical_data = [e for i, e in enumerate(medical_data) if i != esr_idx]
+            
+            # Always remove the standalone E.S.R parent row
+            indices_to_remove.add(esr_idx)
+        
+        # Remove hour rows that have no value (e.g., empty II Hour)
+        for hi, _ in hour_entries:
+            hval = str(medical_data[hi].get('field_value', '')).strip()
+            if not hval:
+                indices_to_remove.add(hi)
+        
+        if indices_to_remove:
+            medical_data = [e for i, e in enumerate(medical_data) if i not in indices_to_remove]
         
         return medical_data
 
@@ -663,6 +684,10 @@ class MedicalDataPostProcessor:
         if not name:
             return ""
         name = str(name).strip()
+        
+        # Reject empty/placeholder values
+        if name.lower() in ('n/a', 'na', 'unknown', 'none', 'empty', '-', ''):
+            return ""
         
         # Reject prompt echoes (VLM returned the instruction text as the value)
         if MedicalDataPostProcessor._is_prompt_echo(name):
