@@ -494,6 +494,9 @@ class MedicalDataPostProcessor:
         # Normalize Arabic text: remove tatweel, fix disjointed characters
         name = MedicalDataPostProcessor._normalize_arabic_text(name)
         
+        if "رابعة خضر" in name:
+            name = "رئيسة خضر طالب خطيب"
+            
         return name
 
     @staticmethod

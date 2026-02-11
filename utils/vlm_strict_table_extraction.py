@@ -112,17 +112,17 @@ JSON RETURN ONLY:
     "patient_name": "Read EXACT name from image next to اسم المريض. Letter by letter.",
     "patient_age": "Literal age or DOB",
     "patient_gender": "Male or Female",
-    "report_date": "YYYY-MM-DD (Arabic: DD/MM/YYYY, English: MM/DD/YYYY)",
-    "report_name": "Full title of the report (e.g. CBC, Biochemistry)",
-    "report_type": "Category of report (e.g. Haematology, Chemistry)",
-    "doctor_names": "Read EXACT doctor name from image next to الطبيب. Person name only.",
+    "report_date": "YYYY-MM-DD",
+    "report_name": "Full title (e.g. CBC)",
+    "report_type": "Category (Lab results, Imaging...)",
+    "doctor_names": "Read EXACT person name.",
     "medical_data": [
         {{
-            "field_name": "Read EXACT test name from image (NOT from OCR list). Character by character.",
-            "field_value": "Numeric Value from SAME row ONLY (empty string if no value visible or shows * only)",
-            "field_unit": "Unit (🚨 MIRROR PRECISELY: e.g. '%L', '%G', 'mg/dL'). No simplification.",
-            "normal_range": "Literal Range from image. If column shows (-) or dash only, return empty string.",
-            "notes": "Any visual flags (handwritten, signature, etc)"
+            "field_name": "Read EXACT char-by-char from image (Absolute Authority)",
+            "field_value": "Numerical/Text (ONLY visually confirmed ink. Hallucination = FAILURE)",
+            "field_unit": "Unit (Literal match)",
+            "normal_range": "Literal Range (Read ink carefully. If OCR differs from image, use IMAGE).",
+            "notes": "Any handwritten marks"
         }}
     ]
 }}
