@@ -18,10 +18,12 @@ REQUIRED FIELDS:
 4. **DOB**: Text INSIDE the box for "تاريخ الميلاد".
 5. **Order Date**: Text INSIDE the box for "تاريخ الطلب". Extract as YYYY-MM-DD.
 6. **Doctor Name**: Search the ENTIRE page for the doctor's name:
-   - Header: text INSIDE the box for "الطبيب" or "Doctor Name" or "Physician".
+   - Header: Find the label "الطبيب" in the demographics grid → read the text INSIDE that same box cell. This is the doctor's PERSONAL name.
+   - Also check: "Doctor Name", "Physician", "Requesting Doctor", "الطبيب المعالج".
    - Footer/bottom: next to a signature, stamp, "إعداد" (Prepared by), or "المختص" (Specialist).
    - Signature area: a handwritten or printed name near the bottom.
-   - ⚠️ ALERT: "عيادة الطب العام" is a clinic, NOT a doctor. "جهة الطلب" is a facility. Extract ONLY the person's name (e.g., جهاد العملة).
+   - ⚠️ ALERT: "عيادة الطب العام" is a clinic, NOT a doctor. "جهة الطلب" is a facility.
+   - ✅ The doctor name is a PERSON's name in Arabic or English (e.g., "جهاد العملة", "Ahmad Saleh").
    - If no doctor name found anywhere, return empty string "".
 
 JSON OUTPUT ONLY:
@@ -47,7 +49,9 @@ Task: Extract LAB DATA (page {idx}/{total_pages}).
 3. **"EMPTY_SPECIFIED"**: If the Result column is empty or only contains a symbol (`*`) within the horizontal band of a test, you MUST return `field_value`: "EMPTY_SPECIFIED".
    - **NEVER** pull a value from a different horizontal line. This is why Take 5 failed!
 4. **LITERAL RANGE**: Capture the "Normal Range" column exactly as written, including brackets and hyphens.   - 🚨 **DECIMAL PRECISION**: Read EVERY digit and decimal point. If the range says "(27-31.2)", write "(27-31.2)" NOT "(27-31)".
+   - 🚨 If the range says "(11.5-14.5)", write "(11.5-14.5)" NOT "(115-145)". Watch for decimal points!
    - 🚨 Do NOT round, truncate, or substitute commonly known ranges. Copy the EXACT printed numbers.
+5. **EXTRACT ALL ROWS**: Tables can have 20-30+ rows. Scan to the VERY BOTTOM. Do NOT stop early.
 VALIDATION:
 - Produced JSON must contain one entry for every physical row in the table.
 
@@ -93,7 +97,9 @@ CRITICAL ALIGNMENT RULES
    - Each field_unit is a medical unit (NOT a number, range, or percentage symbol alone)
    - Each normal_range is a range like (X-Y) (NOT a number or unit)
    - If any two different tests share the EXACT same range AND same unit -> re-check alignment.
-   - 🚨 DECIMAL PRECISION: Read EVERY digit & decimal in the range. (27-31.2) is NOT (27-31). (140-450) is NOT (150-400).
+   - 🚨 DECIMAL PRECISION: Read EVERY digit & decimal in the range. (27-31.2) is NOT (27-31). (140-450) is NOT (150-400). (11.5-14.5) is NOT (115-145).
+   - 🚨 ROW-VALUE SANITY: Does the value make sense for the test? (e.g., RDW ~12-15%, NOT 257; Platelets ~150-450 K/uL, NOT 12.6)
+7) EXTRACT ALL ROWS: Tables can have 20-30+ rows. Scan ALL the way to the bottom. Do NOT stop early. Tests like Eosinophils, Basophils, MPV, PDW at the bottom MUST be extracted.
 
 READING STEPS PER ROW
 - field_name: test column in THIS row. Must be a medical test name.
@@ -211,15 +217,12 @@ Arabic characters must be read carefully — each dot and letter matters.
    - 🚫 Do NOT guess or "correct" the name. Read the EXACT ink.
 
 2. **DOCTOR NAME (الطبيب)**:
-   - 🔍 **SEARCH THE ENTIRE PAGE** for the doctor's name. It may appear in ANY of these locations:
-     * Header area: next to "الطبيب" or "Doctor Name" or "Physician" or "Requesting Doctor" or "الطبيب المعالج"
-     * Footer/bottom: next to a signature, stamp, or "إعداد" (Prepared by) or "المختص" (Specialist)
-     * Signature area: a handwritten name or printed name near the bottom of the report
-     * Stamp: a doctor's stamp with their name and credentials
-   - 🚨 **READ CHARACTER BY CHARACTER**: The doctor is a PERSON's name (e.g., "جهاد العملة").
+   - 🔍 **FIND THE LABEL "الطبيب" IN THE HEADER GRID**: Read the text INSIDE the same cell/box. This text is the doctor's personal name.
+   - 🔍 **ALSO SEARCH**: footer, signature area, stamp, "إعداد" (Prepared by), "المختص" (Specialist).
+   - 🚨 **READ CHARACTER BY CHARACTER**: The doctor is a PERSON's name (e.g., "جهاد العملة", "أحمد صالح").
    - 🚨 **VOID REJECTION**: "عيادة" (Clinic), "مختبر" (Lab), "وزارة" (Ministry), "مديرية" (Directorate) are NOT doctor names. 
    - 🚫 Do NOT confuse the clinic/facility name with the doctor's personal name.
-   - If the doctor name field is empty in the header, look at the BOTTOM of the page for a signature or stamp.
+   - ⚠️ Even if "جهة الطلب" or "عيادة الطب العام" appears NEARBY, the text inside the "الطبيب" box is a separate person's name.
    - If no doctor name is found anywhere on the page, return empty string "".
 
 3. **GENDER (الجنس)**:
@@ -288,13 +291,11 @@ Your task is to VERIFY this name against the image:
    - 🚫 Do NOT guess or invent a name. If you cannot read it clearly, use the OCR version.
 
 2. **DOCTOR NAME (الطبيب)**:
-   - 🔍 **SEARCH THE ENTIRE PAGE** for the doctor's name. Check ALL of these locations:
-     * Header: next to "الطبيب" or "Doctor Name" or "Physician"
-     * Footer/bottom: next to a signature, stamp, "إعداد" (Prepared by), or "المختص" (Specialist)
-     * Signature area: a handwritten or printed name near the bottom
-     * Stamp: a doctor's stamp with their name
+   - 🔍 **FIND THE LABEL "الطبيب" IN THE HEADER GRID** → read the text INSIDE that same cell. It is a person's name.
+   - 🔍 **ALSO SEARCH**: footer, signature, stamp, "إعداد", "المختص".
    {"- OCR read it as: " + chr(34) + ocr_doctor_name + chr(34) + ". Verify against the image." if ocr_doctor_name else "- Read the name directly from the image."}
    - 🚫 "عيادة" (Clinic), "مختبر" (Lab), "وزارة" (Ministry), "مديرية" (Directorate) are NOT doctor names.
+   - ⚠️ Even if "جهة الطلب" or "عيادة الطب العام" appears NEARBY, the text inside the "الطبيب" box is a separate person's name.
    - If no doctor name is found anywhere on the page, return empty string "".
 
 3. **GENDER (الجنس)**:

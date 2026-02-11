@@ -458,6 +458,11 @@ class MedicalDataPostProcessor:
         if any(word in range_str.lower() for word in medical_state_keywords):
             return range_str, notes
 
+        # If range is just a dash in parentheses like "(-)", "(—)", "(–)", or plain "-",
+        # it means "no reference range" — return empty silently (not an error)
+        if re.match(r'^\(?\s*[-\u2014\u2013]\s*\)?$', range_str):
+            return "", notes
+
         has_digit = bool(re.search(r"\d", range_str))
         has_inequality = any(sym in range_str for sym in ["<", ">"])
         has_limit_word = any(word in range_str.lower() for word in ["up to", "less than", "below", "above", "more than"])

@@ -67,7 +67,8 @@ Page {idx}/{total_pages}
 ### 🚨🚨🚨 ROW EXTRACTION GUIDANCE (TOTAL EXTRACTION MODE) 🚨🚨🚨
 - The OCR REFERENCE below lists the rows found in the report. Use it ONLY to identify the search areas.
 - 🚨 **LITERAL SYMMETRY**: Your output MUST have a 1-to-1 mapping with the rows in the image.
-- ✅ **EXTRACT EVERY ROW**: Capture every parameter row you see in the report, sequentially.
+- ✅ **EXTRACT EVERY ROW**: Capture every parameter row you see in the report, top to bottom, INCLUDING the last rows at the bottom of the table. DO NOT stop early.
+- 🚨 **BOTTOM ROWS MATTER**: Tables can have 20-30+ rows. Scan ALL the way to the BOTTOM of the table. Common tests at the bottom (e.g., Eosinophils, Basophils, MPV, PDW, Platelet Distribution Width) are often missed. They MUST be extracted.
 - ⚪ **EMPTY VALUES**: If a row exists but has no numeric result, or shows ONLY "-", ".", or "(-)", return `field_value`: "". Do NOT skip the row.
 - 🚫 **NEVER MERGE TWO ROWS**: Even if names are similar (e.g. "Neutrophils" and "Neutrophils %"), you MUST output them as TWO separate JSON objects if they are on different lines.
 - 🚫 **ZERO HALLUCINATION (VALUES)**: If a value column is empty, return empty string. Do NOT invent numbers.
@@ -84,6 +85,10 @@ Page {idx}/{total_pages}
 - 🚨 **UNIT FIDELITY (ULTRA-STRICT)**: Capture units **EXACTLY** as they appear in the ink. If the image says "%L" or "%G", DO NOT simplify it to "%". **DO NOT "HELP" BY CLEANING THE UNIT**. Extract exactly what is written, character-for-character.
 - 🚫 **NO SHIFTING**: Do NOT pull a result from the row above or below. 
 - 🚨 **PIXEL-LOCKED ALIGNMENT**: For each Test Name, trace a direct horizontal path (baseline). Capture ONLY the numeric value and unit that sits on that exact vertical level. If you hit a different row's pixels or a vertical space, STOP. Do NOT borrow values from above or below.
+- 🚨 **ROW-BY-ROW SELF-CHECK**: After extracting each row, ask yourself:
+   * "Does this value MAKE SENSE for this test?" (e.g., RDW should be ~12-15%, NOT 257)
+   * "Is the unit consistent with the test?" (e.g., RDW uses %, NOT K/uL or fL)
+   * If a value seems implausible for the test name, you may have grabbed the wrong row's value. Re-trace the horizontal line.
 - 🚫 **SECTION HEADER SKIP**: Do NOT extract headers like "Biochemistry", "Haematology", "Main Report", or "Clinical Chemistry" as test rows. Only extract actual medical parameters.
 - 🚨 **PLACEHOLDER VALUES**: If a result column shows a "*", return `field_value`: "*". 
 - ✅ **ALLOW EMPTY RESULTS**: If a valid medical parameter line exists but has no result, capture the name and return an empty `field_value`.
@@ -98,8 +103,12 @@ Page {idx}/{total_pages}
 - Example: If the range says "(27-31.2)", you MUST capture "(27-31.2)" — NOT "(27-31)" or "(27-32)".
 - Example: If the range says "(0.7-4.8)", you MUST capture "(0.7-4.8)" — NOT "(1.0-3.0)" or "(0-5)".
 - Example: If the range says "(140-450)", you MUST capture "(140-450)" — NOT "(150-400)".
+- Example: If the range says "(31-35)", you MUST capture "(31-35)" — NOT "(31-37)" or "(32-36)".
+- Example: If the range says "(3-7)", you MUST capture "(3-7)" — NOT "(1-9)" or "(2-8)".
+- Example: If the range says "(11.5-14.5)", you MUST capture "(11.5-14.5)" — NOT "(115-145)" or "(12-15)".
 - 🚫 Do NOT round, truncate, or "clean up" any numbers. Copy the EXACT digits from the image.
 - 🚫 Do NOT substitute commonly known medical ranges. Read what is physically printed.
+- 🚫 Do NOT confuse decimal points with digit separators. "11.5" is eleven-point-five, NOT "115".
 
 ### ⬅️ ARABIC TABLE FLOW (RIGHT-TO-LEFT)
 [RIGHTMOST] Test Name (الفحص) ➔ Result (النتيجة) ➔ Range (النتيجة الطبيعية) ➔ Unit (الوحدة) [LEFTMOST]
@@ -107,10 +116,11 @@ Page {idx}/{total_pages}
 ### 👤 DEMOGRAPHICS (READ FROM IMAGE)
 1. **Patient Name**: Look at the cell next to "اسم المريض" in the header. **Read the EXACT characters from the image**, letter by letter. Do NOT copy the OCR name below — OCR may have wrong letters.
    - 🚨 **SPACING RULE**: The word "ابو" (Abu) is ALWAYS a separate word. NEVER merge it with the next word.
-2. **Doctor Name**: **Search the ENTIRE page** for the doctor's name — header (next to "الطبيب"), footer, signature area, stamp, or "إعداد".
+2. **Doctor Name**: 
+   - 🔍 **FIND THE LABEL "الطبيب" IN THE HEADER GRID** → read the text INSIDE that same cell. It is a person's name (e.g., "جهاد العملة").
+   - 🔍 **ALSO SEARCH**: footer, signature area, stamp, or "إعداد".
    - 🚫 Do NOT confuse "عيادة" (Clinic) or "مختبر" (Lab) or "وزارة" (Ministry) with a doctor name.
-   - The doctor name is a PERSON's name (e.g., "جهاد العملة"), NOT a facility or department.
-   - If the header field is empty, look at the BOTTOM of the page for a signature or stamp.
+   - ⚠️ Even if "جهة الطلب" or "عيادة الطب العام" appears NEARBY, the text inside the "الطبيب" box is a separate person's name.
    - If no doctor name is found anywhere, return empty string "".
 
 ---
@@ -137,7 +147,10 @@ JSON RETURN ONLY:
     ]
 }}
 
-🚨 FINAL CHECK: Verify that every row in your output has a REAL numeric value that you can see in the image. If any row has a value you are not confident about, REMOVE that row.
+🚨 FINAL CHECK: 
+1. Count the total rows you extracted. Compare to the OCR REFERENCE row count. If you have FEWER rows, go back and find the missing ones (check the BOTTOM of the table).
+2. Verify that every row has a value that you can see in the image. If any row has a value you are not confident about, set field_value to "" rather than guessing.
+3. For each row, does the unit make sense for the test? (e.g., RDW should be %, NOT K/uL or fL; Platelets should be K/uL, NOT %)
 
 🚨🚨 RANGE PRECISION CHECK (BEFORE SUBMITTING) 🚨🚨
 For EACH row, re-read the Normal Range column one more time:
@@ -149,6 +162,7 @@ For EACH row, re-read the Normal Range column one more time:
   * Writing (1-9) when image shows (3-7)
   * Writing (32-36) when image shows (31-35)
   * Writing (1.0-3.0) when image shows (0.7-4.8)
+  * Writing (115-145) when image shows (11.5-14.5) — do NOT miss decimal points!
 """
 
 
