@@ -190,9 +190,10 @@ Arabic characters must be read carefully — each dot and letter matters.
 
 1. **PATIENT NAME (اسم المريض)**:
    - Location: Top demographics table, next to label "اسم المريض".
-   - 🚨 **READ CHARACTER BY CHARACTER**: Look at each Arabic letter in the image individually. Copy EXACTLY what is printed.
+   - 🚨 **EXTREME CHARACTER AWARENESS**: Mirror the INK letter-for-letter. Look closely at dots and "teeth" of letters.
+   - Example: Significant difference between "رئيسة" (Raeesa) and "رابعة" (Rabaa). Look for single dots vs multi-dot clusters.
    - 🚨 **SPACING**: "ابو" (Abu) is always separate (e.g., "أبو الرب" NOT "ابوراب").
-   - 🚫 Do NOT guess or "correct" the name. If the image says "رنيسة" then write "رنيسة", not "دنيسة".
+   - 🚫 Do NOT guess or "correct" the name.
 
 2. **DOCTOR NAME (الطبيب)**:
    - 🔍 Look at the cell next to the label "الطبيب" (Doctor) in the header grid.
@@ -212,7 +213,12 @@ Arabic characters must be read carefully — each dot and letter matters.
 
 5. **REPORT NAME & TYPE**:
    - Identify the specific title of the report (e.g., "Complete Blood Count", "Biochemistry Report").
-   - Identify the type (e.g., "Haematology", "Chemistry").
+   - 🚨 **REPORT TYPE CATEGORY**: You MUST pick EXACTLY ONE from this list: [`Lab results`, `Prescriptions`, `Imaging`, `Cardiology`, `Neurology`, `Orthopedic`].
+   - If it is a blood test, urine test, or biopsy, it is ALWAYS `Lab results`.
+
+6. **PARAMETER DEDUPLICATION BIAS**:
+   - If you see two rows for "Neutrophils" (one as absolute count, one as percent), you MUST output BOTH separately.
+   - Do NOT merge "Neutrophils" and "Neutrophils %" or "Lymphocytes" and "Lymphocytes %".
 
 Return JSON only:
 {

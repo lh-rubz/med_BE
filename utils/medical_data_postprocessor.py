@@ -37,13 +37,23 @@ class MedicalDataPostProcessor:
             report_date=cleaned_report_date
         )
         
+        # Enforce valid report_type categories
+        allowed_types = ["Lab results", "Prescriptions", "Imaging", "Cardiology", "Neurology", "Orthopedic"]
+        report_type = str(extracted_data.get("report_type", "")).strip()
+        best_type = "Lab results"  # Default fallback
+        if report_type:
+            for allowed in allowed_types:
+                if allowed.lower() in report_type.lower() or report_type.lower() in allowed.lower():
+                    best_type = allowed
+                    break
+
         cleaned = {
             "patient_name": MedicalDataPostProcessor._clean_patient_name(extracted_data.get("patient_name", "")),
             "patient_age": cleaned_age,
             "patient_gender": MedicalDataPostProcessor._clean_gender(extracted_data.get("patient_gender", "")),
             "report_date": cleaned_report_date,
             "report_name": extracted_data.get("report_name", ""),
-            "report_type": extracted_data.get("report_type", ""),
+            "report_type": best_type,
             "doctor_names": extracted_data.get("doctor_names", ""),
             "medical_data": []
         }
@@ -263,6 +273,10 @@ class MedicalDataPostProcessor:
             "P.L.T": "PLT",
             "(ALPI": "(ALP)",
             "(GGT": "(GGT)",
+            "Neutrophils Granuloc%": "Neutrophils (%)",
+            "Neutrophils granuloc%": "Neutrophils (%)",
+            "Platelet Distrubtion Witdh": "PDW",
+            "Red blood cell distribution width": "RDW",
         }
         for typo, fix in typo_fixes.items():
             if typo in field_name:
