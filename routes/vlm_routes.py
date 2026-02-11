@@ -728,6 +728,18 @@ class ChatResource(Resource):
         if not files or len(files) == 0:
             return {'error': 'No file selected'}, 400
 
+        # Check if the client wants to bypass duplicate detection
+        allow_duplicate = (
+            request.form.get('allow_duplicate', 'false').lower() in ('true', '1', 'yes')
+            or request.args.get('allow_duplicate', 'false').lower() in ('true', '1', 'yes')
+            or request.form.get('force', 'false').lower() in ('true', '1', 'yes')
+            or request.args.get('force', 'false').lower() in ('true', '1', 'yes')
+            or request.form.get('ignore_duplicates', 'false').lower() in ('true', '1', 'yes')
+            or request.args.get('ignore_duplicates', 'false').lower() in ('true', '1', 'yes')
+        )
+        if allow_duplicate:
+            print("⚠️  allow_duplicate=true — duplicate checks will be skipped")
+
         # Create user-specific folder
         user_folder = ensure_upload_folder(f"user_{current_user_id}")
         
@@ -751,12 +763,13 @@ class ChatResource(Resource):
                     file_hash = hashlib.sha256(file_content).hexdigest()
                     file.seek(0)
                     
-                    # Check for duplicate FILE
-                    existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
-                    if existing_file:
-                        error_msg = f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})'
-                        yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_FILE', 'report_id': existing_file.report_id})}\n\n"
-                        return
+                    # Check for duplicate FILE (skip if allow_duplicate)
+                    if not allow_duplicate:
+                        existing_file = ReportFile.query.filter_by(user_id=current_user_id, file_hash=file_hash).first()
+                        if existing_file:
+                            error_msg = f'Duplicate detected: The file "{file.filename}" has already been processed (Report #{existing_file.report_id})'
+                            yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_FILE', 'report_id': existing_file.report_id})}\n\n"
+                            return
 
                     # Save file
                     filename = secure_filename(file.filename)
@@ -1470,7 +1483,7 @@ Be aggressive but intelligent - group all variations of same test together."""
                     report_hash=report_hash
                 ).first()
                 
-                if existing_report:
+                if existing_report and not allow_duplicate:
                     error_msg = f'This report appears to be a duplicate of an existing report (#{existing_report.id})'
                     yield f"data: {json.dumps({'error': error_msg, 'code': 'DUPLICATE_REPORT', 'report_id': existing_report.id})}\n\n"
                     return
