@@ -996,6 +996,13 @@ class ChatResource(Resource):
                         extracted_data[key] = organized_data[key]
                         if key == 'report_date':
                             extracted_data['_ocr_report_date'] = organized_data[key]
+                
+                # DOB→Age fallback: If age is empty but DOB is available, use DOB as patient_age
+                # The postprocessor's _clean_age() will calculate the correct age from it
+                if not extracted_data.get('patient_age') and organized_data.get('patient_dob'):
+                    extracted_data['patient_age'] = organized_data['patient_dob']
+                    print(f"   🎂 Using DOB as patient_age for calculation: {organized_data['patient_dob']}")
+                
                 print(f"   👤 Patient demographics (age/gender/date) pre-loaded from OCR baseline")
             
             # FALLBACK: Extract report date directly from raw OCR text if organizer missed it
@@ -1027,6 +1034,23 @@ class ChatResource(Resource):
                             extracted_data['_ocr_report_date'] = extracted_data['report_date']
                             print(f"   📅 Report date from raw OCR: {extracted_data['report_date']}")
                             break
+
+            # FALLBACK: Extract DOB from raw OCR text if age is still empty
+            if not extracted_data.get('patient_age') and ocr_text:
+                import re as _re
+                dob_patterns = [
+                    r'تاريخ الميلاد[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{4})',  # DOB DD/MM/YYYY
+                    r'تاريخ الميلاد[:\s]*(\d{4}[-/]\d{1,2}[-/]\d{1,2})',  # DOB YYYY-MM-DD
+                    r'Date of Birth[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{4})',
+                    r'DOB[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{4})',
+                ]
+                for dp in dob_patterns:
+                    dmatch = _re.search(dp, ocr_text, _re.IGNORECASE)
+                    if dmatch:
+                        raw_dob = dmatch.group(1).strip()
+                        extracted_data['patient_age'] = raw_dob  # _clean_age will calculate from DOB
+                        print(f"   🎂 DOB from raw OCR: {raw_dob}")
+                        break
 
             # Only call VLM if we're using vlm_primary method
             if extraction_method == "vlm_primary":
@@ -1176,8 +1200,8 @@ class ChatResource(Resource):
                         prompt_echo_phrases = ["read exact", "from image", "person name", "verified", "letter by letter", "char-by-char", "not a clinic", "not a facility", "next to", "اسم المريض", "الطبيب"]
                         is_prompt_echo = sum(1 for p in prompt_echo_phrases if p in ocr_patient_name.lower()) >= 2
                         if not any(s in ocr_patient_name for s in rejection_terms) and not is_prompt_echo:
-                            # OCR gets extra weight for Arabic names
-                            ocr_weight = 3 if is_arabic_name else 1
+                            # OCR gets moderate weight for Arabic names (easyocr can misread Arabic characters)
+                            ocr_weight = 2 if is_arabic_name else 1
                             for _ in range(ocr_weight):
                                 name_candidates.append(ocr_patient_name)
                             print(f"      OCR patient name (weight {ocr_weight}): {ocr_patient_name}")
@@ -1207,11 +1231,15 @@ class ChatResource(Resource):
                     
                     # Run VLM demographics extraction with name VERIFICATION prompt
                     best_patient_data = None
-                    num_vlm_passes = 2 if idx == 1 else 1
+                    num_vlm_passes = 3 if idx == 1 else 1
                     
                     for pass_num in range(num_vlm_passes):
-                        # Build a verification-style prompt when we have OCR name
-                        if ocr_patient_name and is_arabic_name:
+                        # Pass 0: Fresh read WITHOUT OCR anchor (independent VLM reading)
+                        # Passes 1-2: Verification with OCR anchor
+                        if pass_num == 0:
+                            # First pass always reads independently for unbiased Arabic reading
+                            patient_prompt = get_robust_demographics_prompt()
+                        elif ocr_patient_name and is_arabic_name:
                             patient_prompt = get_name_verification_demographics_prompt(ocr_patient_name, ocr_doctor_name)
                         else:
                             patient_prompt = get_robust_demographics_prompt()
@@ -1311,6 +1339,15 @@ class ChatResource(Resource):
                         print(f"   📝 Final doctor_names (voted): {voted_doctor_name}")
                     
                     print(f"   👤 Patient info enriched (Final name: {extracted_data.get('patient_name')})")
+                    
+                    # DOB→Age fallback after VLM demographics
+                    # If patient_age is still empty but VLM returned a DOB-like value, use it
+                    if not extracted_data.get('patient_age') and best_patient_data:
+                        vlm_age_val = str(best_patient_data.get('patient_age', '')).strip()
+                        if vlm_age_val and ('/' in vlm_age_val or '-' in vlm_age_val):
+                            extracted_data['patient_age'] = vlm_age_val
+                            print(f"   🎂 VLM returned DOB as age: {vlm_age_val}")
+                    
                 except Exception as pe:
                     print(f"   ⚠️  Patient info extraction failed: {pe}")
                     import traceback

@@ -213,6 +213,13 @@ Arabic characters must be read carefully — each dot and letter matters.
      * ن (dot above) vs ب (dot below)
      * ك vs ل - different shapes
      * د vs ر - different curves
+     * ط (closed loop) vs ل (no loop) - VERY different shapes, do NOT confuse
+     * ب (dot below) vs ي (two dots below) vs ن (dot above)
+   - 🚨 **HAMZA & TA MARBUTA** (CRITICAL for Arabic names):
+     * ئ (hamza on ya) is COMMON in Arabic names like "رئيسة". Do NOT replace with plain ي.
+     * ة (ta marbuta / round ta) is the STANDARD ending for Arabic female names. Do NOT replace with ه (ha).
+     * أ (hamza on alef) is common at start of names. Keep it as أ, not ا.
+   - 🚨 **EACH WORD MATTERS**: Read the LAST word of the name just as carefully as the first. Do NOT skip or rush.
    - 🚨 **SPACING**: "ابو" (Abu) is always separate (e.g., "أبو الرب" NOT "ابوراب").
    - 🚫 Do NOT guess or "correct" the name. Read the EXACT ink.
 
@@ -249,7 +256,7 @@ Arabic characters must be read carefully — each dot and letter matters.
 Return JSON only:
 {
     "patient_name": "Read EXACT characters from image next to اسم المريض. Letter by letter.",
-    "patient_age": "Literal age or DOB",
+    "patient_age": "If explicit age field exists, use that number. Otherwise extract Date of Birth (تاريخ الميلاد) as DD/MM/YYYY.",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
     "report_name": "Full title of the report as written (e.g. CBC)",
@@ -288,6 +295,13 @@ Your task is to VERIFY this name against the image:
      * غ (dot above) vs ع (no dot)
      * ر (no dot) vs ز (dot above)
      * ن (dot above) vs ب (dot below)
+     * ط (closed loop) vs ل (no loop) - VERY different shapes, do NOT confuse
+     * ب (dot below) vs ي (two dots below) vs ن (dot above)
+   - 🚨 **HAMZA & TA MARBUTA** (CRITICAL for Arabic names):
+     * ئ (hamza on ya) is COMMON in names like "رئيسة". Do NOT replace with plain ي.
+     * ة (ta marbuta) is the STANDARD ending for Arabic female names. Do NOT replace with ه (ha).
+     * أ (hamza on alef) is common at start of names. Keep it as أ, not ا.
+   - 🚨 **EACH WORD MATTERS**: Read every word of the name with equal care, especially the LAST word.
    - 🚫 Do NOT guess or invent a name. If you cannot read it clearly, use the OCR version.
 
 2. **DOCTOR NAME (الطبيب)**:
@@ -311,7 +325,7 @@ Your task is to VERIFY this name against the image:
 Return JSON only:
 {{
     "patient_name": "Verified/corrected name from image",
-    "patient_age": "Literal age or DOB",
+    "patient_age": "If explicit age exists, use it. Otherwise extract Date of Birth (تاريخ الميلاد) as DD/MM/YYYY.",
     "patient_gender": "Male or Female",
     "report_date": "YYYY-MM-DD",
     "report_name": "Full title of the report",
