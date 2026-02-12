@@ -904,6 +904,12 @@ class MedicalDataPostProcessor:
         
         date_str = str(date_str).strip()
         
+        # Strip timestamp suffix (e.g. "2025-12-31 10:00:02.0" → "2025-12-31")
+        import re
+        ts_match = re.match(r'(\d{4}-\d{2}-\d{2})\s+\d', date_str)
+        if ts_match:
+            date_str = ts_match.group(1)
+        
         # If already in YYYY-MM-DD format, return it
         if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
             return date_str

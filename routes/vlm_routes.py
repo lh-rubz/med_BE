@@ -994,7 +994,39 @@ class ChatResource(Resource):
                 for key in ['patient_gender', 'patient_age', 'report_date']:
                     if organized_data.get(key) and not any(s in str(organized_data[key]) for s in ["شؤون", "اجتماعية"]):
                         extracted_data[key] = organized_data[key]
+                        if key == 'report_date':
+                            extracted_data['_ocr_report_date'] = organized_data[key]
                 print(f"   👤 Patient demographics (age/gender/date) pre-loaded from OCR baseline")
+            
+            # FALLBACK: Extract report date directly from raw OCR text if organizer missed it
+            if not extracted_data.get('report_date') and ocr_text:
+                import re as _re
+                # Look for dates near Arabic date labels
+                date_patterns = [
+                    r'تاريخ الطلب[:\s]*(\d{4}[-/]\d{1,2}[-/]\d{1,2})',  # YYYY-MM-DD
+                    r'تاريخ الدخول[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{4})',  # DD/MM/YYYY
+                    r'تاريخ[:\s]*(\d{4}[-/]\d{1,2}[-/]\d{1,2})',
+                    r'تاريخ[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{4})',
+                    r'Date[:\s]*(\d{4}[-/]\d{1,2}[-/]\d{1,2})',
+                    r'Date[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{4})',
+                ]
+                for dp in date_patterns:
+                    dmatch = _re.search(dp, ocr_text, _re.IGNORECASE)
+                    if dmatch:
+                        raw_date = dmatch.group(1).strip()
+                        # Quick normalize: YYYY-MM-DD stays, DD/MM/YYYY converts
+                        ym = _re.match(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', raw_date)
+                        dm = _re.match(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', raw_date)
+                        if ym:
+                            y, m, d = ym.groups()
+                            extracted_data['report_date'] = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                        elif dm:
+                            d, m, y = dm.groups()
+                            extracted_data['report_date'] = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                        if extracted_data.get('report_date'):
+                            extracted_data['_ocr_report_date'] = extracted_data['report_date']
+                            print(f"   📅 Report date from raw OCR: {extracted_data['report_date']}")
+                            break
 
             # Only call VLM if we're using vlm_primary method
             if extraction_method == "vlm_primary":
@@ -1261,6 +1293,12 @@ class ChatResource(Resource):
                             val = str(best_patient_data.get(key, "")).strip()
                             if val and val.lower() not in ["unknown", "n/a", "none", "", "empty_specified"]:
                                 current_val = str(extracted_data.get(key, "")).strip()
+                                # For report_date: NEVER let VLM overwrite an OCR-extracted date
+                                # VLM commonly hallucinates wrong years
+                                if key == 'report_date' and extracted_data.get('_ocr_report_date'):
+                                    if val != extracted_data['_ocr_report_date']:
+                                        print(f"   ⚠️ VLM date '{val}' differs from OCR '{extracted_data['_ocr_report_date']}', keeping OCR")
+                                        continue
                                 if not current_val or len(val) > len(current_val):
                                     extracted_data[key] = val
                                     print(f"   📝 Demographics set {key}: {val}")
