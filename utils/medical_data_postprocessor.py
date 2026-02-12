@@ -232,9 +232,15 @@ class MedicalDataPostProcessor:
         category = str(entry.get("category", "")).strip().strip('[]')
         notes = str(entry.get("notes", "")).strip().strip('[]')
         
-        # Clean literal "None" string in notes (VLM sometimes outputs "None" instead of empty)
+        # Clean literal "None" strings (VLM sometimes outputs "None" instead of empty)
         if notes.lower() == "none":
             notes = ""
+        if field_value.lower() == "none":
+            field_value = ""
+        if field_unit.lower() == "none":
+            field_unit = ""
+        if normal_range.lower() == "none":
+            normal_range = ""
         
         # Skip rows that are clearly table headers (case-insensitive regex)
         header_patterns = [
@@ -254,8 +260,7 @@ class MedicalDataPostProcessor:
         if not field_name and not field_value and not field_unit and not normal_range and not category and not notes:
             return None
 
-        # Special check: if field_value is empty, we keep it if it has a name
-        # (USER REQUEST: Total Row Extraction Mode)
+        # Special check: if field_value is empty AND field_name is empty, drop
         if not field_value and not field_name:
             return None
 
@@ -264,14 +269,12 @@ class MedicalDataPostProcessor:
             notes = MedicalDataPostProcessor._append_note(notes, "value_malformed")
             # If the value looks like a range, it's highly likely a column swap/misalignment
             if "(" in field_value and ")" in field_value and "-" in field_value:
-                # In strict mode, we might want to drop these, but for now we flag them
                 notes = MedicalDataPostProcessor._append_note(notes, "check_alignment")
             
-        # USER REQUEST: Total Extraction Mode (preserving empty rows)
-        is_val_empty = not field_value or field_value in ["-", ".", "(-)", "EMPTY"]
+        # Filter out rows with no actual result value
+        is_val_empty = not field_value or field_value.lower() in ["-", ".", "(-)", "empty", "none", "n/a", "*", "**", "***"]
         if is_val_empty:
-             # Preserve row for the user
-             field_value = ""
+             return None  # Drop entries with no actual measurement value
         
         # Sanitize normal range if it looks malformed or wildly mismatched
         normal_range, notes = MedicalDataPostProcessor._sanitize_normal_range(

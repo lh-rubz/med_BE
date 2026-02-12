@@ -1650,11 +1650,15 @@ Be aggressive but intelligent - group all variations of same test together."""
             except Exception as std_err:
                 print(f"⚠️  Field standardization failed: {std_err}")
 
-            # Save fields
+            # Save fields (skip entries with empty values)
             medical_entries = []
             for item in final_data['medical_data']:
                 if isinstance(item, dict):
                     field_value = item.get('field_value', '')
+                    
+                    # Skip fields with empty/missing/placeholder values
+                    if not str(field_value).strip() or str(field_value).strip().lower() in ['-', '.', '*', 'n/a', 'none', 'empty', '**', '***', 'empty_specified']:
+                        continue
                     normal_range = item.get('normal_range', '')
                     field_type = item.get('field_type', 'measurement')
                     
