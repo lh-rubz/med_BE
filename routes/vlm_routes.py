@@ -901,15 +901,34 @@ class ChatResource(Resource):
                     # Fallback: extract doctor name directly from raw OCR text if organizer missed it
                     if not organized_data.get('doctor_names') and ocr_text:
                         import re as _re
-                        # Look for Arabic label "الطبيب" followed by a name
-                        doc_match = _re.search(r'الطبيب[:\s]*?([\u0600-\u06FF][\u0600-\u06FF\s]{2,}?)(?:\n|$)', ocr_text)
-                        if doc_match:
-                            raw_doc = doc_match.group(1).strip()
-                            # Reject facility words
-                            facility_words = ['عيادة', 'مختبر', 'وزارة', 'مديرية', 'مركز', 'صحة', 'العام']
-                            if not any(w in raw_doc for w in facility_words) and len(raw_doc) >= 3:
-                                organized_data['doctor_names'] = raw_doc
-                                print(f"   👨‍⚕️ Doctor name from raw OCR: {raw_doc}")
+                        facility_words = ['عيادة', 'مختبر', 'وزارة', 'مديرية', 'مركز', 'صحة', 'العام',
+                                         'الطب', 'جهة', 'شؤون', 'اجتماعية', 'تأمين', 'شذون']
+                        doc_patterns = [
+                            # Label then name (standard)
+                            r'الطبيب[:\s\t]+([\u0600-\u06FF][\u0600-\u06FF\s\.]{2,}?)(?:\n|$|\t)',
+                            # Label then name (next line — OCR sometimes splits)
+                            r'الطبيب\s*\n\s*([\u0600-\u06FF][\u0600-\u06FF\s\.]{2,}?)(?:\n|$)',
+                            # Name before label (RTL grid layout — common in Ramallah PHC)
+                            r'([\u0600-\u06FF][\u0600-\u06FF\s\.]{2,}?)\s*الطبيب',
+                            # Tab-separated grid cell
+                            r'الطبيب[\s\t]+([\u0600-\u06FF][\u0600-\u06FF\s\.\t]{2,}?)(?:\t|\n|$)',
+                            # Broader: الطبيب within 40 chars of an Arabic name
+                            r'الطبيب.{0,15}([\u0600-\u06FF]{2,}[\s][\u0600-\u06FF]{2,})',
+                        ]
+                        for pat in doc_patterns:
+                            doc_match = _re.search(pat, ocr_text)
+                            if doc_match:
+                                raw_doc = doc_match.group(1).strip()
+                                # Clean tabs/extra whitespace
+                                raw_doc = _re.sub(r'[\t]+', ' ', raw_doc).strip()
+                                # Trim to max 4 words
+                                words = raw_doc.split()
+                                if len(words) > 4:
+                                    raw_doc = ' '.join(words[:4])
+                                if not any(w in raw_doc for w in facility_words) and len(raw_doc) >= 3:
+                                    organized_data['doctor_names'] = raw_doc
+                                    print(f"   👨‍⚕️ Doctor name from raw OCR: {raw_doc}")
+                                    break
                 except Exception as org_err:
                     print(f"⚠️  Text organization failed: {org_err}, continuing with raw OCR")
             
