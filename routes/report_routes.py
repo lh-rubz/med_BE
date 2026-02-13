@@ -63,72 +63,51 @@ class UserReports(Resource):
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
             
             # التحقق من الوصول للبيانات الحساسة
-            # تخطي التحقق تماماً إذا كان Profile مشترك عبر ProfileShare (عند قبول طلب اتصال)
-            # التحقق فقط عند إنشاء Profile جديد يدوياً (ليس له linked_user_id)
-            session_token = request.headers.get('X-Access-Session-Token')
+            # User Request: Smart Verification Logic
+            # 1. Skip verification if Profile is shared with the user (Active Share)
+            # 2. Skip verification if Profile was created via connection (linked_user_id)
+            # 3. For owned profiles, verify once and persist for 365 days
             
-            # التحقق من وجود ProfileShare (يعني تم قبول طلب اتصال - لا حاجة للتحقق)
             share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
-            is_shared_via_connection = share is not None
-            
-            # التحقق من أن Profile تم إنشاؤه عبر connection request (له linked_user_id)
-            # Profiles التي تم إنشاؤها عبر connection request لها linked_user_id
+            is_shared = share is not None
             is_created_via_connection = getattr(profile, 'linked_user_id', None) is not None
             
-            # تخطي التحقق إذا:
-            # 1. Profile مشترك عبر ProfileShare (قبول طلب اتصال مع profile_id)
-            # 2. أو Profile تم إنشاؤه عبر connection request (له linked_user_id)
-            # 3. User request: Disable verification for ALL profiles to improve UX for Shared/Family profiles
-            #    (The user wants seamless access without OTP. Authorization is handled by Ownership/Share check above)
-            pass
-            
-            # Legacy Verification Logic (Disabled for seamless UX)
-            """
-            if is_shared_via_connection or is_created_via_connection:
-                # Profile مشترك أو تم إنشاؤه عبر connection - لا حاجة للتحقق
+            if is_shared or is_created_via_connection:
+                # Active share or connection - No OTP required for seamless UX
+                print(f"DEBUG: Seamless access granted for shared/connected profile {profile_id}")
                 pass
-            elif session_token:
-                has_access, verification = verify_session_token(
-                    current_user_id,
-                    session_token,
-                    'profile',
-                    profile_id
-                )
-                if not has_access:
-                    return {
-                        'message': 'Session token غير صالح أو منتهي الصلاحية',
-                        'requires_verification': True
-                    }, 403
             else:
-                # لا يوجد session token - التحقق من الحاجة للتحقق
-                # فقط إذا كان Profile مملوك للمستخدم وتم إنشاؤه يدوياً (ليس عبر connection)
-                if profile.creator_id == current_user_id and not is_created_via_connection:
-                    # Profile مملوك للمستخدم وتم إنشاؤه يدوياً - يحتاج للتحقق عند أول وصول
-                    has_access, needs_verification, _ = check_access_permission(
+                # Owned profile - check if already verified once
+                has_access, needs_verification, session_token = check_access_permission(
+                    current_user_id,
+                    'profile',
+                    profile_id,
+                    require_verification=True
+                )
+                
+                if needs_verification:
+                    # Need to verify at least once
+                    verification, is_new = create_access_verification(
                         current_user_id,
                         'profile',
                         profile_id,
-                        require_verification=True
+                        method='otp'
                     )
+                    # Only send email if it's a new verification request
+                    if is_new:
+                        send_verification_otp(user, verification)
                     
-                    if needs_verification:
-                        verification, is_new = create_access_verification(
-                            current_user_id,
-                            'profile',
-                            profile_id,
-                            method='otp'
-                        )
-                        # Only send email if it's a new verification request
-                        if is_new:
-                            send_verification_otp(user, verification)
-                        
-                        return {
-                            'message': 'Access verification required for sensitive medical data',
-                            'requires_verification': True,
-                            'verification_id': verification.id,
-                            'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
-                        }, 403
-            """
+                    return {
+                        'message': 'Access verification required for sensitive medical data (First-time only)',
+                        'requires_verification': True,
+                        'verification_id': verification.id,
+                        'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
+                    }, 403
+                else:
+                    # Already verified before (within 365 days)
+                    print(f"DEBUG: Persistent access granted for owned profile {profile_id}")
+            
+            # Legacy Verification Logic (Cleaned up)
                 # إذا كان Profile مشترك أو تم إنشاؤه عبر connection، لا حاجة للتحقق
         
         report_owner_id = current_user_id

@@ -728,6 +728,14 @@ class ChatResource(Resource):
         if not files or len(files) == 0:
             return {'error': 'No file selected'}, 400
 
+        # Get profile_id from form or args (Support for Upload Attribution)
+        profile_id = request.form.get('profile_id') or request.args.get('profile_id')
+        if profile_id:
+            try:
+                profile_id = int(profile_id)
+            except (ValueError, TypeError):
+                profile_id = None
+
         # Check if the client wants to bypass duplicate detection
         allow_duplicate = (
             request.form.get('allow_duplicate', 'false').lower() in ('true', '1', 'yes')
@@ -819,7 +827,7 @@ class ChatResource(Resource):
                     return
 
                 # Process Images Generator
-                yield from self._process_multiple_images_stream(all_images_to_process, current_user_id, user, saved_files, allow_duplicate)
+                yield from self._process_multiple_images_stream(all_images_to_process, current_user_id, user, saved_files, allow_duplicate, profile_id=profile_id)
                 
             except Exception as e:
                 print(f"Stream Error: {e}")
@@ -829,7 +837,7 @@ class ChatResource(Resource):
 
         return Response(stream_with_context(generate_progress()), content_type='text/event-stream')
 
-    def _process_multiple_images_stream(self, images_list, current_user_id, user, saved_files, allow_duplicate=False):
+    def _process_multiple_images_stream(self, images_list, current_user_id, user, saved_files, allow_duplicate=False, profile_id=None):
         """Generator that yields progress for image processing steps"""
         total_pages = len(images_list)
         all_extracted_data = []
@@ -1626,22 +1634,45 @@ Be aggressive but intelligent - group all variations of same test together."""
                 except:
                     print(f"⚠️ Could not parse report date: {extracted_date}, using now()")
 
-            # Get user's Self profile and assign to report
-            from models import Profile
-            user_profile = Profile.query.filter_by(
-                creator_id=current_user_id,
-                relationship='Self'
-            ).first()
+            # Determine which profile to assign the report to
+            from models import Profile, ProfileShare
             
-            # If no 'Self' profile found, use any profile owned by user or none
-            if not user_profile:
-                user_profile = Profile.query.filter_by(creator_id=current_user_id).first()
+            final_profile_id = None
             
-            profile_id = user_profile.id if user_profile else None
+            # If profile_id was provided in request, verify access
+            if profile_id:
+                # 1. Check if user owns the profile
+                target_profile = Profile.query.filter_by(id=profile_id, creator_id=current_user_id).first()
+                
+                # 2. Check if profile is shared with user
+                if not target_profile:
+                    share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
+                    if share:
+                        target_profile = Profile.query.get(profile_id)
+                
+                if target_profile:
+                    final_profile_id = target_profile.id
+                    print(f"✅ Assigning report to specified profile: {final_profile_id}")
+                else:
+                    print(f"⚠️ User {current_user_id} requested unauthorized profile {profile_id}. Falling back to 'Self'.")
+            
+            # Fallback to 'Self' profile if no valid profile_id was provided
+            if not final_profile_id:
+                user_profile = Profile.query.filter_by(
+                    creator_id=current_user_id,
+                    relationship='Self'
+                ).first()
+                
+                # If no 'Self' profile found, use any profile owned by user
+                if not user_profile:
+                    user_profile = Profile.query.filter_by(creator_id=current_user_id).first()
+                
+                final_profile_id = user_profile.id if user_profile else None
+                print(f"ℹ️ Falling back to default profile: {final_profile_id}")
             
             new_report = Report(
                 user_id=current_user_id,
-                profile_id=profile_id,
+                profile_id=final_profile_id,
                 report_date=report_date_obj,
                 report_hash=report_hash,
                 report_name=final_data.get('report_name'),
