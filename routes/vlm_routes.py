@@ -729,10 +729,12 @@ class ChatResource(Resource):
             return {'error': 'No file selected'}, 400
 
         # Get profile_id from form or args (Support for Upload Attribution)
+        # PRIORITIZE Profile ID to ensure reports go to the selected profile (especially for Shared Profiles)
         profile_id = request.form.get('profile_id') or request.args.get('profile_id')
         if profile_id:
             try:
                 profile_id = int(profile_id)
+                print(f"📥 Received profile_id for upload: {profile_id}")
             except (ValueError, TypeError):
                 profile_id = None
 
@@ -1648,13 +1650,16 @@ Be aggressive but intelligent - group all variations of same test together."""
                 if not target_profile:
                     share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
                     if share:
+                        # User has shared access to this profile
                         target_profile = Profile.query.get(profile_id)
+                        if target_profile:
+                            print(f"✅ User {current_user_id} has SHARED access to profile {profile_id}")
                 
                 if target_profile:
                     final_profile_id = target_profile.id
-                    print(f"✅ Assigning report to specified profile: {final_profile_id}")
+                    print(f"🎯 SUCCESS: Assigning report to target profile: {final_profile_id}")
                 else:
-                    print(f"⚠️ User {current_user_id} requested unauthorized profile {profile_id}. Falling back to 'Self'.")
+                    print(f"⚠️ User {current_user_id} requested unauthorized or non-existent profile {profile_id}. Falling back to 'Self'.")
             
             # Fallback to 'Self' profile if no valid profile_id was provided
             if not final_profile_id:
@@ -1668,7 +1673,7 @@ Be aggressive but intelligent - group all variations of same test together."""
                     user_profile = Profile.query.filter_by(creator_id=current_user_id).first()
                 
                 final_profile_id = user_profile.id if user_profile else None
-                print(f"ℹ️ Falling back to default profile: {final_profile_id}")
+                print(f"ℹ️ No valid profile_id provided or unauthorized. Falling back to default profile: {final_profile_id}")
             
             new_report = Report(
                 user_id=current_user_id,

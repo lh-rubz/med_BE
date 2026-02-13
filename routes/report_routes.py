@@ -63,49 +63,9 @@ class UserReports(Resource):
                 return {'message': 'Invalid profile_id or unauthorized access'}, 403
             
             # التحقق من الوصول للبيانات الحساسة
-            # User Request: Smart Verification Logic
-            # 1. Skip verification if Profile is shared with the user (Active Share)
-            # 2. Skip verification if Profile was created via connection (linked_user_id)
-            # 3. For owned profiles, verify once and persist for 365 days
-            
-            share = ProfileShare.query.filter_by(profile_id=profile_id, shared_with_user_id=current_user_id).first()
-            is_shared = share is not None
-            is_created_via_connection = getattr(profile, 'linked_user_id', None) is not None
-            
-            if is_shared or is_created_via_connection:
-                # Active share or connection - No OTP required for seamless UX
-                print(f"DEBUG: Seamless access granted for shared/connected profile {profile_id}")
-                pass
-            else:
-                # Owned profile - check if already verified once
-                has_access, needs_verification, session_token = check_access_permission(
-                    current_user_id,
-                    'profile',
-                    profile_id,
-                    require_verification=True
-                )
-                
-                if needs_verification:
-                    # Need to verify at least once
-                    verification, is_new = create_access_verification(
-                        current_user_id,
-                        'profile',
-                        profile_id,
-                        method='otp'
-                    )
-                    # Only send email if it's a new verification request
-                    if is_new:
-                        send_verification_otp(user, verification)
-                    
-                    return {
-                        'message': 'Access verification required for sensitive medical data (First-time only)',
-                        'requires_verification': True,
-                        'verification_id': verification.id,
-                        'instructions': 'Use /auth/verify-access-code with the verification code sent to your email'
-                    }, 403
-                else:
-                    # Already verified before (within 365 days)
-                    print(f"DEBUG: Persistent access granted for owned profile {profile_id}")
+            # User Request: Disable all verification (No OTP needed)
+            # Access is granted based on Ownership or Active Share check above
+            pass
             
             # Legacy Verification Logic (Cleaned up)
                 # إذا كان Profile مشترك أو تم إنشاؤه عبر connection، لا حاجة للتحقق
